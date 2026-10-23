@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/tour.webp" alt="A tour of Aura on a real TV: boot, home, rearranging, Control Center, photo mode, screensaver" width="92%">
+  <img src="docs/tour.webp" alt="A tour of Aura on a real TV: boot, the Smart Stack, a sky moment, rearranging, Control Center, Wi-Fi, Settings, photo mode" width="92%">
 </p>
 
 <br>
