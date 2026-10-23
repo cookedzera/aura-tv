@@ -1,0 +1,21 @@
+# Your signing key (build.ps1 makes a fresh one when it's missing)
+*.keystore
+*.jks
+
+# Your TV's snapshot: lists your apps and settings; make your own with tools/backup.ps1
+/backup/
+
+# Build output
+/launcher/build/
+*.apk
+*.idsig
+
+# Working material at the top level only: raw downloads, source photos, test captures, design drafts.
+# (The app's own photos in launcher/src/main/assets/wallpapers/ are part of the source.)
+/downloads/
+/wallpapers/
+/wallpapers2/
+/screenshots/
+/mockups/
+__pycache__/
+*.pyc
