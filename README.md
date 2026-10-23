@@ -97,6 +97,12 @@ with its title, a line about it, the photographer and the licence.
 dark, golden hour at dusk. When the light turns (first light, sunrise, golden hour, sunset) a small
 **sky moment** card slides in and the photograph changes with it.
 
+**Your own photos and GIFs, from your phone.** *Settings → From your phone* shows a QR code. Scan it
+with the phone's camera, pick photos or GIFs in the page that opens, and they land on the wall a
+moment later. No app, no account and no cloud: Aura runs a tiny web server only while that code is
+on screen, reachable only on your network through a one-time link. Portrait shots are framed whole on a
+blurred copy of themselves, GIFs play, and a switch shows only your photos.
+
 Leave the TV for a while and the photograph sharpens into **photo mode**; the screensaver uses the
 same story card, with the time and the weather.
 
@@ -132,7 +138,7 @@ same story card, with the time and the weather.
 |---|---|
 | <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> | Move through your apps · up from the top row reaches the widgets · left reaches the sidebar |
 | <kbd>OK</kbd> | Open |
-| hold <kbd>OK</kbd> | Rearrange: the arrows carry the app, <kbd>OK</kbd> saves |
+| hold <kbd>OK</kbd> | The app's menu: **Move** (the arrows carry it, <kbd>OK</kbd> saves), **Hide from home**, **App info**, **Uninstall** |
 | <kbd>Back</kbd> | From lower rows, jump to the top · from the sidebar, return to the apps |
 | <kbd>Menu</kbd> | Control Center |
 

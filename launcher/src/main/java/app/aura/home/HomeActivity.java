@@ -105,11 +105,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private int zone = GRID, contentZone = GRID, sideAt, widgetAt, gridAt, lastCol = -1, lastHour = -1;
     private float scrollTarget;
     private ValueAnimator scrollAnim, wiggle;
-    private boolean ccOpen, racked, photo, resumed, introPending, editing, held, tipShown, dashboard = true;
+    private boolean ccOpen, racked, photo, resumed, introPending, editing, held, tipShown, dashboard = true, greetingShown = true;
     private boolean wallReady, appsReady, splashFinishing;
     private long splashAt, lastStep;
     private View beforeCc;
-    private int swallowUp = -1;
+    private int swallowUp = -1, heldConfirm = KeyEvent.KEYCODE_DPAD_CENTER;
     /** Live Inputs: HDMI sources that are switched on right now, as {id, label}. */
     private final List<String[]> live = new ArrayList<>();
     private TvInputManager tim;
@@ -257,6 +257,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         handler.removeCallbacks(goPhoto);
         handler.removeCallbacks(glintTick);
         if (editing) stopEdit();
+        if (menu.isOpen()) closeMenu(null);
     }
 
     @Override
@@ -382,6 +383,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
         });
         root.addView(settings.panel, match());
+        menu = new AppMenu(this, backdrop);
+        root.addView(menu, match());
         buildHud();
         buildMoment();
 
@@ -754,7 +757,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             cell.setNamesAlways(namesAlways);
             cell.card.sway = true;
             cell.card.onClick = () -> launch(a.launch, cell.card, a.label);
-            cell.card.onLongClick = this::startEdit;
+            cell.card.onLongClick = this::openMenu;
             cells.add(cell);
         }
         int at = 0;
@@ -1009,6 +1012,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         int rows = (cells.size() + COLS - 1) / COLS;
         float screen = root.getHeight() > 0 ? root.getHeight() / Ui.density : 540f;
         float end = GRID_Y + (rows - 1) * ROW_H + TILE_H + 44 - screen; // last row and its name in view
+        // when everything nearly fits, stay put: a nudge of a few dp isn't worth leaving the widgets for
+        if (end < 28) return 0;
         return Math.max(0, Math.min(GRID_Y + row * ROW_H - FOCUS_LINE, end));
     }
 
@@ -1053,13 +1058,22 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             for (Cell c : cells) c.card.invalidate();
         });
         scrollAnim.start();
-        boolean top = target == 0;
-        if (top == dashboard) return;
-        dashboard = top;
-        for (View v : new View[]{greeting, skyW, fyW, tdW}) {
-            v.animate().alpha(top ? 1f : 0f).setDuration(top ? 420 : 240).setStartDelay(top ? 120 : 0)
-                    .setInterpolator(Ui.SOFT).start();
+        // the greeting leaves on any scroll (it would be cut at the top edge); the widgets only once
+        // they're half off screen, so a short scroll to the last row never empties the top
+        boolean top = target == 0, shown = target < WIDGET_Y + WIDGET_H / 2f;
+        if (top != greetingShown) {
+            greetingShown = top;
+            fade(greeting, top);
         }
+        if (shown != dashboard) {
+            dashboard = shown;
+            for (View v : new View[]{skyW, fyW, tdW}) fade(v, shown);
+        }
+    }
+
+    private static void fade(View v, boolean in) {
+        v.animate().alpha(in ? 1f : 0f).setDuration(in ? 420 : 240).setStartDelay(in ? 120 : 0)
+                .setInterpolator(Ui.SOFT).start();
     }
 
     private void returnToContent() {
@@ -1271,6 +1285,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         wake();
         if (wasResting && !isVolumeKey(code)) return swallow(code);
         boolean first = e.getRepeatCount() == 0;
+        if (first && Pad.isConfirm(code)) heldConfirm = code;
+        if (menu.isOpen()) return menuKey(code, e);
         if (first && (code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS || code == KeyEvent.KEYCODE_INFO)) {
             if (ccOpen) closeCc(true);
             else openCc(false);
@@ -1394,9 +1410,76 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN || code == KeyEvent.KEYCODE_VOLUME_MUTE;
     }
 
+    // ---- app menu ----------------------------------------------------------------------------
+
+    private AppMenu menu;
+
+    /** Hold OK on an app: move it, hide it, see its details in Android's settings, or uninstall it. */
+    private void openMenu() {
+        if (editing || ccOpen || menu.isOpen() || zone != GRID || cells.isEmpty()) return;
+        Cell c = cells.get(gridAt);
+        if (c.tag.startsWith("input:")) return;
+        final String pkg = c.tag, label = c.label.getText().toString();
+        final Card card = c.card;
+        handler.removeCallbacks(rack);
+        handler.removeCallbacks(goPhoto);
+        stopPreview();
+        // the OK that opened the menu is still held: its release mustn't press the first row
+        swallow(heldConfirm);
+        List<AppMenu.Item> items = new ArrayList<>();
+        items.add(new AppMenu.Item(R.drawable.ic_move, "Move", () -> {
+            closeMenu(card);
+            startEdit();
+        }));
+        items.add(new AppMenu.Item(R.drawable.ic_hide, "Hide from home", () -> {
+            closeMenu(card);
+            Prefs.hide(this, pkg, true);
+            populate();
+            hud(R.drawable.ic_hide, label + " is hidden  ·  Settings brings it back");
+        }));
+        items.add(new AppMenu.Item(R.drawable.ic_info, "App info", () -> {
+            closeMenu(card);
+            open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + pkg)), card);
+        }));
+        if (removable(pkg)) items.add(new AppMenu.Item(R.drawable.ic_trash, "Uninstall", () -> {
+            closeMenu(card);
+            // Android asks to confirm; the grid updates itself once the app is gone
+            open(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + pkg)), card);
+        }));
+        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        menu.show(card, label, items);
+    }
+
+    private void closeMenu(View back) {
+        if (!menu.isOpen()) return;
+        menu.hide();
+        home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        if (back == null || !back.isAttachedToWindow() || !back.requestFocus()) focusGrid(gridAt);
+    }
+
+    private boolean menuKey(int code, KeyEvent e) {
+        if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU) {
+            closeMenu(cells.isEmpty() ? null : cells.get(Math.min(gridAt, cells.size() - 1)).card);
+            return swallow(code);
+        }
+        // the opening press repeating, or a sideways step out of the list: nothing to do
+        if (Pad.isConfirm(code) && e.getRepeatCount() > 0) return true;
+        if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) return true;
+        return super.dispatchKeyEvent(e);
+    }
+
+    /** Apps that came with the TV can't be uninstalled, only hidden. */
+    private boolean removable(String pkg) {
+        try {
+            return (getPackageManager().getApplicationInfo(pkg, 0).flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0;
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            return false;
+        }
+    }
+
     // ---- rearranging -------------------------------------------------------------------------
 
-    /** Hold OK on an app: it wiggles, the arrows carry it through the grid and the others make room. */
+    /** Move, from an app's menu: it wiggles, the arrows carry it through the grid and the others make room. */
     private void startEdit() {
         if (editing || ccOpen || zone != GRID || cells.isEmpty()) return;
         Cell c = cells.get(gridAt);
@@ -1599,6 +1682,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             case "stack":
                 if (Prefs.on(this, Prefs.STACK_AUTO)) stack.start();
                 else stack.stop();
+                break;
+            case "photos":
+                // your own photos only, or one removed: the wall moves on to the new set
+                backdrop.reload();
                 break;
             case "weather":
                 showWeather();

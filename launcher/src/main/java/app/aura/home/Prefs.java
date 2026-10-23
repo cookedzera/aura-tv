@@ -9,7 +9,8 @@ import java.util.Set;
 /** Aura's own choices, all in one place with their defaults. */
 final class Prefs {
     static final String GLASS_TILES = "set_glass_tiles", NAMES_ALWAYS = "set_names_always", STACK_AUTO = "set_stack_auto",
-            MOMENTS = "set_moments", PICKS = "set_picks", WEATHER = "set_weather", DAILY = "set_daily", HIDDEN = "set_hidden";
+            MOMENTS = "set_moments", PICKS = "set_picks", WEATHER = "set_weather", DAILY = "set_daily", HIDDEN = "set_hidden",
+            MINE_ONLY = "set_mine_only";
 
     private Prefs() { }
 
@@ -18,8 +19,8 @@ final class Prefs {
     }
 
     static boolean on(Context c, String key) {
-        // everything starts on, except always-visible app names
-        return of(c).getBoolean(key, !NAMES_ALWAYS.equals(key));
+        // everything starts on, except always-visible app names and showing only your own photos
+        return of(c).getBoolean(key, !NAMES_ALWAYS.equals(key) && !MINE_ONLY.equals(key));
     }
 
     static void set(Context c, String key, boolean v) {

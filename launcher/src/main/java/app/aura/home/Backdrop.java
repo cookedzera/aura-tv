@@ -9,11 +9,15 @@ import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorFilter;
+import android.graphics.ImageDecoder;
 import android.graphics.LightingColorFilter;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.graphics.drawable.Animatable;
+import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -24,6 +28,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -44,11 +49,15 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         /** Imported photographs live on disk at {@code path} and carry their {@code day} (yyyy-MM-dd). */
         final String path, day;
         final int accent;
+        /** Sent from a phone (see {@link Mine}); a GIF plays on the wall. */
+        final boolean mine, gif;
 
         Wallpaper(JSONObject o) {
             file = o.optString("file");
             path = o.optString("path");
             day = o.optString("day");
+            mine = "mine".equals(o.optString("kind"));
+            gif = o.optBoolean("gif");
             mood = o.optString("mood", "day");
             place = o.optString("place");
             region = o.optString("region");
@@ -64,7 +73,13 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             accent = a;
         }
 
+        /** A Picture of the Day. */
         boolean daily() {
+            return !path.isEmpty() && !mine;
+        }
+
+        /** Read from disk rather than the app's assets: imported or sent from a phone. */
+        boolean onDisk() {
             return !path.isEmpty();
         }
     }
@@ -84,6 +99,10 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     private static final class Slide {
         Wallpaper wall;
         Bitmap sharp, soft, blur;
+        /** A GIF's frames, played by the render thread; {@code sharp} keeps its first frame for the glass. */
+        Drawable anim;
+        ColorFilter animFilter;
+        int animAlpha = -1;
         BitmapShader blurShader;
         int sw, sh;
         float lumaTop, lumaBottom;
@@ -94,7 +113,9 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     }
 
     private final List<Wallpaper> walls = new ArrayList<>(), builtIn = new ArrayList<>();
-    private long dailyStamp = -1;
+    private long wallStamp = -1;
+    /** A photograph just sent from a phone, to go on next. */
+    private String wanted;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Random rnd = new Random();
@@ -130,14 +151,22 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         index = prefs.getInt("wall", -1) + 1;
     }
 
-    /** Imported photographs (newest first) ahead of the built-in set; re-read only when the importer has written. */
+    /**
+     * Photos sent from a phone, then imported photographs (each newest first), then the built-in
+     * set; re-read only when something has been written or a switch has changed.
+     */
     private void refreshWalls() {
-        // re-read when the importer writes, or when daily photos are switched on or off
-        long stamp = Daily.stamp(getContext()) * 2 + (Prefs.on(getContext(), Prefs.DAILY) ? 1 : 0);
-        if (stamp == dailyStamp && !walls.isEmpty()) return;
-        dailyStamp = stamp;
+        Context c = getContext();
+        boolean daily = Prefs.on(c, Prefs.DAILY), only = Prefs.on(c, Prefs.MINE_ONLY);
+        long stamp = (Daily.stamp(c) * 31 + Mine.stamp(c)) * 4 + (daily ? 1 : 0) + (only ? 2 : 0);
+        if (stamp == wallStamp && !walls.isEmpty()) return;
+        wallStamp = stamp;
         walls.clear();
-        if (Prefs.on(getContext(), Prefs.DAILY)) walls.addAll(Daily.walls(getContext()));
+        List<Wallpaper> mine = Mine.walls(c);
+        walls.addAll(mine);
+        // "only your photos" with none left falls back to everything, never to a black screen
+        if (only && !mine.isEmpty()) return;
+        if (daily) walls.addAll(Daily.walls(c));
         walls.addAll(builtIn);
     }
 
@@ -150,6 +179,18 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             if (w.daily()) return w.day.compareTo(seen) > 0 ? i : -1;
         }
         return -1;
+    }
+
+    /** Puts the photograph at {@code path} on next, straight away: a phone has just sent it. */
+    void show(String path) {
+        wanted = path;
+        if (!loading && incoming == null) nextAt = 0;
+    }
+
+    /** The list of photographs changed (a switch, or a photo removed): move on to the new set. */
+    void reload() {
+        wallStamp = -1;
+        skip();
     }
 
     void setListener(Listener l) {
@@ -165,7 +206,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         running = true;
         long now = SystemClock.uptimeMillis();
         if (current == null && !loading) load(index, true);
-        else nextAt = Math.max(nextAt, now + 6_000);
+        else nextAt = wanted != null ? 0 : Math.max(nextAt, now + 6_000);
+        play(current, true);
         Choreographer.getInstance().postFrameCallback(this);
     }
 
@@ -173,16 +215,26 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         running = false;
         Choreographer.getInstance().removeFrameCallback(this);
         if (incoming != null) {
+            play(current, false);
             current = incoming;
             current.alpha = 1f;
             incoming = null;
             accent = accentTo;
         }
+        play(current, false);
+    }
+
+    /** Starts or pauses a GIF; a photograph ignores it. */
+    private static void play(Slide s, boolean on) {
+        if (s == null || !(s.anim instanceof Animatable)) return;
+        if (on) ((Animatable) s.anim).start();
+        else ((Animatable) s.anim).stop();
     }
 
     /** Drop the photos when the system is short on memory; they fade back in on return. */
     void trim(int level) {
         if (running || level < ComponentCallbacks2.TRIM_MEMORY_MODERATE) return;
+        play(current, false);
         current = null;
         incoming = null;
         loading = false;
@@ -282,7 +334,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
                 if (v.isShown() && v.getAlpha() > 0f) v.invalidate();
             }
         }
-        if (incoming == null && !loading && now >= nextAt && walls.size() > 1 && current != null) {
+        if (incoming == null && !loading && now >= nextAt && (walls.size() > 1 || wanted != null) && current != null) {
             load(index + 1, false);
         }
         Choreographer.getInstance().postFrameCallback(this);
@@ -298,6 +350,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             incoming.alpha = f * f * (3 - 2 * f);
             accent = Ui.mix(accentFrom, accentTo, incoming.alpha);
             if (f >= 1f) {
+                play(current, false);
                 current = incoming;
                 incoming = null;
                 current.alpha = 1f;
@@ -363,8 +416,19 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         if (s == null || s.sharp == null) return;
         // fully defocused, the soft copy covers everything: skip the sharp fill
         if (defocus < 0.995f || s.soft == null) {
-            paint.setAlpha(Math.round(255 * s.alpha * ia));
-            c.drawBitmap(s.sharp, s.m, paint);
+            int a = Math.round(255 * s.alpha * ia);
+            if (s.anim != null) {
+                // the render thread steps the GIF's frames; this only places it
+                if (a != s.animAlpha) s.anim.setAlpha(s.animAlpha = a);
+                if (dim != s.animFilter) s.anim.setColorFilter(s.animFilter = dim);
+                c.save();
+                c.concat(s.m);
+                s.anim.draw(c);
+                c.restore();
+            } else {
+                paint.setAlpha(a);
+                c.drawBitmap(s.sharp, s.m, paint);
+            }
         }
         if (defocus > 0.005f && s.soft != null) {
             tmp.set(s.m);
@@ -418,8 +482,10 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         refreshWalls();
         if (walls.isEmpty()) return;
         loading = true;
-        int f = fresh();
-        final int idx = f >= 0 ? f : pick(i);
+        int f = wanted != null ? -1 : fresh(), want = -1;
+        for (int k = 0; wanted != null && k < walls.size(); k++) if (wanted.equals(walls.get(k).path)) want = k;
+        wanted = null;
+        final int idx = want >= 0 ? want : f >= 0 ? f : pick(i);
         if (f >= 0) prefs.edit().putString("daily_seen", walls.get(f).day).apply();
         final int gen = generation;
         final Wallpaper w = walls.get(idx);
@@ -446,7 +512,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         for (int k = 0; k < n; k++) {
             int j = ((from + k) % n + n) % n;
             // the daily photographs are the fresh ones: they take their turn whatever the light
-            if (walls.get(j).daily() || Sun.suits(walls.get(j).mood, phase)) return j;
+            if (walls.get(j).onDisk() || Sun.suits(walls.get(j).mood, phase)) return j;
         }
         return ((from % n) + n) % n;
     }
@@ -469,6 +535,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             accentTo = s.wall.accent;
         }
         place(s, now);
+        if (running) play(s, true);
         if (listener != null) listener.onWallpaperChanged(s.wall, s.lumaTop, s.lumaBottom, first);
         invalidate();
     }
@@ -485,7 +552,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     }
 
     private Slide decode(Wallpaper w) {
-        try (InputStream in = w.daily() ? new java.io.FileInputStream(w.path) : getContext().getAssets().open("wallpapers/" + w.file)) {
+        try (InputStream in = w.onDisk() ? new java.io.FileInputStream(w.path) : getContext().getAssets().open("wallpapers/" + w.file)) {
             Bitmap b = BitmapFactory.decodeStream(in);
             if (b == null) return null;
             b.prepareToDraw();
@@ -494,11 +561,33 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             s.sharp = b;
             s.sw = b.getWidth();
             s.sh = b.getHeight();
+            if (w.gif && Build.VERSION.SDK_INT >= 28) {
+                s.anim = gif(w.path, s.sw, s.sh);
+                if (s.anim != null) s.anim.setBounds(0, 0, s.sw, s.sh);
+            }
             s.blur = blur(b);
             s.soft = soften(b);
             s.lumaTop = luma(s.blur, 0f, 0f, 0.62f, 0.66f);
             s.lumaBottom = luma(s.blur, 0f, 0.6f, 1f, 1f);
             return s;
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * A GIF that plays on the render thread, decoded no larger than the screen it covers. Each frame
+     * replaces the last in one buffer, so even a long GIF costs about one photograph's memory.
+     */
+    @android.annotation.TargetApi(28)
+    private Drawable gif(String path, int w, int h) {
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        int vw = getWidth() > 0 ? getWidth() : dm.widthPixels, vh = getHeight() > 0 ? getHeight() : dm.heightPixels;
+        try {
+            return ImageDecoder.decodeDrawable(ImageDecoder.createSource(new File(path)), (d, info, src) -> {
+                float k = Math.max(vw / (float) w, vh / (float) h);
+                if (k < 1f) d.setTargetSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+            });
         } catch (IOException | RuntimeException e) {
             return null;
         }

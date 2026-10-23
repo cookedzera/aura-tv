@@ -11,6 +11,8 @@
     <!-- Continue Watching: read Android TV's Watch Next list (granted at setup) -->
     <uses-permission android:name="android.permission.READ_TV_LISTINGS" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- hold OK on an app, then Uninstall: Android shows its own confirmation -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <!-- usage history for For You and Today; activated once over ADB with "appops set ... GET_USAGE_STATS allow" -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
