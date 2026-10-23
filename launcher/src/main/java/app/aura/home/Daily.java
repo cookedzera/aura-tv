@@ -119,6 +119,7 @@ final class Daily {
     }
 
     private static boolean runLocked(Context c) {
+        if (!Prefs.on(c, Prefs.DAILY)) return true; // switched off in Settings
         File dir = dir(c);
         if (!dir.isDirectory() && !dir.mkdirs()) return true;
         JSONArray index = readIndex(c);

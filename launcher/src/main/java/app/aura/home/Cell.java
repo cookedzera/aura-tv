@@ -33,9 +33,17 @@ final class Cell extends LinearLayout {
         ll.topMargin = Ui.dp(12);
         addView(label, ll);
 
-        card.focusListener = (card, gained) -> label.animate().alpha(gained ? 1f : 0f)
+        card.focusListener = (card, gained) -> label.animate().alpha(gained ? 1f : namesAlways ? 0.75f : 0f)
                 .translationY(gained ? Ui.dpf(6) : 0f).setDuration(gained ? 380 : 160)
                 .setInterpolator(Ui.EMPHASIZED).setStartDelay(gained ? 60 : 0).start();
+    }
+
+    private boolean namesAlways;
+
+    /** Show the name under every tile, not just the focused one (a choice in Settings). */
+    void setNamesAlways(boolean always) {
+        namesAlways = always;
+        label.setAlpha(always ? 0.75f : 0f);
     }
 
     /** Fades (the intro cascade) apply straight to the card and label: no offscreen layer per tile. */

@@ -132,11 +132,12 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
 
     /** Imported photographs (newest first) ahead of the built-in set; re-read only when the importer has written. */
     private void refreshWalls() {
-        long stamp = Daily.stamp(getContext());
+        // re-read when the importer writes, or when daily photos are switched on or off
+        long stamp = Daily.stamp(getContext()) * 2 + (Prefs.on(getContext(), Prefs.DAILY) ? 1 : 0);
         if (stamp == dailyStamp && !walls.isEmpty()) return;
         dailyStamp = stamp;
         walls.clear();
-        walls.addAll(Daily.walls(getContext()));
+        if (Prefs.on(getContext(), Prefs.DAILY)) walls.addAll(Daily.walls(getContext()));
         walls.addAll(builtIn);
     }
 

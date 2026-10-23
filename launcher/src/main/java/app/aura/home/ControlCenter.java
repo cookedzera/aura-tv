@@ -579,6 +579,10 @@ final class ControlCenter {
 
     /** A different show each time the board opens. */
     private void showPick() {
+        if (!Prefs.on(act, Prefs.PICKS)) {
+            pick.setVisibility(View.GONE);
+            return;
+        }
         Picks.Pick p = nextPick;
         if (p == null) return;
         shownPick = p;

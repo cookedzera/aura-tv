@@ -36,10 +36,16 @@
 **Glass tiles.** Each app's logo is lifted off its own banner and set as a white mark on glass
 tinted in the app's colour. Logos that can't be lifted keep their icon, on glass.
 
-**Three widgets.** *Sky* draws the sun on its arc with the next sunset. *For You* offers the app
-you usually open at this hour, or "jump back in". *Today* shows time in apps and free memory.
+**A Smart Stack.** Full-bleed cards that change on their own: every show you're partway through
+(from Android TV's *Continue Watching* list, with the time left), the app you usually open at this
+hour, what you opened last, and what you've watched most today. It holds still while you look at it.
 
-**A light that follows you.** A soft bloom in the focused app's colour glides behind the grid.
+**Sky and Today.** *Sky* draws the sun on its arc with the next sunset, for your city. *Today* shows
+time in apps and free memory, and turns into **Now Playing** (OK plays or pauses) while something plays.
+
+**Live previews.** Rest on a switched-on HDMI source and its picture appears inside the tile, muted.
+
+**Weather** sits next to the clock, and a soft light in the focused app's colour follows you around.
 
 </td>
 </tr>
@@ -64,8 +70,12 @@ Press <kbd>Menu</kbd>. A frosted board rises with the time set large beside it: 
 Wi-Fi, Bluetooth, the sleep timer and photo mode, a tall volume slider, your HDMI inputs, picture
 and sound settings, a memory boost and standby.
 
+**Wi-Fi** opens as a sheet: on/off, disconnect, nearby networks with a password field.
+**Tonight's pick** puts a top-rated show beside the clock (from TVmaze); OK finds its trailer.
 **Gentle Sleep** fades the volume over the timer's last minute, then puts the TV to standby.
 **Live Inputs** turns a set-top box or console that just switched on into the first tile.
+**Settings**, from the sidebar: glass or original tiles, app names, hidden apps, the stack,
+weather city, and switches for every extra.
 
 </td>
 <td width="58%"><img src="docs/control-center.png" alt="Control Center"></td>
@@ -83,11 +93,12 @@ Aura ships with 23 hand-picked landscapes and adds **Wikimedia Commons' Picture 
 background: wide, high-resolution, properly licensed, no account and no API key. Each one arrives
 with its title, a line about it, the photographer and the licence.
 
-**Sky Sync** matches the built-in photographs to the light outside, computed offline from your time
-zone: night skies after dark, golden hour at dusk.
+**Sky Sync** matches the built-in photographs to the light outside, for your city: night skies after
+dark, golden hour at dusk. When the light turns (first light, sunrise, golden hour, sunset) a small
+**sky moment** card slides in and the photograph changes with it.
 
 Leave the TV for a while and the photograph sharpens into **photo mode**; the screensaver uses the
-same story card.
+same story card, with the time and the weather.
 
 </td>
 </tr>
@@ -145,13 +156,16 @@ $env:AURA_TV = "192.168.1.50:5555"
 .\tools\backup.ps1
 ```
 
-**3 &nbsp;·&nbsp; Build.** Straight from the SDK tools; a signing key is made on the first run.
+**3 &nbsp;·&nbsp; Build, or download.** Build straight from the SDK tools (a signing key is made on the
+first run), or take `Aura.apk` from [Releases](../../releases/latest) and save it as `launcher/Aura.apk`.
 
 ```powershell
 .\tools\build.ps1
 ```
 
-**4 &nbsp;·&nbsp; Make it home.**
+**4 &nbsp;·&nbsp; Make it home.** This also approves what the extras need: usage history (Smart
+Stack, Today), the TV listings (Continue Watching), media sessions (Now Playing) and Wi-Fi control.
+Add `-NearbyWifi` to list nearby networks too, which turns on location services.
 
 ```powershell
 .\tools\setup-aura.ps1

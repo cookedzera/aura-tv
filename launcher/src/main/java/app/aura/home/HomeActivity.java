@@ -244,7 +244,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // it does no system lookups on its first frame
         handler.removeCallbacks(warmCc);
         handler.postDelayed(warmCc, 1500);
-        stack.start();
+        if (Prefs.on(this, Prefs.STACK_AUTO)) stack.start();
     }
 
     @Override
@@ -309,6 +309,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     public void onBackPressed() {
         if (ccOpen) {
             if (!cc.back()) closeCc(true);
+        } else if (settings.isOpen()) {
+            if (!settings.back()) closeSettings();
         } else if (zone == SIDE) {
             returnToContent();
         } else if (zone == GRID && gridAt >= COLS) {
@@ -352,6 +354,34 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         root.addView(story, match());
         cc = new ControlCenter(this, this);
         root.addView(cc.panel, match());
+        settings = new SettingsPanel(this, new SettingsPanel.Host() {
+            @Override
+            public Backdrop backdrop() {
+                return backdrop;
+            }
+
+            @Override
+            public List<AppRepo.App> apps() {
+                return apps;
+            }
+
+            @Override
+            public void applied(String what) {
+                applySetting(what);
+            }
+
+            @Override
+            public void open(Intent intent, View from) {
+                closeSettings();
+                HomeActivity.this.open(intent, from);
+            }
+
+            @Override
+            public void hud(int icon, String text) {
+                HomeActivity.this.hud(icon, text);
+            }
+        });
+        root.addView(settings.panel, match());
         buildHud();
         buildMoment();
 
@@ -482,7 +512,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         rl.bottomMargin = Ui.dp(4);
         col.addView(Ui.rule(this, 0x33FFFFFF), rl);
         addSide(col, R.drawable.ic_tune, "Control Center", () -> openCc(false), false);
-        addSide(col, R.drawable.ic_settings, "Settings", () -> open(new Intent(Settings.ACTION_SETTINGS), sidebar), false);
+        addSide(col, R.drawable.ic_settings, "Settings", this::openSettings, false);
         sidebar.addView(col, new FrameLayout.LayoutParams(MATCH, WRAP));
         home.addView(sidebar, frame(Ui.dp(58), WRAP, Gravity.START | Gravity.CENTER_VERTICAL, Ui.dp(22), 0, 0, 0));
 
@@ -596,7 +626,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     private void moment(Moment m) {
-        if (!resumed || ccOpen || editing) return;
+        if (!resumed || ccOpen || editing || !Prefs.on(this, Prefs.MOMENTS)) return;
         long now = System.currentTimeMillis();
         Calendar c = Calendar.getInstance();
         c.set(Calendar.HOUR_OF_DAY, 0);
@@ -715,10 +745,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         List<AppRepo.App> sorted = new ArrayList<>();
         for (String pkg : order) sorted.add(find(pkg));
         for (AppRepo.App a : apps) if (!order.contains(a.pkg)) sorted.add(a);
+        sorted.removeAll(hiddenApps());
+        boolean glassTiles = Prefs.on(this, Prefs.GLASS_TILES), namesAlways = Prefs.on(this, Prefs.NAMES_ALWAYS);
         for (final AppRepo.App a : sorted) {
-            // glass panes with the app's mark, tinted in its colour, rather than loud opaque banners
-            final Cell cell = new Cell(this, Tiles.glass(a), a.color, a.label, a.pkg, TILE_W, TILE_H);
-            cell.card.glass = backdrop;
+            // glass panes with the app's mark, tinted in its colour (or, if chosen, the original banners)
+            final Cell cell = new Cell(this, glassTiles ? Tiles.glass(a) : Tiles.app(a), a.color, a.label, a.pkg, TILE_W, TILE_H);
+            if (glassTiles) cell.card.glass = backdrop;
+            cell.setNamesAlways(namesAlways);
             cell.card.sway = true;
             cell.card.onClick = () -> launch(a.launch, cell.card, a.label);
             cell.card.onLongClick = this::startEdit;
@@ -1245,6 +1278,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         if (editing) return editKey(code, e);
         if (ccOpen) return cc.handleKey(code, getCurrentFocus()) ? swallow(code) : super.dispatchKeyEvent(e);
+        // the settings list focuses and scrolls itself
+        if (settings.isOpen()) return super.dispatchKeyEvent(e);
         return homeKey(code, e) ? swallow(code) : super.dispatchKeyEvent(e);
     }
 
@@ -1510,7 +1545,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         refreshWidgets(hour != lastHour);
         watchSky();
         showWeather();
-        if (resumed) {
+        if (resumed && Prefs.on(this, Prefs.WEATHER)) {
             final Context app = getApplicationContext();
             worker.execute(() -> {
                 if (Weather.refresh(app)) runOnUiThread(this::showWeather);
@@ -1519,9 +1554,81 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         lastHour = hour;
     }
 
+    // ---- settings ----------------------------------------------------------------------------
+
+    private SettingsPanel settings;
+    private View beforeSettings;
+
+    private void openSettings() {
+        if (settings.isOpen() || ccOpen) return;
+        if (editing) stopEdit();
+        stopPreview();
+        hideTip();
+        beforeSettings = getCurrentFocus();
+        handler.removeCallbacks(rack);
+        handler.removeCallbacks(goPhoto);
+        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        stack.hold(true);
+        settings.open();
+        // as with Control Center, nothing under the frost keeps drawing
+        handler.postDelayed(() -> {
+            if (settings.isOpen()) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
+        }, 300);
+    }
+
+    private void closeSettings() {
+        if (!settings.isOpen()) return;
+        for (View v : behindCc()) v.setVisibility(View.VISIBLE);
+        home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        settings.close();
+        stack.hold(false);
+        if (beforeSettings == null || !beforeSettings.isAttachedToWindow() || !beforeSettings.requestFocus()) focusGrid(gridAt);
+        wake();
+    }
+
+    /** A setting just changed: put it into effect straight away. */
+    private void applySetting(String what) {
+        switch (what) {
+            case "tiles":
+            case "names":
+            case "apps":
+                populate();
+                // populate() refocuses the grid; the settings list keeps focus while it's open
+                home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+                break;
+            case "stack":
+                if (Prefs.on(this, Prefs.STACK_AUTO)) stack.start();
+                else stack.stop();
+                break;
+            case "weather":
+                showWeather();
+                worker.execute(() -> {
+                    if (Weather.refresh(getApplicationContext())) runOnUiThread(() -> {
+                        showWeather();
+                        refreshWidgets(false);
+                    });
+                });
+                break;
+            default:
+                break;
+        }
+    }
+
+    private List<AppRepo.App> hiddenApps() {
+        List<AppRepo.App> out = new ArrayList<>();
+        Set<String> hidden = Prefs.hidden(this);
+        for (AppRepo.App a : apps) if (hidden.contains(a.pkg)) out.add(a);
+        return out;
+    }
+
     private void showWeather() {
-        Weather.Now w = Weather.now(this);
-        if (w == null) return;
+        Weather.Now w = Prefs.on(this, Prefs.WEATHER) ? Weather.now(this) : null;
+        if (w == null) {
+            stWx.setVisibility(View.GONE);
+            stTemp.setVisibility(View.GONE);
+            story.weather(null);
+            return;
+        }
         stWx.setImageResource(w.icon());
         stTemp.setText(w.temp + "°");
         stWx.setVisibility(View.VISIBLE);
