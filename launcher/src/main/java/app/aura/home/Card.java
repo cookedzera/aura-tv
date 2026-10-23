@@ -243,31 +243,37 @@ final class Card extends View {
                 swayAnim.start();
             }
         }
+        if (!gained) removeCallbacks(hold);
         if (focusListener != null) focusListener.onFocus(this, gained);
     }
+
+    /**
+     * Holding OK is timed from the press itself, not from the remote's key repeats: IR remotes
+     * repeat at their own pace (some barely at all), which made the system long-press unreliable.
+     */
+    private final Runnable hold = () -> {
+        if (onLongClick == null || !isFocused()) return;
+        longFired = true;
+        onLongClick.run();
+    };
 
     @Override
     public boolean onKeyDown(int code, KeyEvent e) {
         if (Pad.isConfirm(code)) {
-            if (e.getRepeatCount() == 0) e.startTracking();
+            if (e.getRepeatCount() == 0) {
+                longFired = false;
+                removeCallbacks(hold);
+                if (onLongClick != null) postDelayed(hold, android.view.ViewConfiguration.getLongPressTimeout());
+            }
             return true;
         }
         return super.onKeyDown(code, e);
     }
 
     @Override
-    public boolean onKeyLongPress(int code, KeyEvent e) {
-        if (Pad.isConfirm(code) && onLongClick != null) {
-            longFired = true;
-            onLongClick.run();
-            return true;
-        }
-        return super.onKeyLongPress(code, e);
-    }
-
-    @Override
     public boolean onKeyUp(int code, KeyEvent e) {
         if (Pad.isConfirm(code)) {
+            removeCallbacks(hold);
             if (!longFired && !e.isCanceled() && onClick != null) onClick.run();
             longFired = false;
             return true;

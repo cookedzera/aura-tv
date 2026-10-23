@@ -39,36 +39,40 @@ final class Story extends FrameLayout implements Backdrop.Tick {
         backdrop = b;
         b.addTick(this);
 
+        // Legibility comes from two soft shades the GPU paints for almost nothing, not from text
+        // shadows: this TV blurs shadowed glyphs on the CPU every frame (~15 ms for this card).
+        addView(shade(GradientDrawable.Orientation.BOTTOM_TOP, 0x99000000),
+                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(300), Gravity.BOTTOM));
+        addView(shade(GradientDrawable.Orientation.TR_BL, 0x73000000),
+                new FrameLayout.LayoutParams(Ui.dp(420), Ui.dp(200), Gravity.TOP | Gravity.END));
+
         clock = new LinearLayout(c);
         clock.setOrientation(LinearLayout.VERTICAL);
         clock.setGravity(Gravity.END);
         time = Ui.text(c, 46, Ui.heavy, 0xFFFFFFFF);
         time.setIncludeFontPadding(true);
         time.setLetterSpacing(-0.04f);
-        Ui.lift(time, 12);
         clock.addView(time, lp(0));
-        date = Ui.caps(c, 7.5f, 0xD9FFFFFF, 0.3f);
+        date = flat(Ui.caps(c, 7.5f, 0xD9FFFFFF, 0.3f));
         clock.addView(date, lp(2));
         addView(clock, frame(Gravity.TOP | Gravity.END, 0, Ui.dp(34), Ui.dp(56), 0));
 
         card = new LinearLayout(c);
         card.setOrientation(LinearLayout.VERTICAL);
-        kicker = Ui.caps(c, 8, 0xE6FFFFFF, 0.3f);
+        kicker = flat(Ui.caps(c, 8, 0xE6FFFFFF, 0.3f));
         card.addView(kicker, lp(0));
         title = Ui.text(c, 54, Ui.heavy, 0xFFFFFFFF);
         title.setIncludeFontPadding(true);
         title.setLetterSpacing(-0.04f);
         title.setEllipsize(TextUtils.TruncateAt.END);
         title.setMaxWidth(Ui.dp(820));
-        title.setShadowLayer(Ui.dpf(16), 0, Ui.dpf(2), 0x59000000);
         card.addView(title, lp(4));
-        line = Ui.text(c, 15, Ui.regular, 0xE0FFFFFF);
+        line = Ui.text(c, 15, Ui.regular, 0xE6FFFFFF);
         line.setSingleLine(false);
         line.setMaxLines(2);
         line.setEllipsize(TextUtils.TruncateAt.END);
         line.setMaxWidth(Ui.dp(600));
         line.setLineSpacing(Ui.dpf(3), 1f);
-        Ui.lift(line, 10);
         card.addView(line, lp(4));
 
         LinearLayout meta = new LinearLayout(c);
@@ -81,12 +85,24 @@ final class Story extends FrameLayout implements Backdrop.Tick {
         fill.setScaleX(0f);
         bar.addView(fill, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         meta.addView(bar, new LinearLayout.LayoutParams(Ui.dp(96), Ui.dp(2)));
-        credit = Ui.caps(c, 6.5f, 0x99FFFFFF, 0.24f);
+        credit = flat(Ui.caps(c, 6.5f, 0xB3FFFFFF, 0.24f));
         LinearLayout.LayoutParams cl = lp(0);
         cl.leftMargin = Ui.dp(14);
         meta.addView(credit, cl);
         card.addView(meta, lp(18));
         addView(card, frame(Gravity.BOTTOM | Gravity.START, Ui.dp(64), 0, 0, Ui.dp(50)));
+    }
+
+    private View shade(GradientDrawable.Orientation o, int color) {
+        View v = new View(getContext());
+        v.setBackground(new GradientDrawable(o, new int[]{color, Ui.withAlpha(color, 0)}));
+        return v;
+    }
+
+    /** Caps without the default text shadow (see the shades above). */
+    private static TextView flat(TextView t) {
+        t.setShadowLayer(0, 0, 0, 0);
+        return t;
     }
 
     private static GradientDrawable pill(int color) {

@@ -61,6 +61,8 @@ final class ControlCenter {
     }
 
     private static final int U = 84, G = 14;
+    /** How long the frost takes to turn opaque; after that the home screen beneath stops drawing. */
+    static final long FROST_MS = 240;
     private static final int BLUE = 0xFF2F7BFF, ORANGE = 0xFFFF9F0A, GREEN = 0xFF30D158, VIOLET = 0xFF8E6CFF;
     private static final int MODULE = 0x1FFFFFFF;
     private static final int[] SLEEP_STEPS = {0, 15, 30, 60, 90, 120};
@@ -85,6 +87,7 @@ final class ControlCenter {
     private final Ring ring;
     private final SkyArc arc;
     private final AudioManager audio;
+    private String segmentsSig;
 
     ControlCenter(Activity a, Host h) {
         act = a;
@@ -97,7 +100,12 @@ final class ControlCenter {
         panel.addView(veil, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         // the time, set large on the left
-        header = new LinearLayout(a);
+        header = new LinearLayout(a) {
+            @Override
+            public boolean hasOverlappingRendering() {
+                return false;
+            }
+        };
         header.setOrientation(LinearLayout.VERTICAL);
         TextView title = Ui.caps(a, 8, 0x99FFFFFF, 0.3f);
         title.setText("CONTROL CENTER");
@@ -307,24 +315,31 @@ final class ControlCenter {
     // ---- open / close / keys -----------------------------------------------------------------
 
     void open(boolean inputs) {
-        refresh();
+        // readings are kept warm while the home screen idles; opening only refreshes them once the
+        // board has settled, so no system lookups land on the first frames of the animation
+        if (segmentsSig == null) {
+            refresh();
+        } else {
+            volume.sync(); // the remote's volume keys may have moved it while the board was closed
+            panel.postDelayed(this::refresh, 700);
+        }
         tick(Calendar.getInstance());
         panel.animate().cancel();
         panel.setAlpha(1f);
         panel.setVisibility(View.VISIBLE);
         veil.setAlpha(0f);
-        veil.animate().alpha(1f).setStartDelay(0).setDuration(380).setInterpolator(Ui.SOFT).start();
+        veil.animate().alpha(1f).setStartDelay(0).setDuration(FROST_MS).setInterpolator(Ui.SOFT).start();
         header.setAlpha(0f);
         header.setTranslationX(-Ui.dp(24));
         header.animate().alpha(1f).translationX(0f).setStartDelay(80).setDuration(620).setInterpolator(Ui.EMPHASIZED).start();
-        // modules bloom outward from the top-left corner of the board
+        // modules rise into place from the top-left corner of the board. They move rather than
+        // scale: scaling re-rasterises every glyph on every frame, which this GPU can't keep up with
         for (View m : modules) {
             int order = (Integer) m.getTag();
             m.setAlpha(0f);
-            m.setScaleX(0.86f);
-            m.setScaleY(0.86f);
-            m.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(90 + order * 34L).setDuration(560)
-                    .setInterpolator(Ui.SPRING).start();
+            m.setTranslationY(Ui.dp(16));
+            m.animate().alpha(1f).translationY(0f).setStartDelay(60 + order * 30L).setDuration(460)
+                    .setInterpolator(Ui.EMPHASIZED).start();
         }
         if (inputs && segments.getChildCount() > 0) segments.getChildAt(0).requestFocus();
         else wifi.requestFocus();
@@ -455,9 +470,6 @@ final class ControlCenter {
     }
 
     private void buildSegments() {
-        View focused = act.getCurrentFocus();
-        int had = focused != null && focused.getParent() == segments ? segments.indexOfChild(focused) : -1;
-        segments.removeAllViews();
         TvInputManager tim = (TvInputManager) act.getSystemService(Context.TV_INPUT_SERVICE);
         if (tim == null) return;
         List<TvInputInfo> list = new ArrayList<>();
@@ -468,6 +480,14 @@ final class ControlCenter {
             int tx = x.getType() == TvInputInfo.TYPE_HDMI ? 0 : 1, ty = y.getType() == TvInputInfo.TYPE_HDMI ? 0 : 1;
             return tx != ty ? tx - ty : label(x).compareTo(label(y));
         });
+        // the buttons are only rebuilt when an input or its state actually changed
+        StringBuilder sig = new StringBuilder();
+        for (TvInputInfo info : list) sig.append(info.getId()).append('=').append(tim.getInputState(info.getId())).append('|');
+        if (sig.toString().equals(segmentsSig)) return;
+        segmentsSig = sig.toString();
+        View focused = act.getCurrentFocus();
+        int had = focused != null && focused.getParent() == segments ? segments.indexOfChild(focused) : -1;
+        segments.removeAllViews();
         for (int i = 0; i < list.size() && i < 3; i++) {
             TvInputInfo info = list.get(i);
             LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
@@ -663,6 +683,12 @@ final class ControlCenter {
             text.setTypeface(Ui.bold);
             text.setTextSize(12 * Ui.scaled);
             text.setTextAlign(Paint.Align.CENTER);
+        }
+
+        /** Its entrance fade applies straight to its draws: no offscreen layer. */
+        @Override
+        public boolean hasOverlappingRendering() {
+            return false;
         }
 
         void sync() {

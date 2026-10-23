@@ -131,9 +131,21 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private final Runnable rack = () -> setRacked(true);
     private final Runnable goPhoto = () -> setPhoto(true);
     private final Runnable hideHud = this::hideHud;
-    private final Runnable hideHome = () -> {
-        if (ccOpen) home.setVisibility(View.INVISIBLE);
+    private final Runnable warmCc = () -> {
+        if (!ccOpen && resumed && !held) cc.refresh();
     };
+    /**
+     * Once Control Center's frost is opaque, everything beneath it stops drawing: the photograph
+     * (two full-screen passes), the light, the shading and the home screen. The frost samples the
+     * photograph's blurred copy directly, so it keeps drifting.
+     */
+    private final Runnable hideHome = () -> {
+        if (ccOpen) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
+    };
+
+    private View[] behindCc() {
+        return new View[]{home, backdrop, bloom, scrim};
+    }
     private final Runnable glintTick = new Runnable() {
         @Override
         public void run() {
@@ -224,6 +236,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         handler.postDelayed(glintTick, 4000);
         if (ccOpen) cc.refresh();
         else if (getCurrentFocus() == null && !cells.isEmpty()) focusGrid(gridAt);
+        // have Control Center's toggles and readings current before it's next opened, so opening
+        // it does no system lookups on its first frame
+        handler.removeCallbacks(warmCc);
+        handler.postDelayed(warmCc, 1500);
     }
 
     @Override
@@ -1033,6 +1049,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
             case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                // the OK that started rearranging is usually still held: its repeats mustn't end it.
+                // Only a fresh press does.
+                if (e.getRepeatCount() > 0) return true;
                 stopEdit();
                 return swallow(code);
             default:
@@ -1146,11 +1165,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        // the home screen sinks back as the frosted board rises over it; once the frost is opaque
-        // the home screen stops drawing altogether, so nothing renders twice while the board is up
-        home.animate().scaleX(0.94f).scaleY(0.94f).setDuration(460).setStartDelay(0)
-                .setInterpolator(Ui.EMPHASIZED).start();
-        handler.postDelayed(hideHome, 420);
+        // the frost settles over a still home screen (scaling it would re-rasterise all its text
+        // every frame); once the frost is opaque the home screen stops drawing altogether
+        handler.postDelayed(hideHome, ControlCenter.FROST_MS + 30);
         bloom.setStrength(0.3f * glow(), 460);
         cc.open(inputs);
     }
@@ -1160,11 +1177,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (!ccOpen) return;
         ccOpen = false;
         handler.removeCallbacks(hideHome);
-        home.setVisibility(View.VISIBLE);
+        for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         cc.close(animate, null);
-        home.animate().scaleX(1f).scaleY(1f).setDuration(animate ? 560 : 0).setStartDelay(animate ? 60 : 0)
-                .setInterpolator(Ui.EMPHASIZED).start();
         bloom.setStrength(glow(), animate ? 560 : 0);
         if (beforeCc == null || !beforeCc.isAttachedToWindow() || !beforeCc.requestFocus()) focusGrid(gridAt);
         beforeCc = null;
