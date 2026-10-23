@@ -1,117 +1,219 @@
-<p align="center"><img src="docs/social.png" alt="Aura" width="760"></p>
+<p align="center">
+  <img src="docs/hero.svg" alt="Aura: the sun climbs its sky arc above the wordmark" width="100%">
+</p>
 
-# Aura
+<p align="center">
+  <b>Your TV's home screen, rebuilt as frosted glass over living photographs.</b><br>
+  <sub>No ads · no sponsored rows · no account · a steady 60&nbsp;fps on a 1.5&nbsp;GB TV</sub>
+</p>
 
-**A fast, glass-clear home screen for Android TV.** Frosted glass over living photographs, a soft
-light that follows your focus, and a steady 60 fps on a budget 1.5 GB TV. No ads, no rows of
-sponsored content, no account.
+<p align="center">
+  <img alt="Android TV 8.0+" src="https://img.shields.io/badge/Android%20TV-8.0%2B-0d1630?style=flat-square&labelColor=05070c">
+  <img alt="60 fps" src="https://img.shields.io/badge/frames-60%20fps-ffa65c?style=flat-square&labelColor=05070c">
+  <img alt="No Gradle" src="https://img.shields.io/badge/build-no%20Gradle%2C%20no%20AndroidX-fff0c8?style=flat-square&labelColor=05070c">
+  <img alt="MIT" src="https://img.shields.io/badge/license-MIT-7fb2ff?style=flat-square&labelColor=05070c">
+</p>
 
-<p align="center"><img src="docs/home.png" alt="Aura home screen" width="880"></p>
+<p align="center">
+  <img src="docs/tour.webp" alt="A tour of Aura on a real TV: boot, home, rearranging, Control Center, photo mode, screensaver" width="92%">
+</p>
 
-| Control Center | Photo mode & screensaver |
+<br>
+
+> **Aura** replaces the stock Android TV launcher with something calmer: a glass sidebar, three
+> quiet widgets, your apps as frosted tiles, and a photograph that drifts behind it all and follows
+> the real sun outside. Every pixel of it was tuned on a budget 1.5&nbsp;GB TV, frame by frame.
+
+<br>
+
+## ✦ 01 &nbsp;·&nbsp; The home screen
+
+<table>
+<tr>
+<td width="58%"><img src="docs/home.png" alt="Aura's home screen"></td>
+<td>
+
+**Glass tiles.** Each app's logo is lifted off its own banner and set as a white mark on glass
+tinted in the app's colour. Logos that can't be lifted keep their icon, on glass.
+
+**Three widgets.** *Sky* draws the sun on its arc with the next sunset. *For You* offers the app
+you usually open at this hour, or "jump back in". *Today* shows time in apps and free memory.
+
+**A light that follows you.** A soft bloom in the focused app's colour glides behind the grid.
+
+</td>
+</tr>
+</table>
+
+## ✦ 02 &nbsp;·&nbsp; Glass that doesn't cost frames
+
+<p align="center"><img src="docs/glass.svg" alt="Four layers of glass slide together into one draw" width="100%"></p>
+
+Real frosted glass usually means blurring the screen behind every panel, every frame. Aura blurs the
+photograph **once**, when it arrives, into a tiny 128&times;72 copy. Every pane samples its own slice of
+that copy, and the pane's tint, frost and highlight are folded into a single colour matrix. One
+rounded draw per pane, whether it's a tile, a widget, the sidebar or Control Center.
+
+## ✦ 03 &nbsp;·&nbsp; Control Center
+
+<table>
+<tr>
+<td>
+
+Press <kbd>Menu</kbd>. A frosted board rises with the time set large beside it: round toggles for
+Wi-Fi, Bluetooth, the sleep timer and photo mode, a tall volume slider, your HDMI inputs, picture
+and sound settings, a memory boost and standby.
+
+**Gentle Sleep** fades the volume over the timer's last minute, then puts the TV to standby.
+**Live Inputs** turns a set-top box or console that just switched on into the first tile.
+
+</td>
+<td width="58%"><img src="docs/control-center.png" alt="Control Center"></td>
+</tr>
+</table>
+
+## ✦ 04 &nbsp;·&nbsp; A new photograph every day
+
+<table>
+<tr>
+<td width="58%"><img src="docs/photo-mode.png" alt="Photo mode showing a Picture of the Day"></td>
+<td>
+
+Aura ships with 23 hand-picked landscapes and adds **Wikimedia Commons' Picture of the Day** in the
+background: wide, high-resolution, properly licensed, no account and no API key. Each one arrives
+with its title, a line about it, the photographer and the licence.
+
+**Sky Sync** matches the built-in photographs to the light outside, computed offline from your time
+zone: night skies after dark, golden hour at dusk.
+
+Leave the TV for a while and the photograph sharpens into **photo mode**; the screensaver uses the
+same story card.
+
+</td>
+</tr>
+</table>
+
+## ✦ 05 &nbsp;·&nbsp; Measured, not guessed
+
+<p align="center"><img src="docs/speed.svg" alt="Before and after: missed frames and milliseconds per frame" width="100%"></p>
+
+<details>
+<summary><b>What made the difference</b></summary>
+<br>
+
+| Trap | What Aura does instead |
 |---|---|
-| ![Control Center](docs/control-center.png) | ![Photo mode](docs/photo-mode.png) |
+| Blurring behind every panel | One blurred copy per photograph, sampled by every pane |
+| Fades painted into offscreen layers | Containers fade by applying alpha straight to their draws |
+| Animating the *scale* of text | Panels slide and fade; text is never re-rasterised mid-animation |
+| Text shadows over photographs | Gradient shades the GPU paints for free |
+| Drawing what an overlay covers | Everything under Control Center stops drawing once the frost is opaque |
+| Looping idle animations | The photograph redraws at a third of the frame rate when nothing moves |
+| System lookups on the first frame | Readings are kept warm while the home screen idles |
 
-## Highlights
+</details>
 
-- **Glass, done cheaply.** Every pane (tiles, widgets, sidebar, Control Center) is frosted glass cut
-  from one shared, pre-blurred copy of the photograph, with its tint folded into a single colour
-  filter: one draw per pane, so it stays smooth on weak TV GPUs.
-- **App tiles that match.** Each app's logo is lifted off its own banner as a clean white mark on glass
-  tinted in the app's colour. Apps whose banner can't be lifted show their icon on the glass instead.
-- **A fresh photograph every day.** Wikimedia Commons' *Picture of the Day* is imported in the
-  background (no account, no API key), sized for the TV, and credited on screen with its photographer
-  and licence. It joins 23 hand-picked landscapes that ship with the app.
-- **Sky Sync.** The built-in photographs follow the real sun, computed offline from your time zone:
-  night skies after dark, first light at dawn, golden hour at dusk.
-- **Widgets that know you.** *Sky* (the sun on its arc, next sunset), *For You* (your usual app for this
-  hour, or "jump back in"), *Today* (time in apps, free memory). Usage history never leaves the TV.
-- **Control Center.** Press Menu: Wi-Fi, Bluetooth, sleep timer, photo mode, a tall volume slider,
-  HDMI inputs, picture and sound settings, a memory boost and standby, on one frosted board.
-- **Live Inputs.** Switch on a set-top box or console and it becomes the first tile, tagged LIVE.
-- **Gentle Sleep.** The sleep timer fades the volume over its last minute, then puts the TV in standby.
-- **Photo mode and screensaver.** Leave the TV alone and the photograph sharpens; leave it longer and
-  it becomes a story card: the place, a line about it, the photographer, and the time.
-- **Boot screen.** While Aura loads, the sun climbs the sky arc as the progress bar.
+<br>
 
-## Remote
+## ✦ 06 &nbsp;·&nbsp; Remote
 
-| Key | Does |
+| | |
 |---|---|
-| Arrows | Move through the apps; up from the top row reaches the widgets, left from the first column the sidebar |
-| OK / hold OK | Open / rearrange (the arrows carry the app, OK saves) |
-| Back | From lower rows, jump to the top row; from the sidebar, return to the apps |
-| Menu or Settings | Control Center |
+| <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> | Move through your apps · up from the top row reaches the widgets · left reaches the sidebar |
+| <kbd>OK</kbd> | Open |
+| hold <kbd>OK</kbd> | Rearrange: the arrows carry the app, <kbd>OK</kbd> saves |
+| <kbd>Back</kbd> | From lower rows, jump to the top · from the sidebar, return to the apps |
+| <kbd>Menu</kbd> | Control Center |
 
-## Install
+<br>
 
-You need a Windows PC on the same network as the TV, the Android SDK platform-tools (`adb`) and, to
-build from source, the Android SDK build-tools plus a JDK 11+ (Android Studio has both).
+## ✦ 07 &nbsp;·&nbsp; Install in four steps
 
-1. On the TV, turn on **Developer options** and **USB/network debugging**, and note its IP address.
-2. Tell the scripts where the TV is:
-   ```powershell
-   $env:AURA_TV = "192.168.1.50:5555"
-   ```
-3. Snapshot the TV before changing anything (this is what `restore` returns it to):
-   ```powershell
-   .\tools\backup.ps1
-   ```
-4. Build Aura and set it as the home screen and screensaver:
-   ```powershell
-   .\tools\build.ps1
-   .\tools\setup-aura.ps1
-   ```
+You need a Windows PC on the same network as the TV, the Android SDK platform-tools (`adb`), and to
+build from source the Android SDK build-tools plus a JDK 11+ (Android Studio brings both).
 
-Optional:
-- `.\tools\tune.ps1` gives Aura a full ahead-of-time compile and stops five streaming apps running in
-  the background when you aren't using them. `-Undo` reverts it.
-- `.\tools\debloat.ps1` disables the ads, telemetry and junk packages of an **Acer / Dixon DIX41RKF**
-  Google TV (`pm disable-user`, never uninstall). Read the list and adjust it before using it on
-  any other TV.
-
-### Undo everything
+**1 &nbsp;·&nbsp; Let the PC talk to the TV.** On the TV turn on *Developer options* and *network
+debugging*, then note its IP address.
 
 ```powershell
-.\tools\restore.ps1 -DryRun      # shows every command first
-.\tools\restore.ps1 -RemoveAura  # re-enables every package, restores settings, hands Home back, uninstalls Aura
+$env:AURA_TV = "192.168.1.50:5555"
 ```
 
-## Scripts
+**2 &nbsp;·&nbsp; Take a snapshot first.** Everything Aura changes can be put back from it.
+
+```powershell
+.\tools\backup.ps1
+```
+
+**3 &nbsp;·&nbsp; Build.** Straight from the SDK tools; a signing key is made on the first run.
+
+```powershell
+.\tools\build.ps1
+```
+
+**4 &nbsp;·&nbsp; Make it home.**
+
+```powershell
+.\tools\setup-aura.ps1
+```
+
+Changed your mind? `.\tools\restore.ps1 -DryRun` shows every step, and `.\tools\restore.ps1 -RemoveAura`
+re-enables every package, restores your settings, hands Home back and uninstalls Aura.
+
+<details>
+<summary><b>Optional: speed tuning and debloat</b></summary>
+<br>
+
+- `.\tools\tune.ps1` compiles Aura ahead of time and stops five streaming apps running in the
+  background while you aren't using them. `-Undo` reverts it.
+- `.\tools\debloat.ps1` disables the ads, telemetry and junk packages of an **Acer / Dixon DIX41RKF**
+  Google TV with `pm disable-user` (nothing is uninstalled). Read the list and adjust it before using
+  it on any other TV.
+
+</details>
+
+<details>
+<summary><b>All the scripts</b></summary>
+<br>
 
 | Script | Does |
 |---|---|
-| `backup.ps1` | Saves enabled/disabled packages, all settings and the home app to `backup/` (kept private by `.gitignore`). |
-| `build.ps1` | Builds `launcher/Aura.apk` straight from the Android SDK tools (aapt2, javac, d8, apksigner), no Gradle. Creates a signing key on first run. |
+| `backup.ps1` | Saves enabled/disabled packages, all settings and the home app to `backup/` (git-ignored: it's personal). |
+| `build.ps1` | aapt2 → javac → d8 → zipalign → apksigner, no Gradle. |
 | `setup-aura.ps1` | Installs Aura as home, screensaver and a force-lock-only device admin (for Standby and the sleep timer). |
 | `tune.ps1` | Background limits and an ahead-of-time compile. `-Undo` reverts. |
 | `debloat.ps1` | The reviewed disable list for the DIX41RKF, one reason per package. |
 | `restore.ps1` / `restore.bat` | Puts the TV back exactly as the backup recorded it. |
 | `prepare_wallpapers.py` | Fetches, grades and credits the built-in photographs. |
-| `make_icons.py` | Draws the line icons, launcher icon, TV banner and the social preview. |
+| `make_icons.py` | Draws the line icons, launcher icon, TV banner and social preview. |
+| `make_tour.py` | Builds the animated tour at the top of this page from TV screenshots. |
 
-## Under the hood
+</details>
 
-- Plain Java on the Android framework (no AndroidX, no Gradle), minSdk 26. The APK is about 13 MB,
-  almost all of it photographs.
-- The photograph drifts in a slow Ken Burns move and only redraws at a third of the frame rate
-  when nothing else is moving.
-- Fades never paint offscreen layers, and focus animations settle instead of looping, so idle
-  frames cost about 8 ms on a Realtek RTD2841A.
-- Remote input is routed by hand (grid maths for the apps, geometry for Control Center), and held
-  keys move at a steady pace instead of queueing.
+<details>
+<summary><b>Under the hood</b></summary>
+<br>
 
-Tested on an Acer DIX41RKF (Android 11, 720p, 1.5 GB RAM). Android 11's cached-app freezer can't be
-used there: its 4.14 kernel lacks `freezer.killable`.
+- Plain Java on the Android framework, minSdk 26, about 13&nbsp;MB, almost all of it photographs.
+- Remote input is routed by hand: grid maths for the apps, geometry for Control Center. Held keys
+  step at a steady pace instead of queueing, and holding <kbd>OK</kbd> is timed from the press, so
+  it works with IR remotes that barely repeat.
+- Pictures of the Day arrive through a JobScheduler job every six hours on any network, with a
+  descriptive User-Agent, spaced requests and back-off when Wikimedia asks. Only wide JPEGs are kept,
+  centre-cropped to the TV, the newest 40.
+- Tested on an Acer DIX41RKF: Realtek RTD2841A, Android 11, 720p, 1.5&nbsp;GB RAM. Android 11's
+  cached-app freezer can't run there (its 4.14 kernel lacks `freezer.killable`).
+
+</details>
+
+<br>
 
 ## Credits
 
-- Photographs: Wikimedia Commons Featured Pictures and Picture of the Day (CC BY, CC BY-SA, CC0 and
-  public domain), each credited on screen with its photographer and licence.
-- Type: [Inter](https://rsms.me/inter/) by Rasmus Andersson, SIL Open Font License
-  (`launcher/src/main/assets/fonts/LICENSE-Inter.txt`).
+Photographs from Wikimedia Commons Featured Pictures and Picture of the Day (CC BY, CC BY-SA, CC0
+and public domain), each credited on screen. Type: [Inter](https://rsms.me/inter/) by Rasmus
+Andersson, SIL Open Font License (`launcher/src/main/assets/fonts/LICENSE-Inter.txt`).
 
 ## License
 
-The code is [MIT](LICENSE) © 2026 iravi. The photographs and the Inter typeface keep their own
-licences, listed above.
+The code is [MIT](LICENSE) © 2026 iravi. The photographs and the typeface keep their own licences.

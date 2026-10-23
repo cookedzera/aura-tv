@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 440" width="1280" height="440" role="img" aria-label="Four layers of glass, photograph, blurred copy, tint and frost, slide together into a single draw">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1222"/>
+      <stop offset="1" stop-color="#05070c"/>
+    </linearGradient>
+    <linearGradient id="photo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2f6fb5"/>
+      <stop offset="0.55" stop-color="#7fa9c9"/>
+      <stop offset="0.56" stop-color="#5a4a3a"/>
+      <stop offset="1" stop-color="#2b2219"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="9"/></filter>
+    <linearGradient id="tint" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff6a5c" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ff9f6a" stop-opacity="0.35"/>
+    </linearGradient>
+    <linearGradient id="frost" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0.12"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.75"/>
+      <stop offset="0.5" stop-color="#fff" stop-opacity="0.1"/>
+    </linearGradient>
+    <clipPath id="pane"><rect width="300" height="170" rx="26"/></clipPath>
+  </defs>
+  <rect width="1280" height="440" fill="url(#bg)"/>
+
+  <g font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#fff">
+    <text x="64" y="64" font-size="13" font-weight="700" letter-spacing="4" opacity="0.55">HOW THE GLASS STAYS FAST</text>
+    <text x="64" y="104" font-size="30" font-weight="800" letter-spacing="-0.5">Four layers. One draw.</text>
+    <text x="64" y="136" font-size="15" opacity="0.65">Every tile, widget and panel is cut from one shared blurred copy of the photograph,</text>
+    <text x="64" y="158" font-size="15" opacity="0.65">with its tints folded into a single colour filter, so the TV paints each pane once.</text>
+  </g>
+
+  <!-- the four layers spread apart, then settle into one pane -->
+  <g transform="translate(620 205)">
+    <g>
+      <animateTransform attributeName="transform" type="translate" values="0 0;0 0;-460 60;-460 60;0 0" keyTimes="0;0.15;0.45;0.85;1" dur="7s" repeatCount="indefinite" calcMode="spline" keySplines="0 0 1 1;0.45 0 0.2 1;0 0 1 1;0.45 0 0.2 1"/>
+      <g clip-path="url(#pane)"><rect width="300" height="170" fill="url(#photo)"/></g>
+      <text x="0" y="200" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="2" fill="#fff" opacity="0.7">1 · PHOTOGRAPH
+        <animate attributeName="opacity" values="0;0;0.75;0.75;0" keyTimes="0;0.4;0.5;0.8;0.9" dur="7s" repeatCount="indefinite"/></text>
+    </g>
+    <g>
+      <animateTransform attributeName="transform" type="translate" values="0 0;0 0;-140 60;-140 60;0 0" keyTimes="0;0.15;0.45;0.85;1" dur="7s" repeatCount="indefinite" calcMode="spline" keySplines="0 0 1 1;0.45 0 0.2 1;0 0 1 1;0.45 0 0.2 1"/>
+      <g clip-path="url(#pane)"><rect x="-20" y="-20" width="340" height="210" fill="url(#photo)" filter="url(#soft)"/></g>
+      <text x="0" y="200" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="2" fill="#fff" opacity="0">2 · BLURRED ONCE, SHARED
+        <animate attributeName="opacity" values="0;0;0.75;0.75;0" keyTimes="0;0.42;0.52;0.8;0.9" dur="7s" repeatCount="indefinite"/></text>
+    </g>
+    <g>
+      <animateTransform attributeName="transform" type="translate" values="0 0;0 0;180 60;180 60;0 0" keyTimes="0;0.15;0.45;0.85;1" dur="7s" repeatCount="indefinite" calcMode="spline" keySplines="0 0 1 1;0.45 0 0.2 1;0 0 1 1;0.45 0 0.2 1"/>
+      <rect width="300" height="170" rx="26" fill="url(#tint)"/>
+      <text x="0" y="200" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="2" fill="#fff" opacity="0">3 · THE APP'S COLOUR
+        <animate attributeName="opacity" values="0;0;0.75;0.75;0" keyTimes="0;0.44;0.54;0.8;0.9" dur="7s" repeatCount="indefinite"/></text>
+    </g>
+    <g>
+      <animateTransform attributeName="transform" type="translate" values="0 0;0 0;500 60;500 60;0 0" keyTimes="0;0.15;0.45;0.85;1" dur="7s" repeatCount="indefinite" calcMode="spline" keySplines="0 0 1 1;0.45 0 0.2 1;0 0 1 1;0.45 0 0.2 1"/>
+      <rect width="300" height="170" rx="26" fill="url(#frost)"/>
+      <rect x="0.75" y="0.75" width="298.5" height="168.5" rx="25.5" fill="none" stroke="url(#edge)" stroke-width="1.5"/>
+      <text x="0" y="200" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="2" fill="#fff" opacity="0">4 · FROST AND EDGE LIGHT
+        <animate attributeName="opacity" values="0;0;0.75;0.75;0" keyTimes="0;0.46;0.56;0.8;0.9" dur="7s" repeatCount="indefinite"/></text>
+    </g>
+    <!-- the merged pane carries the logo and the verdict -->
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;0.95;0;0;0.95" keyTimes="0;0.12;0.2;0.92;1" dur="7s" repeatCount="indefinite"/>
+      <text x="150" y="98" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="34" font-weight="800" letter-spacing="-1" fill="#fff">YouTube</text>
+      <text x="150" y="214" text-anchor="middle" font-family="ui-monospace, Consolas, monospace" font-size="14" fill="#ffc98a">= 1 draw call</text>
+    </g>
+  </g>
+</svg>

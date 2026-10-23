@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400" role="img" aria-label="Measured on the TV: Control Center missed frames 26 to 4, photo mode 26.5 to 7 milliseconds per frame, browsing missed frames 94 to 10">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1222"/>
+      <stop offset="1" stop-color="#05070c"/>
+    </linearGradient>
+    <linearGradient id="after" x1="0" x2="1">
+      <stop offset="0" stop-color="#ffa65c"/>
+      <stop offset="1" stop-color="#fff0c8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="400" fill="url(#bg)"/>
+  <g font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#fff">
+    <text x="64" y="64" font-size="13" font-weight="700" letter-spacing="4" opacity="0.55">MEASURED ON A 1.5 GB TV · REALTEK RTD2841A · 60 HZ</text>
+    <text x="64" y="104" font-size="30" font-weight="800" letter-spacing="-0.5">Tuned frame by frame.</text>
+
+    <!-- rows: label, before bar (grey), after bar (warm); bar lengths are to scale within each row -->
+    <g transform="translate(64 150)">
+      <text y="16" font-size="15" opacity="0.8">Control Center open / close</text>
+      <text y="36" font-size="12" opacity="0.45">missed frames, two cycles</text>
+      <g transform="translate(330 0)">
+        <rect height="14" rx="7" fill="#fff" opacity="0.18" width="0"><animate attributeName="width" values="0;640;640;0" keyTimes="0;0.15;0.9;1" dur="8s" repeatCount="indefinite"/></rect>
+        <text x="652" y="12" font-size="13" opacity="0.5">26</text>
+        <rect y="22" height="14" rx="7" fill="url(#after)" width="0"><animate attributeName="width" values="0;0;98;98;0" keyTimes="0;0.2;0.35;0.9;1" dur="8s" repeatCount="indefinite"/></rect>
+        <text x="110" y="34" font-size="13" font-weight="700" fill="#ffc98a">4</text>
+      </g>
+    </g>
+    <g transform="translate(64 230)">
+      <text y="16" font-size="15" opacity="0.8">Photo mode and screensaver</text>
+      <text y="36" font-size="12" opacity="0.45">milliseconds per frame</text>
+      <g transform="translate(330 0)">
+        <rect height="14" rx="7" fill="#fff" opacity="0.18" width="0"><animate attributeName="width" values="0;640;640;0" keyTimes="0;0.15;0.9;1" dur="8s" repeatCount="indefinite"/></rect>
+        <text x="652" y="12" font-size="13" opacity="0.5">26.5 ms</text>
+        <rect y="22" height="14" rx="7" fill="url(#after)" width="0"><animate attributeName="width" values="0;0;169;169;0" keyTimes="0;0.25;0.4;0.9;1" dur="8s" repeatCount="indefinite"/></rect>
+        <text x="181" y="34" font-size="13" font-weight="700" fill="#ffc98a">7 ms</text>
+      </g>
+    </g>
+    <g transform="translate(64 310)">
+      <text y="16" font-size="15" opacity="0.8">Browsing the glass app grid</text>
+      <text y="36" font-size="12" opacity="0.45">missed frames while moving</text>
+      <g transform="translate(330 0)">
+        <rect height="14" rx="7" fill="#fff" opacity="0.18" width="0"><animate attributeName="width" values="0;640;640;0" keyTimes="0;0.15;0.9;1" dur="8s" repeatCount="indefinite"/></rect>
+        <text x="652" y="12" font-size="13" opacity="0.5">94</text>
+        <rect y="22" height="14" rx="7" fill="url(#after)" width="0"><animate attributeName="width" values="0;0;68;68;0" keyTimes="0;0.3;0.45;0.9;1" dur="8s" repeatCount="indefinite"/></rect>
+        <text x="80" y="34" font-size="13" font-weight="700" fill="#ffc98a">10</text>
+      </g>
+    </g>
+    <g transform="translate(1050 104)" font-size="12" opacity="0.6">
+      <rect y="-10" width="22" height="8" rx="4" fill="#fff" opacity="0.3"/><text x="30" y="-2">before</text>
+      <rect x="96" y="-10" width="22" height="8" rx="4" fill="url(#after)"/><text x="126" y="-2">after</text>
+    </g>
+  </g>
+</svg>
