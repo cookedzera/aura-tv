@@ -4,13 +4,14 @@ import java.util.TimeZone;
 
 /**
  * Offline solar position (accurate to about a degree), so the photographs can follow the real sky
- * outside: auroras at night, first light at dawn, daylight, then golden hour. No network, no location
- * permission: the place is estimated from the time zone.
+ * outside: auroras at night, first light at dawn, daylight, then golden hour. No location
+ * permission: the place starts as the time zone's estimate and becomes the TV's city once
+ * {@link Weather} has found it.
  */
 final class Sun {
     enum Phase { NIGHT, DAWN, DAY, GOLDEN }
 
-    private static final double LAT, LON;
+    private static volatile double LAT, LON;
     private static final double HORIZON = -0.833; // sunrise/sunset, with refraction
 
     static {
@@ -27,6 +28,13 @@ final class Sun {
     }
 
     private Sun() { }
+
+    /** Exact coordinates once Weather knows where the TV is; until then the time zone's estimate. */
+    static void place(double lat, double lon) {
+        if (lat == 0 && lon == 0) return;
+        LAT = lat;
+        LON = lon;
+    }
 
     /** Sun's height above the horizon in degrees at time {@code t} (epoch ms). */
     static double elevation(long t) {

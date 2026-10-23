@@ -76,7 +76,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private final int[] loc = new int[2];
 
     private SharedPreferences prefs;
-    private FrameLayout root, home, page, fyThumbHost;
+    private FrameLayout root, home, page;
     private Backdrop backdrop;
     private Bloom bloom;
     private Scrim scrim;
@@ -88,9 +88,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private LinearLayout greeting;
     private Story story;
     private TextView hello, dateLine, gridLabel, stTime, tipText, hudText;
-    private TextView skyKicker, skyTitle, skyRise, skySet, fyKicker, fyName, fySub, tdValue, tdSub, tdMem;
-    private ImageView stWifi, stBt, hudIcon;
-    private Card fyThumb;
+    private TextView skyKicker, skyTitle, skyRise, skySet, tdValue, tdSub, tdMem;
+    private ImageView stWifi, stBt, stWx, hudIcon;
+    private TextView stTemp;
+    private SmartStack stack;
     private ControlCenter cc;
 
     private final List<Pad> side = new ArrayList<>();
@@ -99,7 +100,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private final List<Cell> cells = new ArrayList<>();
     private final int[] widgetGlow = {0xFFFFC98A, 0xFF8AA0C0, DAY_GLOW};
     private List<AppRepo.App> apps = new ArrayList<>();
-    private AppRepo.App fyApp;
+    private MediaWatch.Playing playing;
+    private TextView tdKicker;
     private int zone = GRID, contentZone = GRID, sideAt, widgetAt, gridAt, lastCol = -1, lastHour = -1;
     private float scrollTarget;
     private ValueAnimator scrollAnim, wiggle;
@@ -174,6 +176,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         super.onCreate(state);
         Ui.init(this);
         prefs = getSharedPreferences("aura", MODE_PRIVATE);
+        // the TV's own city, if known, before anything asks the sun where it is
+        Weather.placeSun(this);
         tim = (TvInputManager) getSystemService(Context.TV_INPUT_SERVICE);
         buildUi();
         setContentView(root);
@@ -240,12 +244,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // it does no system lookups on its first frame
         handler.removeCallbacks(warmCc);
         handler.postDelayed(warmCc, 1500);
+        stack.start();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         resumed = false;
+        stack.stop();
+        stopPreview();
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
         handler.removeCallbacks(glintTick);
@@ -397,25 +404,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     /** What you'll probably watch: your usual for this hour, else the last thing you opened. */
     private void buildForYou() {
         fyW = new Widget(this, backdrop);
-        fyKicker = Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.24f);
-        fyW.addView(fyKicker, frame(WRAP, WRAP, Gravity.TOP | Gravity.START, Ui.dp(18), Ui.dp(18), 0, 0));
-        fyThumbHost = new FrameLayout(this);
-        fyThumbHost.setClipChildren(false);
-        fyW.addView(fyThumbHost, frame(Ui.dp(144), Ui.dp(81), Gravity.TOP | Gravity.START, Ui.dp(18), Ui.dp(44), 0, 0));
-        LinearLayout t = new LinearLayout(this);
-        t.setOrientation(LinearLayout.VERTICAL);
-        fyName = Ui.text(this, 18, Ui.heavy, 0xFFFFFFFF);
-        fyName.setIncludeFontPadding(true);
-        fyName.setLetterSpacing(-0.02f);
-        t.addView(fyName);
-        fySub = Ui.text(this, 10.5f, Ui.regular, 0xB3FFFFFF);
-        fySub.setSingleLine(false);
-        fySub.setMaxLines(3);
-        fySub.setLineSpacing(Ui.dpf(2), 1f);
-        t.addView(fySub, lp(MATCH, WRAP, 0, 5));
-        fyW.addView(t, frame(Ui.dp(126), WRAP, Gravity.TOP | Gravity.START, Ui.dp(176), Ui.dp(52), 0, 0));
+        stack = new SmartStack(this, 26);
+        stack.listener = s -> {
+            widgetGlow[1] = s.color;
+            if (getCurrentFocus() == fyW) bloom.setColor(s.color, 700);
+        };
+        fyW.addView(stack, match());
         fyW.onClick = () -> {
-            if (fyApp != null) launch(fyApp.launch, fyThumb != null ? fyThumb : fyW, fyApp.label);
+            SmartStack.Slide s = stack.current();
+            if (s != null && s.intent != null) launch(s.intent, fyW, s.label);
         };
         placeWidget(fyW, 1);
     }
@@ -424,9 +421,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void buildToday() {
         tdW = new Widget(this, backdrop);
         LinearLayout d = column(18, 18, 18, 16);
-        TextView k = Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.24f);
-        k.setText("TODAY");
-        d.addView(k);
+        tdKicker = Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.24f);
+        tdKicker.setText("TODAY");
+        tdKicker.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        d.addView(tdKicker, lp(MATCH, WRAP, 0, 0));
         tdValue = Ui.text(this, 30, Ui.heavy, 0xFFFFFFFF);
         tdValue.setIncludeFontPadding(true);
         tdValue.setLetterSpacing(-0.035f);
@@ -446,7 +444,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         memory = new Meter(this);
         d.addView(memory, lp(MATCH, Ui.dp(4), 0, 6));
         tdW.addView(d, match());
-        tdW.onClick = () -> openCc(false);
+        tdW.onClick = () -> {
+            if (playing == null) {
+                openCc(false);
+                return;
+            }
+            // play or pause whatever is playing, without leaving home
+            if (playing.playing) playing.controller.getTransportControls().pause();
+            else playing.controller.getTransportControls().play();
+            handler.postDelayed(() -> refreshWidgets(false), 400);
+        };
         placeWidget(tdW, 2);
     }
 
@@ -518,6 +525,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         sl.leftMargin = Ui.dp(14);
         sl.rightMargin = Ui.dp(14);
         r.addView(Ui.rule(this, 0x40FFFFFF), sl);
+        // the weather outside, once Open-Meteo has answered
+        stWx = ControlCenter.icon(this, R.drawable.ic_w_sun);
+        stWx.setColorFilter(0xFFFFFFFF);
+        stWx.setVisibility(View.GONE);
+        r.addView(stWx, new LinearLayout.LayoutParams(Ui.dp(16), Ui.dp(16)));
+        stTemp = Ui.text(this, 14, Ui.semibold, 0xE6FFFFFF);
+        stTemp.setVisibility(View.GONE);
+        LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(WRAP, WRAP);
+        tl.leftMargin = Ui.dp(7);
+        tl.rightMargin = Ui.dp(14);
+        r.addView(stTemp, tl);
         stTime = Ui.text(this, 14, Ui.bold, 0xFFFFFFFF);
         r.addView(stTime);
         status.addView(r, new FrameLayout.LayoutParams(WRAP, MATCH));
@@ -672,6 +690,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         String keep = gridAt < cells.size() ? cells.get(gridAt).tag : null;
         // on the first fill the window may already have parked focus on the rail; the grid takes it
         boolean firstFill = cells.isEmpty(), hadFocus = zone == GRID && getCurrentFocus() instanceof Card;
+        stopPreview();
         for (Cell c : cells) page.removeView(c);
         cells.clear();
         for (String[] in : live) {
@@ -679,6 +698,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             final Cell cell = new Cell(this, Tiles.input(this, label), 0xFF46D7C8, label, "input:" + id, TILE_W, TILE_H);
             cell.card.glass = backdrop;
             cell.card.onClick = () -> open(new Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(id)), cell.card);
+            // resting on a live source shows its picture, muted, inside the tile
+            cell.card.focusListener = chain(cell.card.focusListener, (card, gained) -> {
+                handler.removeCallbacks(startPreview);
+                if (gained) {
+                    previewId = id;
+                    previewCell = cell;
+                    handler.postDelayed(startPreview, 550);
+                } else {
+                    stopPreview();
+                }
+            });
             cells.add(cell);
         }
         List<String> order = AppRepo.dock(prefs, apps);
@@ -765,11 +795,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
             final Map<String, Float> s = score;
             final Object[] r = recent;
+            // what you're partway through outranks habits
+            final List<Continue.Item> cw = habits ? Continue.all(app, 4) : null;
             runOnUiThread(() -> {
                 if (isDestroyed()) return;
                 applySky(now, rise, set, up, next, phase);
                 applyToday(today, top);
-                if (s != null) applyForYou(s, r, now);
+                if (s != null) applyStack(cw, s, r, top, now);
             });
         });
     }
@@ -806,7 +838,29 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     private void applyToday(long today, String top) {
-        if (today < 0) {
+        // something playing (or paused) takes the widget over: title, who, and OK plays or pauses
+        playing = MediaWatch.now(this);
+        if (playing != null) {
+            AppRepo.App owner = find(playing.pkg);
+            tdKicker.setText(("NOW PLAYING" + (owner != null ? "  ·  " + owner.label : "")).toUpperCase(Locale.getDefault()));
+            // a title gets two lines rather than being cut short
+            tdValue.setSingleLine(false);
+            tdValue.setMaxLines(2);
+            tdValue.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            tdValue.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+            tdValue.setLineSpacing(0, 1f);
+            tdValue.setText(playing.title);
+            tdSub.setText(playing.playing ? (playing.by != null ? playing.by : "Playing") : "Paused" + (playing.by != null ? "  ·  " + playing.by : ""));
+            widgetGlow[2] = owner != null ? owner.color : DAY_GLOW;
+        } else {
+            tdKicker.setText("TODAY");
+            tdValue.setSingleLine(true);
+            tdValue.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 30);
+            widgetGlow[2] = DAY_GLOW;
+        }
+        if (playing != null) {
+            // memory still shows below
+        } else if (today < 0) {
             tdValue.setText("–");
             tdSub.setText("Usage access is off");
         } else {
@@ -821,48 +875,71 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tdMem.setText(mi.availMem / (1024 * 1024) + " MB free");
     }
 
-    /** Your usual for this hour if one app clearly owns it, else whatever you opened last, else your first app. */
-    private void applyForYou(Map<String, Float> score, Object[] recent, long now) {
-        AppRepo.App pick = null;
-        String kicker, sub;
+    /**
+     * The smart stack's cards, most useful first: everything you're partway through, your usual
+     * app for this hour, what you opened last, and what you've watched most today.
+     */
+    private void applyStack(List<Continue.Item> cw, Map<String, Float> score, Object[] recent, String top, long now) {
+        List<SmartStack.Slide> out = new ArrayList<>();
+        Set<String> used = new HashSet<>();
+        for (Continue.Item it : cw) {
+            SmartStack.Slide s = new SmartStack.Slide();
+            AppRepo.App owner = it.pkg == null ? null : find(it.pkg);
+            s.kicker = "CONTINUE WATCHING" + (owner != null ? "  ·  " + owner.label.toUpperCase(Locale.getDefault()) : "");
+            s.title = it.title;
+            s.sub = it.sub;
+            s.art = it.art;
+            s.progress = it.progress;
+            s.intent = it.intent;
+            s.label = it.title;
+            if (owner != null) {
+                s.color = owner.color;
+                if (s.art == null) s.mark = Tiles.glass(owner);
+            }
+            out.add(s);
+        }
+        AppRepo.App usual = null;
         float best = 1.2f; // about two recent visits at this hour before it counts as a habit
         for (Map.Entry<String, Float> e : score.entrySet()) {
             AppRepo.App a = watchable(e.getKey()) ? find(e.getKey()) : null;
             if (a != null && e.getValue() > best) {
                 best = e.getValue();
-                pick = a;
+                usual = a;
             }
         }
-        if (pick != null) {
+        if (usual != null) {
             Calendar c = Calendar.getInstance();
             String hour = DateFormat.is24HourFormat(this) ? c.get(Calendar.HOUR_OF_DAY) + ":00"
                     : (c.get(Calendar.HOUR) == 0 ? 12 : c.get(Calendar.HOUR)) + (c.get(Calendar.AM_PM) == Calendar.AM ? " AM" : " PM");
-            kicker = "YOUR " + hour + " USUAL";
-            sub = "You tend to open it around this time";
-        } else if (recent != null && find((String) recent[0]) != null) {
-            pick = find((String) recent[0]);
-            kicker = "JUMP BACK IN";
-            sub = "Opened " + Habits.ago(now - (Long) recent[1]);
-        } else {
-            for (Cell c : cells) {
-                if (watchable(c.tag) && (pick = find(c.tag)) != null) break;
-            }
-            if (pick == null) return;
-            kicker = "START WITH";
-            sub = "First in your apps";
+            out.add(appSlide(usual, "YOUR " + hour + " USUAL", "You tend to open it around this time"));
+            used.add(usual.pkg);
         }
-        fyKicker.setText(kicker);
-        fySub.setText(sub);
-        widgetGlow[1] = pick.color;
-        boolean same = fyApp != null && fyApp.pkg.equals(pick.pkg) && fyThumb != null;
-        fyApp = pick;
-        if (same) return;
-        Ui.fit(fyName, pick.label, Ui.dp(126), 18, 12);
-        fyThumbHost.removeAllViews();
-        fyThumb = new Card(this, Tiles.app(pick), pick.color, 11);
-        fyThumb.lift = false;
-        fyThumb.setFocusable(false);
-        fyThumbHost.addView(fyThumb, match());
+        AppRepo.App last = recent != null ? find((String) recent[0]) : null;
+        if (last != null && used.add(last.pkg)) out.add(appSlide(last, "JUMP BACK IN", "Opened " + Habits.ago(now - (Long) recent[1])));
+        AppRepo.App most = top != null && watchable(top) ? find(top) : null;
+        if (most != null && used.add(most.pkg)) out.add(appSlide(most, "MOST WATCHED TODAY", "Where most of today's screen time went"));
+        if (out.isEmpty()) {
+            for (Cell cell : cells) {
+                AppRepo.App a = watchable(cell.tag) ? find(cell.tag) : null;
+                if (a != null) {
+                    out.add(appSlide(a, "START WITH", "First in your apps"));
+                    break;
+                }
+            }
+        }
+        stack.setSlides(out);
+    }
+
+    private SmartStack.Slide appSlide(AppRepo.App a, String kicker, String sub) {
+        SmartStack.Slide s = new SmartStack.Slide();
+        s.kicker = kicker;
+        s.title = a.label;
+        s.sub = sub;
+        s.mark = Tiles.glass(a);
+        s.color = a.color;
+        s.intent = a.launch;
+        s.label = a.label;
+        return s;
     }
 
     /** Settings and the like are tools, not something to suggest watching. */
@@ -890,9 +967,43 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         cells.get(gridAt).card.requestFocus();
     }
 
-    /** The first row shares the screen with the widgets; deeper rows settle on one steady line. */
-    private static float scrollFor(int row) {
-        return row == 0 ? 0 : GRID_Y + row * ROW_H - FOCUS_LINE;
+    /**
+     * The first row shares the screen with the widgets; deeper rows settle on one steady line,
+     * but never past the point where the last row sits at the bottom: no empty screen below it.
+     */
+    private float scrollFor(int row) {
+        if (row == 0) return 0;
+        int rows = (cells.size() + COLS - 1) / COLS;
+        float screen = root.getHeight() > 0 ? root.getHeight() / Ui.density : 540f;
+        float end = GRID_Y + (rows - 1) * ROW_H + TILE_H + 44 - screen; // last row and its name in view
+        return Math.max(0, Math.min(GRID_Y + row * ROW_H - FOCUS_LINE, end));
+    }
+
+    private ValueAnimator bounceAnim;
+
+    /**
+     * The end of the apps: the page gives a little, then springs back, so the edge is felt rather
+     * than met with nothing. Only the page's position moves, exactly as when scrolling.
+     */
+    private void bounce(boolean vertical) {
+        if (bounceAnim != null && bounceAnim.isRunning()) return;
+        final View target = vertical ? page : cells.get(gridAt).card;
+        final float base = vertical ? -Ui.dpf(scrollTarget) : 0f, reach = Ui.dpf(vertical ? -16 : 10);
+        bounceAnim = ValueAnimator.ofFloat(0f, 1f);
+        bounceAnim.setDuration(520);
+        bounceAnim.addUpdateListener(a -> {
+            float t = a.getAnimatedFraction();
+            // a quick push out, then a damped spring home
+            float k = t < 0.22f ? t / 0.22f : (float) (Math.exp(-6 * (t - 0.22f)) * Math.cos(9 * (t - 0.22f)));
+            if (vertical) {
+                page.setTranslationY(base + reach * k);
+                for (Widget w : widgets) if (w.getAlpha() > 0f) w.invalidate();
+                for (Cell c : cells) c.card.invalidate();
+            } else {
+                target.setTranslationX(reach * k);
+            }
+        });
+        bounceAnim.start();
     }
 
     private void scrollTo(float target) {
@@ -937,8 +1048,66 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return lastCol >= 0 && widgetForCol(lastCol) == w ? lastCol : new int[]{0, 2, 4}[w];
     }
 
+    // ---- live preview of a connected source ------------------------------------------------
+
+    private android.media.tv.TvView preview;
+    private String previewId;
+    private Cell previewCell;
+    private final Runnable startPreview = this::startPreview;
+
+    private static Card.FocusListener chain(Card.FocusListener a, Card.FocusListener b) {
+        return (card, gained) -> {
+            if (a != null) a.onFocus(card, gained);
+            b.onFocus(card, gained);
+        };
+    }
+
+    /**
+     * A TvView tuned to the input's passthrough channel, muted, laid over the focused tile a few
+     * dp inside its glass. It exists only while the tile has focus, so it costs nothing otherwise.
+     */
+    private void startPreview() {
+        if (!resumed || ccOpen || photo || previewCell == null || !previewCell.card.isFocused()) return;
+        stopPreview();
+        int i = cells.indexOf(previewCell);
+        if (i < 0) return;
+        float inset = Ui.dpf(6);
+        preview = new android.media.tv.TvView(this);
+        preview.setZOrderMediaOverlay(true);
+        preview.setStreamVolume(0f);
+        preview.setAlpha(0f);
+        preview.setCallback(new android.media.tv.TvView.TvInputCallback() {
+            @Override
+            public void onVideoAvailable(String inputId) {
+                if (preview != null) preview.animate().alpha(1f).setStartDelay(0).setDuration(380).setInterpolator(Ui.SOFT).start();
+            }
+
+            @Override
+            public void onVideoUnavailable(String inputId, int reason) {
+                if (preview != null) preview.animate().alpha(0f).setStartDelay(0).setDuration(200).start();
+            }
+        });
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.round(Ui.dpf(TILE_W) - 2 * inset), Math.round(Ui.dpf(TILE_H) - 2 * inset));
+        preview.setTranslationX(cellX(i) + inset);
+        preview.setTranslationY(cellY(i) + inset);
+        // match the focused tile's lift
+        preview.setScaleX(1.1f);
+        preview.setScaleY(1.1f);
+        page.addView(preview, lp);
+        preview.tune(previewId, TvContract.buildChannelUriForPassthroughInput(previewId));
+    }
+
+    private void stopPreview() {
+        handler.removeCallbacks(startPreview);
+        if (preview == null) return;
+        preview.reset();
+        page.removeView(preview);
+        preview = null;
+    }
+
     private void onFocusMoved(View n) {
         if (n == null || ccOpen) return;
+        stack.hold(n == fyW); // the card you're looking at stays put
         int i = side.indexOf(n);
         if (i >= 0) {
             zone = SIDE;
@@ -1032,8 +1201,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private void setPhoto(boolean on) {
         if (photo == on) return;
+        stack.hold(on || getCurrentFocus() == fyW); // nothing changes behind the title card
         photo = on;
         if (on) {
+            stopPreview();
             racked = true;
             backdrop.setDefocus(0f, 2000);
             bloom.setStrength(0f, 2000);
@@ -1118,6 +1289,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                         break;
                     case KeyEvent.KEYCODE_DPAD_RIGHT:
                         if (col < COLS - 1 && gridAt + 1 < n) focusGrid(gridAt + 1);
+                        else if (!held && gridAt == n - 1) bounce(false);
                         break;
                     case KeyEvent.KEYCODE_DPAD_UP:
                         if (row > 0) focusGrid(gridAt - COLS);
@@ -1129,6 +1301,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     default:
                         if (gridAt + COLS < n) focusGrid(gridAt + COLS);
                         else if (row < (n - 1) / COLS) focusGrid(n - 1);
+                        else if (!held) bounce(true);
                         break;
                 }
                 return true;
@@ -1239,7 +1412,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         List<String[]> out = new ArrayList<>();
         if (tim == null) return out;
         for (TvInputInfo info : tim.getTvInputList()) {
-            if (info.getType() != TvInputInfo.TYPE_HDMI || info.isHidden(this)) continue;
+            // digital sources only: composite (AV) ports report "connected" even with nothing playing
+            int type = info.getType();
+            boolean digital = type == TvInputInfo.TYPE_HDMI || type == TvInputInfo.TYPE_DVI
+                    || type == TvInputInfo.TYPE_DISPLAY_PORT || type == TvInputInfo.TYPE_COMPONENT;
+            if (!digital || info.isHidden(this)) continue;
             if (tim.getInputState(info.getId()) != TvInputManager.INPUT_STATE_CONNECTED) continue;
             CharSequence custom = info.loadCustomLabel(this);
             String label = String.valueOf(custom != null && custom.length() > 0 ? custom : info.loadLabel(this));
@@ -1272,6 +1449,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void openCc(boolean inputs) {
         if (ccOpen) return;
         if (editing) stopEdit();
+        stopPreview();
         beforeCc = getCurrentFocus();
         hideTip();
         ccOpen = true;
@@ -1331,7 +1509,24 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // the sky and your day every minute; habits only when the hour turns
         refreshWidgets(hour != lastHour);
         watchSky();
+        showWeather();
+        if (resumed) {
+            final Context app = getApplicationContext();
+            worker.execute(() -> {
+                if (Weather.refresh(app)) runOnUiThread(this::showWeather);
+            });
+        }
         lastHour = hour;
+    }
+
+    private void showWeather() {
+        Weather.Now w = Weather.now(this);
+        if (w == null) return;
+        stWx.setImageResource(w.icon());
+        stTemp.setText(w.temp + "°");
+        stWx.setVisibility(View.VISIBLE);
+        stTemp.setVisibility(View.VISIBLE);
+        story.weather(w);
     }
 
     private void refreshStatus() {

@@ -147,7 +147,7 @@ final class Tiles {
     static Painter input(Context ctx, String label) {
         return (c, w, h) -> {
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            Drawable d = ctx.getDrawable(R.drawable.ic_hdmi).mutate();
+            Drawable d = ctx.getDrawable(label.startsWith("HDMI") ? R.drawable.ic_hdmi : R.drawable.ic_av).mutate();
             d.setTint(0xFFFFFFFF);
             int s = Math.round(h * 0.30f), x = Math.round(w * 0.09f), y = Math.round(h * 0.22f);
             d.setBounds(x, y, x + s, y + s);

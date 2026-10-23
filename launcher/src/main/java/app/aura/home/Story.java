@@ -43,8 +43,15 @@ final class Story extends FrameLayout implements Backdrop.Tick {
         // shadows: this TV blurs shadowed glyphs on the CPU every frame (~15 ms for this card).
         addView(shade(GradientDrawable.Orientation.BOTTOM_TOP, 0x99000000),
                 new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(300), Gravity.BOTTOM));
-        addView(shade(GradientDrawable.Orientation.TR_BL, 0x73000000),
-                new FrameLayout.LayoutParams(Ui.dp(420), Ui.dp(200), Gravity.TOP | Gravity.END));
+        // behind the clock: a soft round glow from the corner, so no edge of it ever shows
+        View corner = new View(c);
+        GradientDrawable glow = new GradientDrawable();
+        glow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        glow.setColors(new int[]{0x80000000, 0x40000000, 0x00000000});
+        glow.setGradientCenter(1f, 0f);
+        glow.setGradientRadius(Ui.dpf(360));
+        corner.setBackground(glow);
+        addView(corner, new FrameLayout.LayoutParams(Ui.dp(420), Ui.dp(300), Gravity.TOP | Gravity.END));
 
         clock = new LinearLayout(c);
         clock.setOrientation(LinearLayout.VERTICAL);
@@ -141,7 +148,15 @@ final class Story extends FrameLayout implements Backdrop.Tick {
             s.setSpan(new RelativeSizeSpan(0.42f), t.length(), s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             time.setText(s);
         }
-        date.setText(new SimpleDateFormat("EEEE  ·  d MMMM", Locale.getDefault()).format(now.getTime()).toUpperCase(Locale.getDefault()));
+        date.setText(new SimpleDateFormat("EEEE  ·  d MMMM", Locale.getDefault()).format(now.getTime()).toUpperCase(Locale.getDefault())
+                + weatherLine);
+    }
+
+    private String weatherLine = "";
+
+    /** "31° · CLEAR · JODHPUR" under the date. */
+    void weather(Weather.Now w) {
+        weatherLine = w == null ? "" : ("  ·  " + w.temp + "°  ·  " + w.condition()).toUpperCase(Locale.getDefault());
     }
 
     /** A new photograph: with {@code animate}, the old story lifts away as the new one rises in. */

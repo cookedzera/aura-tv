@@ -543,7 +543,10 @@ final class ControlCenter {
             final String oth = after > 0 ? (up ? "↑ " : "↓ ") + tf.format(new Date(after)).toUpperCase(Locale.getDefault()) : "";
             final String day = today >= 0 ? compact(today) : "–";
             int fresh = Daily.walls(act).size();
-            final String line = "Photos follow the " + ph.toLowerCase(Locale.ROOT) + " outside."
+            Weather.Now wx = Weather.now(act);
+            String outside = wx == null ? "" : wx.temp + "° and " + wx.condition().toLowerCase(Locale.ROOT)
+                    + (wx.city.isEmpty() ? "" : " in " + wx.city) + ". ";
+            final String line = outside + "Photos follow the " + ph.toLowerCase(Locale.ROOT) + " outside."
                     + (fresh > 0 ? "\n" + fresh + (fresh == 1 ? " fresh photo" : " fresh photos") + " from Wikimedia's Picture of the Day." : "")
                     + (today >= 0 ? "\n" + Habits.duration(today) + " in apps today." : "");
             preparePick();

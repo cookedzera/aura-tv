@@ -25,6 +25,10 @@ if (((& $adb -s $Tv get-state 2>&1) -join '') -notmatch 'device') { throw "TV $T
 # Control Center's Wi-Fi sheet: Android shows nearby networks only to apps with location access,
 # and only while location services are on (the TV has no GPS; this is Wi-Fi/network location)
 & $adb -s $Tv shell pm grant app.aura.home android.permission.ACCESS_FINE_LOCATION
+# Now Playing: Android shares media sessions only with approved notification listeners
+& $adb -s $Tv shell cmd notification allow_listener app.aura.home/app.aura.home.MediaWatch
+# Continue Watching reads Android TV's Watch Next list
+& $adb -s $Tv shell pm grant app.aura.home android.permission.READ_TV_LISTINGS
 # Test it before relying on it: on the Acer DIX41RKF, Google Play services switched location back off
 # within a minute and Wi-Fi dropped each time, so that TV keeps it off (the sheet still toggles Wi-Fi,
 # disconnects/reconnects, and hands "Other networks" to the system picker).

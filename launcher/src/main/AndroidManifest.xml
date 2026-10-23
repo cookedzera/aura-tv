@@ -8,6 +8,8 @@
     <!-- the Wi-Fi sheet: join, leave and switch networks; Android only lists nearby networks to apps with location -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Continue Watching: read Android TV's Watch Next list (granted at setup) -->
+    <uses-permission android:name="android.permission.READ_TV_LISTINGS" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <!-- usage history for For You and Today; activated once over ADB with "appops set ... GET_USAGE_STATS allow" -->
@@ -67,6 +69,17 @@
         </receiver>
 
         <receiver android:name=".SleepReceiver" android:exported="false" />
+
+        <!-- Now Playing: approved over ADB as a notification listener so Android shares media sessions -->
+        <service
+            android:name=".MediaWatch"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".DailyJob"

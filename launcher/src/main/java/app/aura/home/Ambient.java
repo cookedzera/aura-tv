@@ -26,6 +26,7 @@ public class Ambient extends DreamService implements Backdrop.Listener {
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
         Ui.init(this);
+        Weather.placeSun(this);
         setInteractive(false);
         setFullscreen(true);
         FrameLayout root = new FrameLayout(this);
@@ -50,6 +51,7 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         backdrop.start();
         registerReceiver(tick, new IntentFilter(Intent.ACTION_TIME_TICK));
         ticking = true;
+        story.weather(Weather.now(this));
         story.tick(Calendar.getInstance());
         story.reveal(1400);
     }
