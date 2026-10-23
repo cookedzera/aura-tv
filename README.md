@@ -11,6 +11,7 @@
   <img alt="Android TV 8.0+" src="https://img.shields.io/badge/Android%20TV-8.0%2B-0d1630?style=flat-square&labelColor=05070c">
   <img alt="60 fps" src="https://img.shields.io/badge/frames-60%20fps-ffa65c?style=flat-square&labelColor=05070c">
   <img alt="No Gradle" src="https://img.shields.io/badge/build-no%20Gradle%2C%20no%20AndroidX-fff0c8?style=flat-square&labelColor=05070c">
+  <img alt="2.8 MB" src="https://img.shields.io/badge/APK-2.8%20MB-c9b6ff?style=flat-square&labelColor=05070c">
   <img alt="MIT" src="https://img.shields.io/badge/license-MIT-7fb2ff?style=flat-square&labelColor=05070c">
 </p>
 
@@ -41,7 +42,12 @@ tinted in the app's colour. Logos that can't be lifted keep their icon, on glass
 hour, what you opened last, and what you've watched most today. It holds still while you look at it.
 
 **Sky and Today.** *Sky* draws the sun on its arc with the next sunset, for your city. *Today* shows
-time in apps and free memory, and turns into **Now Playing** (OK plays or pauses) while something plays.
+time in apps, the internet you've used today (handy on a phone's hotspot) and free memory, and turns
+into **Now Playing** (OK plays or pauses) while something plays.
+
+**Yours to arrange.** Hold <kbd>OK</kbd> on an app for a small glass menu: move it, hide it, open its
+info or uninstall it. Hold it on a widget to move it along the row or hide it; the others widen to
+fill its place.
 
 **Live previews.** Rest on a switched-on HDMI source and its picture appears inside the tile, muted.
 
@@ -74,8 +80,9 @@ and sound settings, a memory boost and standby.
 **Tonight's pick** puts a top-rated show beside the clock (from TVmaze); OK finds its trailer.
 **Gentle Sleep** fades the volume over the timer's last minute, then puts the TV to standby.
 **Live Inputs** turns a set-top box or console that just switched on into the first tile.
-**Settings**, from the sidebar: glass or original tiles, app names, hidden apps, the stack,
-weather city, and switches for every extra.
+**Settings**, from the sidebar: glass or original tiles, app names, widgets, a **pure black**
+wallpaper for OLED screens, weather city, hidden apps, switches for every extra, and **Updates**,
+which installs new releases from GitHub in place (Android asks you to confirm).
 
 </td>
 <td width="58%"><img src="docs/control-center.png" alt="Control Center"></td>
@@ -89,7 +96,7 @@ weather city, and switches for every extra.
 <td width="58%"><img src="docs/photo-mode.png" alt="Photo mode showing a Picture of the Day"></td>
 <td>
 
-Aura ships with 23 hand-picked landscapes and adds **Wikimedia Commons' Picture of the Day** in the
+Aura ships with 10 hand-picked landscapes, one for every light, and adds **Wikimedia Commons' Picture of the Day** in the
 background: wide, high-resolution, properly licensed, no account and no API key. Each one arrives
 with its title, a line about it, the photographer and the licence.
 
@@ -101,7 +108,8 @@ dark, golden hour at dusk. When the light turns (first light, sunrise, golden ho
 with the phone's camera, pick photos or GIFs in the page that opens, and they land on the wall a
 moment later. No app, no account and no cloud: Aura runs a tiny web server only while that code is
 on screen, reachable only on your network through a one-time link. Portrait shots are framed whole on a
-blurred copy of themselves, GIFs play, and a switch shows only your photos.
+blurred copy of themselves, GIFs play, and a switch shows only your photos. Remove any of them from
+the TV (*Your photos*) or from the phone's page.
 
 Leave the TV for a while and the photograph sharpens into **photo mode**; the screensaver uses the
 same story card, with the time and the weather.
@@ -138,7 +146,7 @@ same story card, with the time and the weather.
 |---|---|
 | <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> | Move through your apps · up from the top row reaches the widgets · left reaches the sidebar |
 | <kbd>OK</kbd> | Open |
-| hold <kbd>OK</kbd> | The app's menu: **Move** (the arrows carry it, <kbd>OK</kbd> saves), **Hide from home**, **App info**, **Uninstall** |
+| hold <kbd>OK</kbd> | On an app: **Move** (the arrows carry it, <kbd>OK</kbd> saves), **Hide from home**, **App info**, **Uninstall** · on a widget: **Move left / right**, **Hide** |
 | <kbd>Back</kbd> | From lower rows, jump to the top · from the sidebar, return to the apps |
 | <kbd>Menu</kbd> | Control Center |
 
@@ -170,7 +178,8 @@ first run), or take `Aura.apk` from [Releases](../../releases/latest) and save i
 ```
 
 **4 &nbsp;·&nbsp; Make it home.** This also approves what the extras need: usage history (Smart
-Stack, Today), the TV listings (Continue Watching), media sessions (Now Playing) and Wi-Fi control.
+Stack, Today), the TV listings (Continue Watching), media sessions (Now Playing), Wi-Fi control and
+installing updates.
 Add `-NearbyWifi` to list nearby networks too, which turns on location services.
 
 ```powershell
@@ -214,7 +223,8 @@ re-enables every package, restores your settings, hands Home back and uninstalls
 <summary><b>Under the hood</b></summary>
 <br>
 
-- Plain Java on the Android framework, minSdk 26, about 13&nbsp;MB, almost all of it photographs.
+- Plain Java on the Android framework, minSdk 26, a 2.8&nbsp;MB APK: ten photographs at about
+  250&nbsp;KB each and Inter cut down to the Latin it needs, its weight and size axes intact.
 - Remote input is routed by hand: grid maths for the apps, geometry for Control Center. Held keys
   step at a steady pace instead of queueing, and holding <kbd>OK</kbd> is timed from the press, so
   it works with IR remotes that barely repeat.

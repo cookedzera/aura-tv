@@ -50,7 +50,13 @@ final class SettingsPanel {
     private final ScrollView scroll;
     private final TextView title, note;
     private final EditText city;
-    private boolean appsPage, dropPage, confirmClear;
+    /** The page on show: "" for the main list, else "apps", "widgets", "wallpaper", "drop" or "updates". */
+    private String page = "";
+    private boolean confirmClear;
+    /** The photo whose removal waits for a second OK. */
+    private String confirmPhoto;
+    private Updater.Release release;
+    private String updateState = "", updateNote = "";
     private Drop drop;
     private View dropCard;
     private TextView dropTitle, dropSub;
@@ -133,8 +139,7 @@ final class SettingsPanel {
     }
 
     void open() {
-        appsPage = false;
-        dropPage = false;
+        page = "";
         build();
         panel.setVisibility(View.VISIBLE);
         panel.setAlpha(0f);
@@ -157,20 +162,35 @@ final class SettingsPanel {
             build();
             return true;
         }
-        if (appsPage) {
-            appsPage = false;
-            build();
-            if (rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
+        if (page.equals("photos")) {
+            // the photo list sits under From your phone, whose code stays on
+            confirmPhoto = null;
+            // the "Your photos" row is gone once the last one is removed: focus the first row instead
+            go("drop");
+            focusTag("photos");
             return true;
         }
-        if (dropPage) {
-            stopDrop();
-            dropPage = false;
+        if (!page.isEmpty()) {
+            String was = page;
+            if (was.equals("drop")) stopDrop();
+            page = "";
             build();
-            focusTag("drop");
+            // back on the main list, on the row that led to the page
+            focusTag(was.equals("apps") ? "hidden" : was);
             return true;
         }
         return false;
+    }
+
+    private void go(String p) {
+        page = p;
+        build();
+        for (int i = 0; i < rows.getChildCount(); i++) {
+            if (rows.getChildAt(i).isFocusable()) {
+                rows.getChildAt(i).requestFocus();
+                break;
+            }
+        }
     }
 
     // ---- pages -------------------------------------------------------------------------------
@@ -178,7 +198,8 @@ final class SettingsPanel {
     private void build() {
         String keep = focusedTag();
         rows.removeAllViews();
-        if (appsPage) {
+        note.setMaxLines(page.equals("updates") ? 10 : 4);
+        if (page.equals("apps")) {
             Ui.fit(title, "Apps", Ui.dp(300), 52, 30);
             note.setText("Hidden apps leave your grid. They stay installed, and you can bring them back here.");
             for (AppRepo.App a : host.apps()) {
@@ -189,7 +210,62 @@ final class SettingsPanel {
                     build();
                 });
             }
-        } else if (dropPage) {
+        } else if (page.equals("widgets")) {
+            Ui.fit(title, "Widgets", Ui.dp(300), 52, 30);
+            note.setText("Hide the ones you don't use and the rest widen to fill the row. Holding OK on a widget moves or hides it too.");
+            java.util.Set<String> hidden = Prefs.hiddenWidgets(act);
+            for (int i : Prefs.widgetOrder(act)) {
+                String id = HomeActivity.WIDGET_IDS[i];
+                add(HomeActivity.WIDGET_NAMES[i], hidden.contains(id) ? "Hidden" : "Shown", "w:" + id, () -> {
+                    boolean hide = !Prefs.hiddenWidgets(act).contains(id);
+                    // one always stays: an empty row would leave a hole above your apps
+                    if (hide && Prefs.hiddenWidgets(act).size() >= HomeActivity.WIDGET_IDS.length - 1) {
+                        host.hud(R.drawable.ic_info, "Keep at least one widget");
+                        return;
+                    }
+                    Prefs.hideWidget(act, id, hide);
+                    host.applied("widgets");
+                    build();
+                });
+            }
+            toggle("Stack pages", Prefs.STACK_AUTO, "Turn on their own", "Stay put", "stack");
+            add("Original order", "", "w:reset", () -> {
+                Prefs.setWidgetOrder(act, java.util.Arrays.asList(0, 1, 2));
+                host.applied("widgets");
+                build();
+            });
+        } else if (page.equals("wallpaper")) {
+            Ui.fit(title, "Wallpaper", Ui.dp(300), 52, 30);
+            note.setText("Photographs that follow the sky, or pure black: on an OLED screen almost every pixel stays off, and the screensaver becomes a drifting clock.");
+            toggle("Wallpaper", Prefs.BLACK, "Pure black", "Photographs", "photos");
+            if (!Prefs.on(act, Prefs.BLACK)) {
+                toggle("Picture of the Day", Prefs.DAILY, "On", "Off", "daily");
+                toggle("Sky moments", Prefs.MOMENTS, "On", "Off", "moments");
+            }
+        } else if (page.equals("updates")) {
+            Ui.fit(title, "Updates", Ui.dp(300), 52, 30);
+            String mine = Updater.installed(act);
+            switch (updateState) {
+                case "checking":
+                    note.setText("Looking for a newer Aura on GitHub…");
+                    break;
+                case "available":
+                case "downloading":
+                    note.setText("Aura " + release.version + " is out.\n\n" + release.notes);
+                    break;
+                case "error":
+                    note.setText(updateNote);
+                    break;
+                default:
+                    note.setText("You have the latest Aura. Updates come from the project's releases on GitHub.");
+            }
+            add("Installed", mine, "u:mine", () -> { });
+            if (release != null && (updateState.equals("available") || updateState.equals("downloading"))) {
+                add("Install " + release.version, updateState.equals("downloading") ? updateNote
+                        : String.format(java.util.Locale.ROOT, "%.1f MB", release.size / 1048576f), "u:install", this::installUpdate);
+            }
+            if (!updateState.equals("checking") && !updateState.equals("downloading")) add("Check again", "", "u:check", this::checkUpdate);
+        } else if (page.equals("drop")) {
             Ui.fit(title, "From your phone", Ui.dp(300), 52, 30);
             note.setText("Point your phone's camera at the code, then choose photos or GIFs. They land on your wall and stay on the TV.");
             LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200));
@@ -197,15 +273,43 @@ final class SettingsPanel {
             rows.addView(dropCard, cl);
             toggle("Show", Prefs.MINE_ONLY, "Only your photos", "Everything", "photos");
             int n = Mine.count(act);
-            if (n > 0) add("Remove your photos", confirmClear ? "Press OK again" : n + (n == 1 ? " photo" : " photos"), "clear", () -> {
+            if (n > 0) add("Your photos", n + " on the TV", "photos", () -> {
+                confirmPhoto = null;
+                confirmClear = false;
+                go("photos");
+            });
+        } else if (page.equals("photos")) {
+            Ui.fit(title, "Your photos", Ui.dp(300), 52, 30);
+            note.setText("Everything sent from your phone. OK on one removes it, after a second OK to be sure.");
+            org.json.JSONArray list = Mine.list(act);
+            for (int i = 0; i < list.length(); i++) {
+                org.json.JSONObject o = list.optJSONObject(i);
+                final String id = o.optString("id");
+                add(o.optString("title") + (o.optBoolean("gif") ? "  ·  GIF" : ""), id.equals(confirmPhoto) ? "Press OK again" : "Remove",
+                        "p:" + id, android.graphics.BitmapFactory.decodeFile(Mine.thumb(act, id).getPath()), () -> {
+                            if (!id.equals(confirmPhoto)) {
+                                confirmPhoto = id;
+                                build();
+                                return;
+                            }
+                            confirmPhoto = null;
+                            Mine.remove(act, id);
+                            host.applied("photos");
+                            build();
+                            if (Mine.count(act) == 0) back();
+                            else if (act.getCurrentFocus() == null || act.getCurrentFocus().getParent() != rows) go("photos");
+                        });
+            }
+            if (list.length() > 1) add("Remove all", confirmClear ? "Press OK again" : list.length() + " photos", "clear", () -> {
                 if (!confirmClear) {
                     confirmClear = true;
-                } else {
-                    confirmClear = false;
-                    Mine.clear(act);
-                    host.applied("photos");
+                    build();
+                    return;
                 }
-                build();
+                confirmClear = false;
+                Mine.clear(act);
+                host.applied("photos");
+                back();
             });
         } else {
             Ui.fit(title, "Settings", Ui.dp(300), 52, 30);
@@ -213,12 +317,12 @@ final class SettingsPanel {
             note.setText("Changes apply at once. Everything here can be undone the same way.");
             toggle("Tiles", Prefs.GLASS_TILES, "Glass", "Original banners", "tiles");
             toggle("App names", Prefs.NAMES_ALWAYS, "Always", "On focus", "names");
-            toggle("Smart Stack", Prefs.STACK_AUTO, "Changes on its own", "Stays put", "stack");
-            toggle("Sky moments", Prefs.MOMENTS, "On", "Off", "moments");
-            toggle("Tonight's pick", Prefs.PICKS, "On", "Off", "picks");
-            toggle("Picture of the Day", Prefs.DAILY, "On", "Off", "daily");
+            int hiddenW = Prefs.hiddenWidgets(act).size();
+            add("Widgets", hiddenW == 0 ? "All shown" : (3 - hiddenW) + " of 3 shown", "widgets", () -> go("widgets"));
+            add("Wallpaper", Prefs.on(act, Prefs.BLACK) ? "Pure black" : "Photographs", "wallpaper", () -> go("wallpaper"));
             int mine = Mine.count(act);
             add("From your phone", mine > 0 ? mine + (mine == 1 ? " photo" : " photos") : "Photos and GIFs", "drop", this::openDrop);
+            toggle("Tonight's pick", Prefs.PICKS, "On", "Off", "picks");
             toggle("Weather", Prefs.WEATHER, "On", "Off", "weather");
             boolean manual = Prefs.of(act).getBoolean("geo_manual", false);
             String place = w != null && !w.city.isEmpty() ? w.city : "Not found yet";
@@ -228,10 +332,10 @@ final class SettingsPanel {
                 host.applied("weather");
                 build();
             });
-            add("Hidden apps", String.valueOf(Prefs.hidden(act).size()), "hidden", () -> {
-                appsPage = true;
-                build();
-                if (rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
+            add("Hidden apps", String.valueOf(Prefs.hidden(act).size()), "hidden", () -> go("apps"));
+            add("Updates", "Version " + Updater.installed(act), "updates", () -> {
+                go("updates");
+                checkUpdate();
             });
             add("Android settings", "", "android", () -> host.open(new Intent(Settings.ACTION_SETTINGS), panel));
         }
@@ -254,8 +358,74 @@ final class SettingsPanel {
 
     // ---- from your phone ---------------------------------------------------------------------
 
+    // ---- updates ------------------------------------------------------------------------------
+
+    private void checkUpdate() {
+        updateState = "checking";
+        build();
+        new Thread(() -> {
+            Updater.Release r = null;
+            String state;
+            try {
+                r = Updater.latest();
+                state = r != null && Updater.newer(r.version, Updater.installed(act)) ? "available" : "latest";
+            } catch (Exception e) {
+                state = "error";
+            }
+            final Updater.Release found = r;
+            final String s = state;
+            act.runOnUiThread(() -> {
+                release = found;
+                updateState = s;
+                updateNote = "Couldn't reach GitHub. Check the connection, then try again.";
+                if (page.equals("updates")) build();
+            });
+        }, "update-check").start();
+    }
+
+    private void installUpdate() {
+        if (release == null || updateState.equals("downloading")) return;
+        if (!Updater.allowed(act)) {
+            // Android asks once whether Aura may install apps
+            try {
+                act.startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        android.net.Uri.parse("package:" + act.getPackageName())));
+            } catch (RuntimeException e) {
+                host.hud(R.drawable.ic_info, "Allow Aura to install apps: Settings, Apps, Special app access");
+            }
+            return;
+        }
+        final Updater.Release r = release;
+        updateState = "downloading";
+        updateNote = "Starting…";
+        build();
+        new Thread(() -> {
+            try {
+                Updater.install(act, r, (done, total) -> {
+                    String t = total > 0 ? "Downloading " + Math.round(100f * done / total) + "%" : "Downloading…";
+                    act.runOnUiThread(() -> {
+                        if (t.equals(updateNote)) return;
+                        updateNote = t;
+                        if (page.equals("updates")) build();
+                    });
+                });
+                act.runOnUiThread(() -> {
+                    updateState = "available";
+                    updateNote = "";
+                    if (page.equals("updates")) build();
+                });
+            } catch (Exception e) {
+                act.runOnUiThread(() -> {
+                    updateState = "error";
+                    updateNote = "The download stopped part-way. Check the connection, then try again.";
+                    if (page.equals("updates")) build();
+                });
+            }
+        }, "update").start();
+    }
+
     private void openDrop() {
-        dropPage = true;
+        page = "drop";
         confirmClear = false;
         drop = new Drop(act, new Drop.Listener() {
             @Override
@@ -415,6 +585,11 @@ final class SettingsPanel {
 
     /** One choice: its name on the left, its value on the right; OK changes it. */
     private void add(String label, String value, String tag, Runnable run) {
+        add(label, value, tag, null, run);
+    }
+
+    /** The same, led by a small picture (a photo's thumbnail). */
+    private void add(String label, String value, String tag, android.graphics.Bitmap thumb, Runnable run) {
         Pad p = new Pad(act, null, 16, 0f);
         p.plainColor = 0x1AFFFFFF;
         p.edgeLight = false;
@@ -422,7 +597,22 @@ final class SettingsPanel {
         p.setTag(tag);
         LinearLayout r = new LinearLayout(act);
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(Ui.dp(16), 0, Ui.dp(16), 0);
+        r.setPadding(Ui.dp(thumb != null ? 6 : 16), 0, Ui.dp(16), 0);
+        if (thumb != null) {
+            android.widget.ImageView iv = new android.widget.ImageView(act);
+            iv.setImageBitmap(thumb);
+            iv.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+            iv.setClipToOutline(true);
+            iv.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override
+                public void getOutline(View v, android.graphics.Outline o) {
+                    o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(7));
+                }
+            });
+            LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(Ui.dp(50), Ui.dp(28));
+            tl.rightMargin = Ui.dp(12);
+            r.addView(iv, tl);
+        }
         TextView name = p.tint(Ui.text(act, 13.5f, Ui.semibold, 0xFFFFFFFF), 1f);
         name.setText(label);
         r.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));

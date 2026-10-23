@@ -68,16 +68,26 @@ final class AppMenu extends FrameLayout {
         int w = Ui.dp(WIDTH);
         panel.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
         int h = panel.getMeasuredHeight();
+        // measured against the screen it covers: this layer was GONE until now, so it has no size of its own yet
+        View screen = (View) getParent();
+        int sw = screen.getWidth(), sh = screen.getHeight();
         int[] at = new int[2], me = new int[2];
         anchor.getLocationInWindow(at);
-        getLocationInWindow(me);
-        float gap = Ui.dpf(20), edge = Ui.dpf(24);
-        float x = at[0] - me[0] + anchor.getWidth() + gap;
-        boolean right = x + w <= getWidth() - edge;
-        if (!right) x = at[0] - me[0] - w - gap;
-        float y = Math.max(edge, Math.min(at[1] - me[1] + anchor.getHeight() / 2f - h / 2f, getHeight() - h - edge));
-        panel.setX(x);
-        panel.setY(y);
+        screen.getLocationInWindow(me);
+        // the tile's visible box as grown by focus (the window position already includes the scale)
+        float aw = anchor.getWidth() * anchor.getScaleX(), ah = anchor.getHeight() * anchor.getScaleY();
+        float ax = at[0] - me[0], ay = at[1] - me[1];
+        float gap = Ui.dpf(18), edge = Ui.dpf(24);
+        float x = ax + aw + gap;
+        boolean right = x + w <= sw - edge;
+        if (!right) x = ax - w - gap;
+        float y = Math.max(edge, Math.min(ay + ah / 2f - h / 2f, sh - h - edge));
+        // placed by margins, so the slide-in below can use the translation freely
+        FrameLayout.LayoutParams l = (FrameLayout.LayoutParams) panel.getLayoutParams();
+        l.leftMargin = Math.round(x);
+        l.topMargin = Math.round(y);
+        panel.setLayoutParams(l);
+        panel.setTranslationY(0f);
         // it slides out from the app's side; text is never scaled mid-animation
         panel.setAlpha(0f);
         panel.setTranslationX(Ui.dpf(right ? -12 : 12));

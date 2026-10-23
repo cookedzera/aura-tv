@@ -51,6 +51,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         final int accent;
         /** Sent from a phone (see {@link Mine}); a GIF plays on the wall. */
         final boolean mine, gif;
+        /** Pure black instead of a photograph, for OLED screens. */
+        final boolean black;
 
         Wallpaper(JSONObject o) {
             file = o.optString("file");
@@ -58,6 +60,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             day = o.optString("day");
             mine = "mine".equals(o.optString("kind"));
             gif = o.optBoolean("gif");
+            black = "black".equals(o.optString("kind"));
             mood = o.optString("mood", "day");
             place = o.optString("place");
             region = o.optString("region");
@@ -157,11 +160,18 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
      */
     private void refreshWalls() {
         Context c = getContext();
-        boolean daily = Prefs.on(c, Prefs.DAILY), only = Prefs.on(c, Prefs.MINE_ONLY);
-        long stamp = (Daily.stamp(c) * 31 + Mine.stamp(c)) * 4 + (daily ? 1 : 0) + (only ? 2 : 0);
+        boolean daily = Prefs.on(c, Prefs.DAILY), only = Prefs.on(c, Prefs.MINE_ONLY), black = Prefs.on(c, Prefs.BLACK);
+        long stamp = ((Daily.stamp(c) * 31 + Mine.stamp(c)) * 4 + (daily ? 1 : 0) + (only ? 2 : 0)) * 2 + (black ? 1 : 0);
         if (stamp == wallStamp && !walls.isEmpty()) return;
         wallStamp = stamp;
         walls.clear();
+        if (black) {
+            try {
+                walls.add(new Wallpaper(new JSONObject().put("kind", "black").put("accent", "#5A6A8C")));
+            } catch (org.json.JSONException ignored) {
+            }
+            return;
+        }
         List<Wallpaper> mine = Mine.walls(c);
         walls.addAll(mine);
         // "only your photos" with none left falls back to everything, never to a black screen
@@ -355,7 +365,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
                 incoming = null;
                 current.alpha = 1f;
                 accent = accentTo;
-                nextAt = now + SHOW_MS;
+                // a photo sent from the phone meanwhile goes straight on next
+                nextAt = now + (wanted != null ? 0 : SHOW_MS);
             }
         }
         float p = Math.min(1f, (now - parallaxStart) / (float) PARALLAX_MS);
@@ -551,7 +562,35 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         s.y1 = rnd.nextFloat() - 0.5f;
     }
 
+    /**
+     * Pure black with the faintest night-blue glow from the top left, so the glass still has
+     * something to frost; on an OLED screen almost every pixel stays off.
+     */
+    private static Bitmap blackWall() {
+        int w = 640, h = 360;
+        Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        c.drawColor(Color.BLACK);
+        Paint p = new Paint(Paint.DITHER_FLAG);
+        p.setShader(new android.graphics.RadialGradient(w * 0.22f, -h * 0.1f, w * 0.85f,
+                new int[]{0xFF101827, 0xFF06080E, 0xFF000000}, new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, w, h, p);
+        return b;
+    }
+
     private Slide decode(Wallpaper w) {
+        if (w.black) {
+            Bitmap b = blackWall();
+            Slide s = new Slide();
+            s.wall = w;
+            s.sharp = b;
+            s.sw = b.getWidth();
+            s.sh = b.getHeight();
+            s.blur = blur(b);
+            s.soft = b;
+            s.lumaTop = s.lumaBottom = 0f;
+            return s;
+        }
         try (InputStream in = w.onDisk() ? new java.io.FileInputStream(w.path) : getContext().getAssets().open("wallpapers/" + w.file)) {
             Bitmap b = BitmapFactory.decodeStream(in);
             if (b == null) return null;

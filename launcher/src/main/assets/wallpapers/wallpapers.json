@@ -45,50 +45,6 @@
  },
  {
   "file": "w04.jpg",
-  "place": "Kåkersundet",
-  "region": "Lofoten · Norway",
-  "author": "Ximonic (Simo Räsänen)",
-  "line": "Late gold over the strait, the peaks still as glass.",
-  "mood": "golden",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:View_towards_Ryten_and_Middagstinden_over_K%C3%A5kersundet_in_Flakstad,_Nordland,_Norway,_2022_June.jpg",
-  "accent": "#E5B267"
- },
- {
-  "file": "w05.jpg",
-  "place": "Cresta Signal",
-  "region": "Monte Rosa · Switzerland",
-  "author": "Nicola Beltraminelli",
-  "line": "First light catches the ridge above a sea of cloud.",
-  "mood": "dawn",
-  "license": "CC BY-SA 3.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Aux_aurores_sur_la_Cresta_Signal.jpg",
-  "accent": "#E567BC"
- },
- {
-  "file": "w06.jpg",
-  "place": "Aurora over Mývatn",
-  "region": "Norðurland · Iceland",
-  "author": "Giles Laurent",
-  "line": "Night lights drifting over a quiet volcanic lake.",
-  "mood": "night",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:039_Northern_lights_over_M%C3%BDvatn_(Iceland)_Photo_by_Giles_Laurent.jpg",
-  "accent": "#67CBE5"
- },
- {
-  "file": "w07.jpg",
-  "place": "Gonbo Rangjon",
-  "region": "Zanskar · Ladakh, India",
-  "author": "Timothy A. Gonsalves",
-  "line": "God's Mountain, five and a half thousand metres of stone.",
-  "mood": "day",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Gonbo_Rangjon_Shinko_La_Zanskar_Jun24_A7CR_00332.jpg",
-  "accent": "#679AE5"
- },
- {
-  "file": "w08.jpg",
   "place": "Øksfjorden",
   "region": "Finnmark · Norway",
   "author": "Ximonic (Simo Räsänen)",
@@ -99,95 +55,7 @@
   "accent": "#E5B367"
  },
  {
-  "file": "w09.jpg",
-  "place": "McQueens Pass",
-  "region": "Canterbury · New Zealand",
-  "author": "Michal Klajban",
-  "line": "Morning fog pours through the valleys like a tide.",
-  "mood": "dawn",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:View_from_McQueens_Pass_towards_Lyttelton_Harbour,_New_Zealand.jpg",
-  "accent": "#6787E5"
- },
- {
-  "file": "w10.jpg",
-  "place": "Matterhorn",
-  "region": "Valais · Switzerland",
-  "author": "Liridon",
-  "line": "Clear alpine air around the most famous summit in the Alps.",
-  "mood": "day",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Matterhorn,_March_2019_(01).jpg",
-  "accent": "#6796E5"
- },
- {
-  "file": "w11.jpg",
-  "place": "Aurora Borealis",
-  "region": "Lysekil · Sweden",
-  "author": "W.carter",
-  "line": "A storm on the sun, painted violet over Sweden.",
-  "mood": "night",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:G5_aurora_over_Tuntorp,_Lysekil_Municipality_15.jpg",
-  "accent": "#DF67E5"
- },
- {
-  "file": "w12.jpg",
-  "place": "Tsarap River",
-  "region": "Zanskar · Ladakh, India",
-  "author": "Timothy A. Gonsalves",
-  "line": "Turquoise water carving its way through the Zanskar.",
-  "mood": "day",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Tsarap_Upstream_Phuktal_Zanskar_Oct22_R16_06699.jpg",
-  "accent": "#679AE5"
- },
- {
-  "file": "w13.jpg",
-  "place": "Gullfoss",
-  "region": "Suðurland · Iceland",
-  "author": "Diego Delso",
-  "line": "A rainbow rises from the mist of the Golden Falls.",
-  "mood": "day",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Gullfoss,_Su%C3%B0urland,_Islandia,_2014-08-16,_DD_123.JPG",
-  "accent": "#E5CB67"
- },
- {
-  "file": "w14.jpg",
-  "place": "Val Sinestra",
-  "region": "Engadin · Switzerland",
-  "author": "Dominicus Johannes Bergsma",
-  "line": "Night settles slowly around Piz S-chalambert.",
-  "mood": "golden",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Val_Sinestra._11-10-2024._(d.j.b.)_03.jpg",
-  "accent": "#E567A6"
- },
- {
-  "file": "w15.jpg",
-  "place": "Moos Mountain",
-  "region": "Black Forest · Germany",
-  "author": "Thomas Heins",
-  "line": "The sun goes down over a sea of fog.",
-  "mood": "golden",
-  "license": "CC BY 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Foggy_sunset_view_from_Moos_mountain,_Baden-W%C3%BCrttemberg,_Germany.jpg",
-  "accent": "#E5BB67"
- },
- {
-  "file": "w16.jpg",
-  "place": "Stongde",
-  "region": "Zanskar · Ladakh, India",
-  "author": "Timothy A. Gonsalves",
-  "line": "Green fields beneath a wall of Himalayan snow.",
-  "mood": "day",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:NE_View_Stongdey_Zanskar_Jun24_A7CR_00966.jpg",
-  "accent": "#679FE5"
- },
- {
-  "file": "w17.jpg",
+  "file": "w05.jpg",
   "place": "Bear Lake",
   "region": "Alaska · USA",
   "author": "U.S. Air Force",
@@ -198,7 +66,7 @@
   "accent": "#67BAE5"
  },
  {
-  "file": "w18.jpg",
+  "file": "w06.jpg",
   "place": "Reynisfjara",
   "region": "Vík · Iceland",
   "author": "Diego Delso",
@@ -209,18 +77,7 @@
   "accent": "#6798E5"
  },
  {
-  "file": "w19.jpg",
-  "place": "Camp Saddle",
-  "region": "Craigieburn Range · New Zealand",
-  "author": "Michal Klajban",
-  "line": "The first snow of the season dusting the ridgelines.",
-  "mood": "day",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Camp_Saddle,_Craigieburn_Range,_New_Zealand_14.jpg",
-  "accent": "#E5A367"
- },
- {
-  "file": "w20.jpg",
+  "file": "w07.jpg",
   "place": "Aurora & Perseids",
   "region": "Norderney · Germany",
   "author": "Stephan Sprinz",
@@ -231,7 +88,7 @@
   "accent": "#D367E5"
  },
  {
-  "file": "w21.jpg",
+  "file": "w08.jpg",
   "place": "Zanskar Range",
   "region": "Padum · Ladakh, India",
   "author": "Timothy A. Gonsalves",
@@ -242,7 +99,7 @@
   "accent": "#6777E5"
  },
  {
-  "file": "w22.jpg",
+  "file": "w09.jpg",
   "place": "High Fläming",
   "region": "Brandenburg · Germany",
   "author": "Karl-Sebastian Schulte",

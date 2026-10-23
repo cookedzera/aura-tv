@@ -30,38 +30,12 @@ CHOSEN = [
      "Four thousand metres up, a lake the colour of deep sky."),
     (80, "Seljalandsfoss", "Suðurland · Iceland", "Diego Delso", 0.5,
      "Behind the falling water, the evening turns to glass."),
-    (60, "Kåkersundet", "Lofoten · Norway", "Ximonic (Simo Räsänen)", 0.5,
-     "Late gold over the strait, the peaks still as glass."),
-    (95, "Cresta Signal", "Monte Rosa · Switzerland", "Nicola Beltraminelli", 0.5,
-     "First light catches the ridge above a sea of cloud."),
-    (30, "Aurora over Mývatn", "Norðurland · Iceland", "Giles Laurent", 0.5,
-     "Night lights drifting over a quiet volcanic lake."),
-    (44, "Gonbo Rangjon", "Zanskar · Ladakh, India", "Timothy A. Gonsalves", 0.4,
-     "God's Mountain, five and a half thousand metres of stone."),
     (65, "Øksfjorden", "Finnmark · Norway", "Ximonic (Simo Räsänen)", 0.5,
      "The low Arctic sun, laid gently across the fjord."),
-    (72, "McQueens Pass", "Canterbury · New Zealand", "Michal Klajban", 0.5,
-     "Morning fog pours through the valleys like a tide."),
-    (101, "Matterhorn", "Valais · Switzerland", "Liridon", 0.4,
-     "Clear alpine air around the most famous summit in the Alps."),
-    (28, "Aurora Borealis", "Lysekil · Sweden", "W.carter", 0.5,
-     "A storm on the sun, painted violet over Sweden."),
-    (49, "Tsarap River", "Zanskar · Ladakh, India", "Timothy A. Gonsalves", 0.5,
-     "Turquoise water carving its way through the Zanskar."),
-    (86, "Gullfoss", "Suðurland · Iceland", "Diego Delso", 0.5,
-     "A rainbow rises from the mist of the Golden Falls."),
-    (12, "Val Sinestra", "Engadin · Switzerland", "Dominicus Johannes Bergsma", 0.5,
-     "Night settles slowly around Piz S-chalambert."),
-    (7, "Moos Mountain", "Black Forest · Germany", "Thomas Heins", 0.5,
-     "The sun goes down over a sea of fog."),
-    (41, "Stongde", "Zanskar · Ladakh, India", "Timothy A. Gonsalves", 0.45,
-     "Green fields beneath a wall of Himalayan snow."),
     (35, "Bear Lake", "Alaska · USA", "U.S. Air Force", 0.5,
      "Aurora dancing over the frozen interior of Alaska."),
     (81, "Reynisfjara", "Vík · Iceland", "Diego Delso", 0.5,
      "Black sand, a lone basalt stack and the North Atlantic."),
-    (69, "Camp Saddle", "Craigieburn Range · New Zealand", "Michal Klajban", 0.5,
-     "The first snow of the season dusting the ridgelines."),
     (29, "Aurora & Perseids", "Norderney · Germany", "Stephan Sprinz", 0.5,
      "Shooting stars falling through a crimson aurora."),
     (43, "Zanskar Range", "Padum · Ladakh, India", "Timothy A. Gonsalves", 0.45,
@@ -73,8 +47,7 @@ CHOSEN = [
 
 # light of each photograph, in CHOSEN order; the launcher matches these to the real sky (Sky Sync)
 MOODS = [
-    "golden", "night", "day", "golden", "golden", "dawn", "night", "day", "golden", "dawn", "day", "night",
-    "day", "day", "golden", "golden", "day", "night", "day", "day", "night", "day", "dawn",
+    "golden", "night", "day", "golden", "golden", "night", "day", "night", "day", "dawn",
 ]
 
 
@@ -104,7 +77,6 @@ def fetch(thumb, dest):
         dest.write_bytes(data)
         if Image.open(dest).width >= 1900:
             return
-    raise RuntimeError("no large rendition for " + thumb)
     raise RuntimeError("no large rendition for " + thumb)
 
 
@@ -151,7 +123,8 @@ def main():
             im = im.resize((OUT_W, OUT_H), Image.LANCZOS)
         im = im.filter(ImageFilter.UnsharpMask(radius=0.9, percent=55, threshold=2))
         name = f"w{n:02d}.jpg"
-        im.save(ASSETS / name, quality=92, subsampling=0, optimize=True)
+        # quality 82, progressive: a few hundred KB a photograph keeps the APK small to install
+        im.save(ASSETS / name, quality=82, optimize=True, progressive=True)
         meta.append({
             "file": name, "place": place, "region": region, "author": author, "line": line, "mood": MOODS[n],
             "license": c["license"], "source": c["page"], "accent": accent(im),

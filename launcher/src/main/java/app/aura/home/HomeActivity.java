@@ -60,7 +60,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     /** Metrics in dp, for the TV's 960 x 540 dp screen. */
     private static final int COLS = 5, TILE_W = 148, TILE_H = 84, GAP = 19, ROW_H = 122;
     private static final int PAGE_X = 104, WIDGET_Y = 104, WIDGET_H = 150, GRID_Y = 296, FOCUS_LINE = 210;
-    private static final int[] WIDGET_X = {0, 278, 616}, WIDGET_W = {260, 320, 200};
+    /** Each widget's natural width; the ones you keep share the row in these proportions. */
+    private static final int[] WIDGET_W = {260, 320, 200};
+    private static final int WIDGET_ROW = 816, WIDGET_GAP = 18;
+    static final String[] WIDGET_IDS = {"sky", "stack", "today"}, WIDGET_NAMES = {"Sky", "Smart Stack", "Today"};
     /** Browsing, the photograph sits half-soft behind the glass; resting, it comes back sharp. */
     private static final float HOME_DEFOCUS = 0.6f;
     private static final int SIDE = 0, WIDGETS = 1, GRID = 2;
@@ -88,7 +91,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private LinearLayout greeting;
     private Story story;
     private TextView hello, dateLine, gridLabel, stTime, tipText, hudText;
-    private TextView skyKicker, skyTitle, skyRise, skySet, tdValue, tdSub, tdMem;
+    private TextView skyKicker, skyTitle, skyRise, skySet, tdValue, tdSub, tdMem, tdData;
+    private LinearLayout tdDataRow;
     private ImageView stWifi, stBt, stWx, hudIcon;
     private TextView stTemp;
     private SmartStack stack;
@@ -96,7 +100,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private final List<Pad> side = new ArrayList<>();
     private final List<String> sideLabels = new ArrayList<>();
+    /** The widgets on show, left to right; {@code allWidgets} keeps them in their natural order. */
     private final List<Widget> widgets = new ArrayList<>();
+    private final Widget[] allWidgets = new Widget[3];
+    private final float[] widgetX = new float[3], widgetW = new float[3];
     private final List<Cell> cells = new ArrayList<>();
     private final int[] widgetGlow = {0xFFFFC98A, 0xFF8AA0C0, DAY_GLOW};
     private List<AppRepo.App> apps = new ArrayList<>();
@@ -244,7 +251,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // it does no system lookups on its first frame
         handler.removeCallbacks(warmCc);
         handler.postDelayed(warmCc, 1500);
-        if (Prefs.on(this, Prefs.STACK_AUTO)) stack.start();
+        if (Prefs.on(this, Prefs.STACK_AUTO) && fyW.getVisibility() == View.VISIBLE) stack.start();
     }
 
     @Override
@@ -344,6 +351,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         buildSky();
         buildForYou();
         buildToday();
+        layoutWidgets(false);
         gridLabel = Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.26f);
         page.addView(gridLabel, frame(WRAP, WRAP, Gravity.TOP | Gravity.START, Ui.dp(PAGE_X), Ui.dp(GRID_Y - 24), 0, 0));
         buildSidebar();
@@ -466,6 +474,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tdSub.setEllipsize(android.text.TextUtils.TruncateAt.END);
         d.addView(tdSub, lp(MATCH, WRAP, 0, 1));
         d.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
+        // internet used today, over Wi-Fi and Ethernet: worth watching on a phone's hotspot
+        tdDataRow = new LinearLayout(this);
+        tdDataRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView dl = Ui.caps(this, 6.5f, 0x8CFFFFFF, 0.24f);
+        dl.setText("DATA");
+        tdDataRow.addView(dl, new LinearLayout.LayoutParams(0, WRAP, 1f));
+        tdData = Ui.text(this, 9.5f, Ui.medium, 0xCCFFFFFF);
+        tdDataRow.addView(tdData);
+        tdDataRow.setVisibility(View.GONE);
+        d.addView(tdDataRow, lp(MATCH, WRAP, 0, 0));
         LinearLayout m = new LinearLayout(this);
         m.setGravity(Gravity.CENTER_VERTICAL);
         TextView ml = Ui.caps(this, 6.5f, 0x8CFFFFFF, 0.24f);
@@ -473,7 +491,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         m.addView(ml, new LinearLayout.LayoutParams(0, WRAP, 1f));
         tdMem = Ui.text(this, 9.5f, Ui.medium, 0xCCFFFFFF);
         m.addView(tdMem);
-        d.addView(m, lp(MATCH, WRAP, 0, 0));
+        d.addView(m, lp(MATCH, WRAP, 0, 6));
         memory = new Meter(this);
         d.addView(memory, lp(MATCH, Ui.dp(4), 0, 6));
         tdW.addView(d, match());
@@ -492,8 +510,56 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private void placeWidget(Widget w, int i) {
         page.addView(w, frame(Ui.dp(WIDGET_W[i]), Ui.dp(WIDGET_H), Gravity.TOP | Gravity.START,
-                Ui.dp(PAGE_X + WIDGET_X[i]), Ui.dp(WIDGET_Y), 0, 0));
-        widgets.add(w);
+                Ui.dp(PAGE_X), Ui.dp(WIDGET_Y), 0, 0));
+        allWidgets[i] = w;
+        w.onLongClick = () -> openWidgetMenu(w);
+    }
+
+    /**
+     * The widgets you keep, in your order, sharing the row in proportion to their natural widths:
+     * hide one and the others widen to fill its place. With {@code animate}, they glide there.
+     */
+    private void layoutWidgets(boolean animate) {
+        List<Integer> shown = new ArrayList<>();
+        Set<String> hidden = Prefs.hiddenWidgets(this);
+        List<Integer> order = Prefs.widgetOrder(this);
+        for (int i : order) if (!hidden.contains(WIDGET_IDS[i])) shown.add(i);
+        if (shown.isEmpty()) shown.add(order.get(0));
+        float natural = 0;
+        for (int i : shown) natural += WIDGET_W[i];
+        float k = (WIDGET_ROW - WIDGET_GAP * (shown.size() - 1)) / natural, x = 0;
+        boolean[] was = new boolean[3];
+        for (int i = 0; i < 3; i++) {
+            was[i] = allWidgets[i].getVisibility() == View.VISIBLE;
+            if (!shown.contains(i)) allWidgets[i].setVisibility(View.GONE);
+        }
+        widgets.clear();
+        for (int n = 0; n < shown.size(); n++) {
+            int i = shown.get(n);
+            Widget w = allWidgets[i];
+            FrameLayout.LayoutParams l = (FrameLayout.LayoutParams) w.getLayoutParams();
+            int before = l.leftMargin;
+            widgetX[n] = x;
+            widgetW[n] = WIDGET_W[i] * k;
+            l.leftMargin = Ui.dp(PAGE_X + x);
+            l.width = Ui.dp(widgetW[n]);
+            w.setLayoutParams(l);
+            w.setVisibility(View.VISIBLE);
+            if (animate && was[i] && before != l.leftMargin) {
+                w.setTranslationX(before - l.leftMargin);
+                w.animate().translationX(0f).setDuration(520).setStartDelay(0).setInterpolator(Ui.EMPHASIZED).start();
+            }
+            widgets.add(w);
+            x += widgetW[n] + WIDGET_GAP;
+        }
+        // a hidden Smart Stack stops turning its pages
+        if (stack != null && fyW.getVisibility() != View.VISIBLE) stack.stop();
+        else if (stack != null && resumed && Prefs.on(this, Prefs.STACK_AUTO)) stack.start();
+    }
+
+    private int glowOf(Widget w) {
+        for (int i = 0; i < 3; i++) if (allWidgets[i] == w) return widgetGlow[i];
+        return DAY_GLOW;
     }
 
     /** A floating glass rail, visionOS style; the page you're on keeps a soft disc behind its icon. */
@@ -833,13 +899,41 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             final Object[] r = recent;
             // what you're partway through outranks habits
             final List<Continue.Item> cw = habits ? Continue.all(app, 4) : null;
+            final long data = dataToday(app, c.getTimeInMillis());
             runOnUiThread(() -> {
                 if (isDestroyed()) return;
                 applySky(now, rise, set, up, next, phase);
                 applyToday(today, top);
+                showData(data);
                 if (s != null) applyStack(cw, s, r, top, now);
             });
         });
+    }
+
+    /**
+     * Bytes over Wi-Fi and Ethernet since {@code since}, or -1 when Android won't say. Network
+     * statistics come in two-hour buckets, so "today" starts at the bucket holding midnight.
+     */
+    static long dataToday(Context c, long since) {
+        android.app.usage.NetworkStatsManager nsm = c.getSystemService(android.app.usage.NetworkStatsManager.class);
+        if (nsm == null) return -1;
+        long sum = -1;
+        for (int type : new int[]{ConnectivityManager.TYPE_WIFI, ConnectivityManager.TYPE_ETHERNET}) {
+            try {
+                android.app.usage.NetworkStats.Bucket b = nsm.querySummaryForDevice(type, null, since, System.currentTimeMillis());
+                if (b != null) sum = Math.max(sum, 0) + b.getRxBytes() + b.getTxBytes();
+            } catch (Exception ignored) {
+                // no usage access, or no such network on this TV
+            }
+        }
+        return sum;
+    }
+
+    private void showData(long bytes) {
+        tdDataRow.setVisibility(bytes >= 0 ? View.VISIBLE : View.GONE);
+        if (bytes < 0) return;
+        double mb = bytes / 1048576.0;
+        tdData.setText((mb < 1000 ? Math.round(mb) + " MB" : String.format(Locale.getDefault(), "%.2f GB", mb / 1024)) + " today");
     }
 
     private void applySky(long now, long rise, long set, boolean up, long next, Sun.Phase phase) {
@@ -1058,12 +1152,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             for (Cell c : cells) c.card.invalidate();
         });
         scrollAnim.start();
-        // the greeting leaves on any scroll (it would be cut at the top edge); the widgets only once
-        // they're half off screen, so a short scroll to the last row never empties the top
+        // the greeting and the status pill leave on any scroll (the apps pass beneath them); the
+        // widgets only once they're half off screen, so a short scroll never empties the top
         boolean top = target == 0, shown = target < WIDGET_Y + WIDGET_H / 2f;
         if (top != greetingShown) {
             greetingShown = top;
             fade(greeting, top);
+            fade(status, top);
         }
         if (shown != dashboard) {
             dashboard = shown;
@@ -1087,12 +1182,25 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         else focusSide(sideAt);
     }
 
-    private static int widgetForCol(int col) {
-        return col <= 1 ? 0 : col <= 3 ? 1 : 2;
+    /** The widget above a column of apps: the one spanning its centre, else the nearest. */
+    private int widgetForCol(int col) {
+        float cx = col * (TILE_W + GAP) + TILE_W / 2f, best = Float.MAX_VALUE;
+        int at = 0;
+        for (int n = 0; n < widgets.size(); n++) {
+            float d = cx >= widgetX[n] && cx <= widgetX[n] + widgetW[n] ? 0 : Math.abs(cx - (widgetX[n] + widgetW[n] / 2f));
+            if (d < best) {
+                best = d;
+                at = n;
+            }
+        }
+        return at;
     }
 
+    /** Down from a widget: back to the column you came up from, else the one under its centre. */
     private int colForWidget(int w) {
-        return lastCol >= 0 && widgetForCol(lastCol) == w ? lastCol : new int[]{0, 2, 4}[w];
+        if (lastCol >= 0 && widgetForCol(lastCol) == w) return lastCol;
+        float c = widgetX[w] + widgetW[w] / 2f;
+        return Math.max(0, Math.min(COLS - 1, Math.round((c - TILE_W / 2f) / (TILE_W + GAP))));
     }
 
     // ---- live preview of a connected source ------------------------------------------------
@@ -1169,7 +1277,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (i >= 0) {
             zone = contentZone = WIDGETS;
             widgetAt = i;
-            glide(Ui.dpf(PAGE_X + WIDGET_X[i] + WIDGET_W[i] / 2f), Ui.dpf(WIDGET_Y + WIDGET_H / 2f), widgetGlow[i]);
+            glide(Ui.dpf(PAGE_X + widgetX[i] + widgetW[i] / 2f), Ui.dpf(WIDGET_Y + WIDGET_H / 2f), glowOf(widgets.get(i)));
             return;
         }
         for (i = 0; i < cells.size(); i++) {
@@ -1450,6 +1558,46 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         menu.show(card, label, items);
     }
 
+    /** Hold OK on a widget: move it along the row, or hide it (the others widen to fill its place). */
+    private void openWidgetMenu(Widget w) {
+        int n = widgets.indexOf(w), id = -1;
+        for (int i = 0; i < 3; i++) if (allWidgets[i] == w) id = i;
+        if (editing || ccOpen || menu.isOpen() || n < 0 || id < 0) return;
+        final String name = WIDGET_NAMES[id], key = WIDGET_IDS[id];
+        swallow(heldConfirm);
+        List<AppMenu.Item> items = new ArrayList<>();
+        if (n > 0) items.add(new AppMenu.Item(R.drawable.ic_move, "Move left", () -> moveWidget(w, -1)));
+        if (n < widgets.size() - 1) items.add(new AppMenu.Item(R.drawable.ic_move, "Move right", () -> moveWidget(w, 1)));
+        if (widgets.size() > 1) items.add(new AppMenu.Item(R.drawable.ic_hide, "Hide", () -> {
+            closeMenu(w);
+            Prefs.hideWidget(this, key, true);
+            layoutWidgets(true);
+            focusWidget(Math.min(n, widgets.size() - 1));
+            hud(R.drawable.ic_hide, name + " is hidden  ·  Settings brings it back");
+        }));
+        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        menu.show(w, name, items);
+    }
+
+    /** Swaps a widget with its neighbour on screen; hidden widgets keep their place in the order. */
+    private void moveWidget(Widget w, int d) {
+        closeMenu(w);
+        int n = widgets.indexOf(w), m = n + d;
+        if (n < 0 || m < 0 || m >= widgets.size()) return;
+        List<Integer> order = Prefs.widgetOrder(this);
+        int a = -1, b = -1;
+        for (int i = 0; i < 3; i++) {
+            if (allWidgets[i] == w) a = i;
+            if (allWidgets[i] == widgets.get(m)) b = i;
+        }
+        int pa = order.indexOf(a), pb = order.indexOf(b);
+        order.set(pa, b);
+        order.set(pb, a);
+        Prefs.setWidgetOrder(this, order);
+        layoutWidgets(true);
+        focusWidget(m);
+    }
+
     private void closeMenu(View back) {
         if (!menu.isOpen()) return;
         menu.hide();
@@ -1680,11 +1828,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
                 break;
             case "stack":
-                if (Prefs.on(this, Prefs.STACK_AUTO)) stack.start();
+                if (Prefs.on(this, Prefs.STACK_AUTO) && fyW.getVisibility() == View.VISIBLE) stack.start();
                 else stack.stop();
                 break;
+            case "widgets":
+                layoutWidgets(true);
+                break;
             case "photos":
-                // your own photos only, or one removed: the wall moves on to the new set
+            case "daily":
+                // pure black, your own photos only, Picture of the Day, or one removed: the wall moves on to the new set
                 backdrop.reload();
                 break;
             case "weather":

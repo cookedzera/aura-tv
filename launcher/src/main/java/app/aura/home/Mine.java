@@ -111,7 +111,7 @@ final class Mine {
             String id = Long.toString(System.currentTimeMillis(), 36) + Integer.toString(RND.nextInt(1296), 36);
             boolean gif = isGif(part);
             Bitmap still = decode(part);
-            if (still == null) throw new Unsupported("That file isn't a photo the TV can read");
+            if (still == null) throw new Unsupported("Not a photo the TV can read");
             File out = new File(dir(c), id + (gif ? ".gif" : ".jpg"));
             Bitmap shown = gif ? still : compose(rotate(still, orientation(part)));
             if (gif) {

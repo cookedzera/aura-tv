@@ -9,9 +9,10 @@ import android.view.KeyEvent;
 
 /** A glass dashboard card. Focused, it lifts a little and gains a bright rim; OK runs its action. */
 final class Widget extends GlassFrame {
-    Runnable onClick;
+    Runnable onClick, onLongClick;
     private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
     private float focus;
+    private boolean longFired;
     private ValueAnimator anim;
 
     Widget(Context c, Backdrop b) {
@@ -37,6 +38,7 @@ final class Widget extends GlassFrame {
     @Override
     protected void onFocusChanged(boolean gained, int direction, Rect previous) {
         super.onFocusChanged(gained, direction, previous);
+        if (!gained) removeCallbacks(hold);
         if (anim != null) anim.cancel();
         anim = ValueAnimator.ofFloat(focus, gained ? 1f : 0f);
         anim.setDuration(gained ? 300 : 200);
@@ -51,15 +53,32 @@ final class Widget extends GlassFrame {
                 .setUpdateListener(a -> invalidate()).start();
     }
 
+    /** Holding OK, timed from the press as on app tiles: IR remotes barely repeat. */
+    private final Runnable hold = () -> {
+        if (onLongClick == null || !isFocused()) return;
+        longFired = true;
+        onLongClick.run();
+    };
+
     @Override
     public boolean onKeyDown(int code, KeyEvent e) {
-        return Pad.isConfirm(code) || super.onKeyDown(code, e);
+        if (Pad.isConfirm(code)) {
+            if (e.getRepeatCount() == 0) {
+                longFired = false;
+                removeCallbacks(hold);
+                if (onLongClick != null) postDelayed(hold, android.view.ViewConfiguration.getLongPressTimeout());
+            }
+            return true;
+        }
+        return super.onKeyDown(code, e);
     }
 
     @Override
     public boolean onKeyUp(int code, KeyEvent e) {
         if (Pad.isConfirm(code)) {
-            if (!e.isCanceled() && onClick != null) onClick.run();
+            removeCallbacks(hold);
+            if (!longFired && !e.isCanceled() && onClick != null) onClick.run();
+            longFired = false;
             return true;
         }
         return super.onKeyUp(code, e);
