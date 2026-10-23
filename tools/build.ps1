@@ -1,4 +1,6 @@
 # Build Aura.apk with the Android SDK tools directly (aapt2 -> javac -> d8 -> zipalign -> apksigner).
+# Targets API 28 on purpose: from 29 Android only lets system apps join, leave or toggle Wi-Fi,
+# which Control Center's Wi-Fi sheet needs. It still runs on (and is tested with) Android 11.
 param([int]$VersionCode = 1, [string]$VersionName = "1.0")
 $ErrorActionPreference = "Stop"
 
@@ -26,7 +28,7 @@ New-Item -ItemType Directory -Force "$out\gen", "$out\classes", "$out\dex" | Out
 Step "aapt2 compile" { & "$bt\aapt2.exe" compile --dir "$src\res" -o "$out\res.zip" }
 Step "aapt2 link" {
     & "$bt\aapt2.exe" link -o "$out\base.apk" -I $jar --manifest "$src\AndroidManifest.xml" `
-        --java "$out\gen" --min-sdk-version 26 --target-sdk-version 30 `
+        --java "$out\gen" --min-sdk-version 26 --target-sdk-version 28 `
         --version-code $VersionCode --version-name $VersionName "$out\res.zip"
 }
 $java = @(Get-ChildItem "$src\java", "$out\gen" -Recurse -Filter *.java | ForEach-Object { $_.FullName })

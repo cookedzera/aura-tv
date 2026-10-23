@@ -276,6 +276,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        // preview a sky moment: am start -n app.aura.home/.HomeActivity --es aura_moment golden
+        String preview = intent.getStringExtra("aura_moment");
+        if (preview != null) {
+            try {
+                // a new intent arrives while the activity is paused; show it once it's resumed
+                Moment m = Moment.valueOf(preview.toUpperCase(Locale.ROOT));
+                handler.postDelayed(() -> moment(m), 500);
+            } catch (IllegalArgumentException ignored) {
+            }
+            return;
+        }
         if (!hasWindowFocus()) {
             // back from an app with Home: keep your place on the tile you left from
             if (ccOpen) closeCc(false);
@@ -289,9 +300,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     @Override
     public void onBackPressed() {
-        if (ccOpen) closeCc(true);
-        else if (zone == SIDE) returnToContent();
-        else if (zone == GRID && gridAt >= COLS) focusGrid(gridAt % COLS);
+        if (ccOpen) {
+            if (!cc.back()) closeCc(true);
+        } else if (zone == SIDE) {
+            returnToContent();
+        } else if (zone == GRID && gridAt >= COLS) {
+            focusGrid(gridAt % COLS);
+        }
     }
 
     // ---- layout ------------------------------------------------------------------------------
@@ -331,6 +346,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         cc = new ControlCenter(this, this);
         root.addView(cc.panel, match());
         buildHud();
+        buildMoment();
 
         root.getViewTreeObserver().addOnGlobalFocusChangeListener((oldFocus, newFocus) -> onFocusMoved(newFocus));
     }
@@ -506,6 +522,103 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         r.addView(stTime);
         status.addView(r, new FrameLayout.LayoutParams(WRAP, MATCH));
         home.addView(status, frame(WRAP, Ui.dp(40), Gravity.TOP | Gravity.END, 0, Ui.dp(26), Ui.dp(40), 0));
+    }
+
+    // ---- sky moments -------------------------------------------------------------------------
+
+    private enum Moment { FIRST_LIGHT, SUNRISE, GOLDEN, SUNSET }
+
+    private GlassFrame momentCard;
+    private SkyArc momentArc;
+    private TextView momentKicker, momentTitle, momentSub;
+    private Sun.Phase lastPhase;
+    private boolean lastUp;
+    private final Runnable hideMoment = () -> momentCard.animate().alpha(0f).translationY(-Ui.dp(10)).setStartDelay(0)
+            .setDuration(420).setInterpolator(Ui.SOFT).withEndAction(() -> momentCard.setVisibility(View.INVISIBLE)).start();
+
+    /** A small glass card for the turns of the day: the sun on its arc, what just changed, what's next. */
+    private void buildMoment() {
+        momentCard = new GlassFrame(this, backdrop, 22, 0.55f);
+        LinearLayout r = new LinearLayout(this);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setPadding(Ui.dp(16), Ui.dp(10), Ui.dp(22), Ui.dp(10));
+        momentArc = new SkyArc(this);
+        r.addView(momentArc, new LinearLayout.LayoutParams(Ui.dp(64), Ui.dp(34)));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        momentKicker = Ui.caps(this, 6.5f, 0xFFFFC98A, 0.26f);
+        momentKicker.setShadowLayer(0, 0, 0, 0);
+        col.addView(momentKicker, lp(WRAP, WRAP, 0, 0));
+        momentTitle = Ui.text(this, 16, Ui.heavy, 0xFFFFFFFF);
+        momentTitle.setIncludeFontPadding(true);
+        col.addView(momentTitle, lp(WRAP, WRAP, 0, 1));
+        momentSub = Ui.text(this, 11, Ui.regular, 0xB3FFFFFF);
+        col.addView(momentSub, lp(WRAP, WRAP, 0, 0));
+        LinearLayout.LayoutParams cl = lp(WRAP, WRAP, 0, 0);
+        cl.leftMargin = Ui.dp(14);
+        r.addView(col, cl);
+        momentCard.addView(r, new FrameLayout.LayoutParams(WRAP, WRAP));
+        momentCard.setAlpha(0f);
+        momentCard.setVisibility(View.INVISIBLE);
+        root.addView(momentCard, frame(WRAP, WRAP, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, Ui.dp(26), 0, 0));
+    }
+
+    /** Called on the minute: notices the sun crossing the horizon or the light changing phase. */
+    private void watchSky() {
+        long t = System.currentTimeMillis();
+        Sun.Phase ph = Sun.phase(t);
+        boolean up = Sun.isUp(t);
+        if (lastPhase != null) {
+            if (up != lastUp) moment(up ? Moment.SUNRISE : Moment.SUNSET);
+            else if (ph != lastPhase && ph == Sun.Phase.GOLDEN) moment(Moment.GOLDEN);
+            else if (ph != lastPhase && ph == Sun.Phase.DAWN) moment(Moment.FIRST_LIGHT);
+        }
+        lastPhase = ph;
+        lastUp = up;
+    }
+
+    private void moment(Moment m) {
+        if (!resumed || ccOpen || editing) return;
+        long now = System.currentTimeMillis();
+        Calendar c = Calendar.getInstance();
+        c.set(Calendar.HOUR_OF_DAY, 0);
+        c.set(Calendar.MINUTE, 0);
+        c.set(Calendar.SECOND, 0);
+        c.set(Calendar.MILLISECOND, 0);
+        long rise = Sun.next(c.getTimeInMillis(), true), set = rise > 0 ? Sun.next(rise, false) : -1;
+        java.text.DateFormat tf = DateFormat.getTimeFormat(this);
+        String riseAt = rise > 0 ? tf.format(new Date(rise > now ? rise : Sun.next(now, true))).toUpperCase(Locale.getDefault()) : "";
+        String setAt = set > 0 ? tf.format(new Date(set)).toUpperCase(Locale.getDefault()) : "";
+        switch (m) {
+            case FIRST_LIGHT:
+                show(m, "FIRST LIGHT", "Dawn is breaking", "Sunrise at " + riseAt);
+                break;
+            case SUNRISE:
+                show(m, "SUNRISE", "The sun is up", "Sunset at " + setAt + " · the photographs turn to day");
+                break;
+            case GOLDEN:
+                show(m, "GOLDEN HOUR", "The light turns gold", "Sunset at " + setAt + " · the photographs follow it");
+                break;
+            default:
+                show(m, "SUNSET", "The sun has set", "Sunrise at " + riseAt + " · night skies from here");
+        }
+        momentArc.set(rise, set, now);
+        // and the photograph moves on to one that matches the new light
+        if (!photo) backdrop.skip();
+    }
+
+    private void show(Moment m, String kicker, String title, String sub) {
+        momentKicker.setTextColor(m == Moment.SUNSET ? 0xFFB9C6FF : m == Moment.FIRST_LIGHT ? 0xFFFFB8C8 : 0xFFFFC98A);
+        momentKicker.setText(kicker);
+        momentTitle.setText(title);
+        momentSub.setText(sub);
+        handler.removeCallbacks(hideMoment);
+        hideHud();
+        momentCard.setVisibility(View.VISIBLE);
+        momentCard.setAlpha(0f);
+        momentCard.setTranslationY(-Ui.dp(18));
+        momentCard.animate().alpha(1f).translationY(0f).setStartDelay(0).setDuration(700).setInterpolator(Ui.EMPHASIZED).start();
+        handler.postDelayed(hideMoment, 8000);
     }
 
     private void buildHud() {
@@ -1217,6 +1330,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         refreshStatus();
         // the sky and your day every minute; habits only when the hour turns
         refreshWidgets(hour != lastHour);
+        watchSky();
         lastHour = hour;
     }
 

@@ -44,7 +44,7 @@ foreach ($p in $toEnable) { Shell @('pm', 'enable', '--user', '0', $p) }
 
 # 2. settings Aura's setup changed
 "== Restoring settings"
-foreach ($k in 'screensaver_components', 'screensaver_default_component') {
+foreach ($k in 'screensaver_components', 'screensaver_default_component', 'location_mode') {
     $v = BackedUp 'settings-secure.txt' $k
     if ($v) { Shell @('settings', 'put', 'secure', $k, $v) }
 }

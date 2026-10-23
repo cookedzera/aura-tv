@@ -77,6 +77,7 @@ final class ControlCenter {
     private final GlassFrame veil;
     private final LinearLayout header;
     private final FrameLayout board;
+    private final WifiSheet wifiSheet;
     private final List<View> modules = new ArrayList<>(), focusables = new ArrayList<>();
     private final TextView time, date, info, phase, eventName, eventTime, other, todayValue, boostValue;
     private final TextView wifiCap, btCap, sleepCap, photoCap;
@@ -88,6 +89,13 @@ final class ControlCenter {
     private final SkyArc arc;
     private final AudioManager audio;
     private String segmentsSig;
+    private final Pad pick;
+    private final ImageView pickPoster;
+    private final TextView pickName, pickLine, pickAbout;
+    /** The pick prepared in the background for the next time the board opens. */
+    private volatile Picks.Pick nextPick;
+    private volatile android.graphics.Bitmap nextPoster;
+    private Picks.Pick shownPick;
 
     ControlCenter(Activity a, Host h) {
         act = a;
@@ -122,9 +130,55 @@ final class ControlCenter {
         info.setLineSpacing(Ui.dpf(3), 1f);
         info.setMaxWidth(Ui.dp(300));
         header.addView(info, lp(0, 14));
-        TextView hint = Ui.caps(a, 7, 0x59FFFFFF, 0.3f);
-        hint.setText("BACK TO CLOSE");
-        header.addView(hint, lp(0, 30));
+        header.setClipChildren(false);
+        header.setClipToPadding(false);
+
+        // Tonight's pick: a top-rated show from TVmaze; OK finds its trailer
+        pick = new Pad(a, null, 18, 0f);
+        pick.plainColor = MODULE;
+        pick.focusScale = 1.04f;
+        LinearLayout pr = new LinearLayout(a);
+        pr.setGravity(Gravity.CENTER_VERTICAL);
+        pr.setPadding(Ui.dp(9), Ui.dp(9), Ui.dp(14), Ui.dp(9));
+        pickPoster = new ImageView(a);
+        pickPoster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        pickPoster.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override
+            public void getOutline(View v, android.graphics.Outline o) {
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(9));
+            }
+        });
+        pickPoster.setClipToOutline(true);
+        pr.addView(pickPoster, new LinearLayout.LayoutParams(Ui.dp(64), Ui.dp(92)));
+        LinearLayout pc = new LinearLayout(a);
+        pc.setOrientation(LinearLayout.VERTICAL);
+        TextView pk = pick.tint(Ui.caps(a, 6.5f, 0xFFFFFFFF, 0.24f), 0.6f);
+        pk.setShadowLayer(0, 0, 0, 0);
+        pk.setText("TONIGHT'S PICK  ·  TVMAZE");
+        pc.addView(pk, lp(0, 0));
+        pickName = pick.tint(Ui.text(a, 15, Ui.heavy, 0xFFFFFFFF), 1f);
+        pickName.setIncludeFontPadding(true);
+        pickName.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        pc.addView(pickName, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        pickLine = pick.tint(Ui.text(a, 10.5f, Ui.semibold, 0xFFFFFFFF), 0.85f);
+        pickLine.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        pc.addView(pickLine, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        pickAbout = pick.tint(Ui.text(a, 10, Ui.regular, 0xFFFFFFFF), 0.65f);
+        pickAbout.setSingleLine(false);
+        pickAbout.setMaxLines(2);
+        pickAbout.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams al2 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        al2.topMargin = Ui.dp(4);
+        pc.addView(pickAbout, al2);
+        LinearLayout.LayoutParams pcl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        pcl.leftMargin = Ui.dp(12);
+        pr.addView(pc, pcl);
+        pick.addView(pr, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        pick.onClick = this::watchTrailer;
+        pick.setVisibility(View.GONE);
+        LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(110));
+        pl.topMargin = Ui.dp(22);
+        header.addView(pick, pl);
         FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(Ui.dp(300), ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.START | Gravity.CENTER_VERTICAL);
         hl.leftMargin = Ui.dp(112);
@@ -136,6 +190,20 @@ final class ControlCenter {
         FrameLayout.LayoutParams bl = new FrameLayout.LayoutParams(Ui.dp(side), Ui.dp(side), Gravity.END | Gravity.CENTER_VERTICAL);
         bl.rightMargin = Ui.dp(96);
         panel.addView(board, bl);
+        wifiSheet = new WifiSheet(a, h.backdrop(), new WifiSheet.Host() {
+            @Override
+            public void hud(int icon, String text) {
+                host.hud(icon, text);
+            }
+
+            @Override
+            public void openSettings(Intent intent) {
+                launch(intent, wifi);
+            }
+        });
+        FrameLayout.LayoutParams wl = new FrameLayout.LayoutParams(Ui.dp(side), Ui.dp(side), Gravity.END | Gravity.CENTER_VERTICAL);
+        wl.rightMargin = Ui.dp(96);
+        panel.addView(wifiSheet, wl);
 
         // 2x2: the round toggles
         FrameLayout connect = place(module(a), 0, 0, 2, 2);
@@ -236,9 +304,9 @@ final class ControlCenter {
 
         settings = place(button(a, R.drawable.ic_settings, "Settings"), 2, 3, 1, 1);
         standby = place(button(a, R.drawable.ic_power, "Standby"), 3, 3, 1, 1);
-        focusables.addAll(Arrays.asList(picture, sound, boost, settings, standby));
+        focusables.addAll(Arrays.asList(picture, sound, boost, settings, standby, pick));
 
-        wifi.onClick = () -> launch(new Intent(Settings.ACTION_WIFI_SETTINGS), wifi);
+        wifi.onClick = this::showWifi;
         bt.onClick = () -> launch(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS), bt);
         sleep.onClick = this::cycleSleep;
         photo.onClick = () -> {
@@ -324,6 +392,7 @@ final class ControlCenter {
             panel.postDelayed(this::refresh, 700);
         }
         tick(Calendar.getInstance());
+        showPick();
         panel.animate().cancel();
         panel.setAlpha(1f);
         panel.setVisibility(View.VISIBLE);
@@ -346,6 +415,7 @@ final class ControlCenter {
     }
 
     void close(boolean animate, Runnable done) {
+        if (wifiSheet.isOpen()) hideWifi(false);
         panel.animate().alpha(0f).setStartDelay(0).setDuration(animate ? 240 : 0).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     panel.setVisibility(View.GONE);
@@ -354,8 +424,33 @@ final class ControlCenter {
                 }).start();
     }
 
+    /** The Wi-Fi sheet slides over the board; the board stops taking focus until it closes. */
+    private void showWifi() {
+        board.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
+                .withEndAction(() -> board.setVisibility(View.INVISIBLE)).start();
+        wifiSheet.open();
+    }
+
+    private void hideWifi(boolean focusToggle) {
+        wifiSheet.close();
+        board.animate().cancel();
+        board.setVisibility(View.VISIBLE);
+        board.setAlpha(1f);
+        refresh();
+        if (focusToggle) wifi.requestFocus();
+    }
+
+    /** Back steps out of the Wi-Fi sheet before it closes Control Center. Returns true if it was used. */
+    boolean back() {
+        if (!wifiSheet.isOpen()) return false;
+        if (!wifiSheet.back()) hideWifi(true);
+        return true;
+    }
+
     /** Arrow keys move between modules by geometry; the volume slider keeps up/down for itself. */
     boolean handleKey(int code, View focused) {
+        // inside the Wi-Fi sheet the list scrolls and focuses itself
+        if (wifiSheet.isOpen()) return false;
         int dir;
         switch (code) {
             case KeyEvent.KEYCODE_DPAD_LEFT:
@@ -451,7 +546,9 @@ final class ControlCenter {
             final String line = "Photos follow the " + ph.toLowerCase(Locale.ROOT) + " outside."
                     + (fresh > 0 ? "\n" + fresh + (fresh == 1 ? " fresh photo" : " fresh photos") + " from Wikimedia's Picture of the Day." : "")
                     + (today >= 0 ? "\n" + Habits.duration(today) + " in apps today." : "");
+            preparePick();
             act.runOnUiThread(() -> {
+                if (shownPick == null) showPick(); // first time: no need to wait for the next opening
                 arc.set(rise, set, now);
                 phase.setText(ph);
                 eventName.setText(evName);
@@ -462,6 +559,43 @@ final class ControlCenter {
                 info.setText(line);
             });
         }, "cc-day").start();
+    }
+
+    /** Off the main thread: the next pick in the pool and its poster, ready for the next opening. */
+    private void preparePick() {
+        if (nextPick != null) return;
+        List<Picks.Pick> all = Picks.load(act);
+        if (all.isEmpty()) return;
+        android.content.SharedPreferences prefs = act.getSharedPreferences("aura", Context.MODE_PRIVATE);
+        int at = prefs.getInt("pick_at", 0);
+        Picks.Pick p = all.get(Math.floorMod(at, all.size()));
+        nextPoster = Picks.poster(p);
+        nextPick = p;
+        prefs.edit().putInt("pick_at", at + 1).apply();
+    }
+
+    /** A different show each time the board opens. */
+    private void showPick() {
+        Picks.Pick p = nextPick;
+        if (p == null) return;
+        shownPick = p;
+        pickPoster.setImageBitmap(nextPoster);
+        pickName.setText(p.name);
+        pickLine.setText(p.line);
+        pickAbout.setText(p.about);
+        pickAbout.setVisibility(p.about.isEmpty() ? View.GONE : View.VISIBLE);
+        pick.setVisibility(View.VISIBLE);
+        nextPick = null;
+        nextPoster = null;
+    }
+
+    /** Its trailer on YouTube, or the TV's own search when YouTube isn't installed. */
+    private void watchTrailer() {
+        if (shownPick == null) return;
+        Intent yt = new Intent(Intent.ACTION_SEARCH).setPackage("com.google.android.youtube.tv")
+                .putExtra(android.app.SearchManager.QUERY, shownPick.query);
+        Intent any = new Intent("android.search.action.GLOBAL_SEARCH").putExtra(android.app.SearchManager.QUERY, shownPick.query);
+        launch(yt.resolveActivity(act.getPackageManager()) != null ? yt : any, pick);
     }
 
     private static String compact(long ms) {
