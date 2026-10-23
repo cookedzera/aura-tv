@@ -110,3 +110,8 @@ used there: its 4.14 kernel lacks `freezer.killable`.
   public domain), each credited on screen with its photographer and licence.
 - Type: [Inter](https://rsms.me/inter/) by Rasmus Andersson, SIL Open Font License
   (`launcher/src/main/assets/fonts/LICENSE-Inter.txt`).
+
+## License
+
+The code is [MIT](LICENSE) © 2026 iravi. The photographs and the Inter typeface keep their own
+licences, listed above.
