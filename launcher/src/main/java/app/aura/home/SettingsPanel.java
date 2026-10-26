@@ -55,6 +55,14 @@ final class SettingsPanel {
     private boolean confirmClear;
     /** The photo whose removal waits for a second OK. */
     private String confirmPhoto;
+    /** "Checking…" while Block ads confirms the filter works; null otherwise. */
+    private String shieldNote;
+    /** What the text field is for: "city" or "dns". */
+    private String inputFor = "city";
+    /** Speeds measured by Find the fastest, by hostname; -1 when unreachable. */
+    private final java.util.Map<String, Long> probed = new java.util.HashMap<>();
+    private final java.util.Set<String> blocksAds = new java.util.HashSet<>();
+    private boolean probing;
     private Updater.Release release;
     private String updateState = "", updateNote = "";
     private Drop drop;
@@ -110,7 +118,9 @@ final class SettingsPanel {
         city.setBackground(field);
         city.setVisibility(View.GONE);
         city.setOnEditorActionListener((v, id, e) -> {
-            findCity(city.getText().toString().trim());
+            // the same field takes a city for the weather or a hostname for Block ads
+            if ("dns".equals(inputFor)) setCustomDns(city.getText().toString().trim());
+            else findCity(city.getText().toString().trim());
             return true;
         });
         right.addView(city, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(40)));
@@ -234,6 +244,18 @@ final class SettingsPanel {
                 host.applied("widgets");
                 build();
             });
+        } else if (page.equals("shield")) {
+            Ui.fit(title, "Block ads", Ui.dp(300), 52, 30);
+            note.setText("Ad and tracker servers get no answer, in every app at once. Pick a filter, or find the fastest one from this TV.");
+            add("Block ads", shieldNote != null ? shieldNote : Shield.on(act) ? "On" : "Off", "shield:on", this::toggleShield);
+            String current = Shield.host(act);
+            boolean custom = true;
+            for (String[] f : Shield.FILTERS) {
+                if (f[0].equals(current)) custom = false;
+                add(f[1], filterValue(f[0], f[2], current), "dns:" + f[0], () -> pickFilter(f[0], f[1]));
+            }
+            add("Your own DNS", custom ? filterValue(current, current, current) : "Type a hostname", "dns:custom", this::askDns);
+            add("Find the fastest", probing ? "Measuring…" : "", "dns:probe", this::findFastest);
         } else if (page.equals("wallpaper")) {
             Ui.fit(title, "Wallpaper", Ui.dp(300), 52, 30);
             note.setText("Photographs that follow the sky, or pure black: on an OLED screen almost every pixel stays off, and the screensaver becomes a drifting clock.");
@@ -322,6 +344,7 @@ final class SettingsPanel {
             add("Wallpaper", Prefs.on(act, Prefs.BLACK) ? "Pure black" : "Photographs", "wallpaper", () -> go("wallpaper"));
             int mine = Mine.count(act);
             add("From your phone", mine > 0 ? mine + (mine == 1 ? " photo" : " photos") : "Photos and GIFs", "drop", this::openDrop);
+            add("Block ads", Shield.on(act) ? "On · " + Shield.name(act) : "Off", "shield", () -> go("shield"));
             toggle("Tonight's pick", Prefs.PICKS, "On", "Off", "picks");
             toggle("Weather", Prefs.WEATHER, "On", "Off", "weather");
             boolean manual = Prefs.of(act).getBoolean("geo_manual", false);
@@ -357,6 +380,128 @@ final class SettingsPanel {
     }
 
     // ---- from your phone ---------------------------------------------------------------------
+
+    // ---- block ads ----------------------------------------------------------------------------
+
+    /** "In use", else the speed measured here (and whether it blocks), else what it's for. */
+    private String filterValue(String host, String about, String current) {
+        Long ms = probed.get(host);
+        String speed = ms == null ? null : ms < 0 ? "Unreachable" : ms + " ms" + (blocksAds.contains(host) ? "" : " · no blocking");
+        if (host.equals(current)) return "In use" + (speed != null ? "  ·  " + speed : "");
+        return speed != null ? speed : about;
+    }
+
+    private void pickFilter(String hostname, String name) {
+        if (shieldNote != null) return;
+        boolean was = Shield.on(act);
+        Shield.choose(act, hostname);
+        if (!was) {
+            host.hud(R.drawable.ic_check, name + " chosen  ·  switch Block ads on to use it");
+            build();
+            return;
+        }
+        // already blocking: the TV moves to the new filter now, and it's checked like a fresh switch-on
+        checkShield(name);
+    }
+
+    private void askDns() {
+        inputFor = "dns";
+        city.setHint("A DNS-over-TLS hostname, e.g. dns.example.com");
+        city.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        city.setText("");
+        city.setVisibility(View.VISIBLE);
+        city.requestFocus();
+        city.post(() -> act.getSystemService(InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
+    }
+
+    /** A hostname you typed: tried from the TV first, so a typo can never cut the internet. */
+    private void setCustomDns(String hostname) {
+        if (hostname.isEmpty()) return;
+        hideKeyboard();
+        city.setVisibility(View.GONE);
+        String h = hostname.replaceFirst("^(tls|https)://", "").replaceAll("/.*$", "").toLowerCase(java.util.Locale.ROOT);
+        host.hud(R.drawable.ic_info, "Trying " + h + "…");
+        new Thread(() -> {
+            Shield.Probe p = Shield.probe(h);
+            act.runOnUiThread(() -> {
+                if (p == null) {
+                    host.hud(R.drawable.ic_info, "Couldn't reach " + h + " for private DNS");
+                    build();
+                    return;
+                }
+                probed.put(h, p.ms);
+                if (p.blocks) blocksAds.add(h);
+                pickFilter(h, h);
+                build();
+            });
+        }, "dns-custom").start();
+    }
+
+    /** Measures every filter from this TV and moves focus to the fastest one that blocks ads. */
+    private void findFastest() {
+        if (probing) return;
+        probing = true;
+        build();
+        new Thread(() -> {
+            String best = null;
+            long bestMs = Long.MAX_VALUE;
+            for (String[] f : Shield.FILTERS) {
+                Shield.Probe p = Shield.probe(f[0]);
+                final long ms = p == null ? -1 : p.ms;
+                final boolean blocks = p != null && p.blocks;
+                act.runOnUiThread(() -> {
+                    probed.put(f[0], ms);
+                    if (blocks) blocksAds.add(f[0]);
+                    if (page.equals("shield")) build();
+                });
+                if (p != null && p.blocks && p.ms < bestMs) {
+                    bestMs = p.ms;
+                    best = f[1];
+                }
+            }
+            final String b = best;
+            final long bm = bestMs;
+            act.runOnUiThread(() -> {
+                probing = false;
+                host.hud(R.drawable.ic_check, b != null ? "Fastest from this TV: " + b + "  ·  " + bm + " ms" : "None of the filters answered");
+                if (page.equals("shield")) build();
+                for (String[] f : Shield.FILTERS) if (f[1].equals(b)) focusTag("dns:" + f[0]);
+            });
+        }, "dns-probe").start();
+    }
+
+    private void toggleShield() {
+        if (shieldNote != null) return;
+        if (!Shield.allowed(act)) {
+            host.hud(R.drawable.ic_info, "Run setup-aura.ps1 once to let Aura block ads");
+            return;
+        }
+        if (Shield.on(act)) {
+            Shield.set(act, false);
+            host.hud(R.drawable.ic_check, "Ads are no longer blocked");
+            build();
+            return;
+        }
+        Shield.set(act, true);
+        checkShield(Shield.name(act));
+    }
+
+    /** Confirms the TV is online through the filter; if not, blocking goes off again at once. */
+    private void checkShield(String name) {
+        shieldNote = "Checking…";
+        build();
+        new Thread(() -> {
+            boolean ok = Shield.verify(act);
+            // never leave the TV without internet: switch straight back if the filter can't be reached
+            if (!ok) Shield.set(act, false);
+            act.runOnUiThread(() -> {
+                shieldNote = null;
+                host.hud(ok ? R.drawable.ic_check : R.drawable.ic_info,
+                        ok ? "Blocking ads with " + name : "Couldn't reach " + name + ", so blocking is off again");
+                build();
+            });
+        }, "shield").start();
+    }
 
     // ---- updates ------------------------------------------------------------------------------
 
@@ -633,6 +778,9 @@ final class SettingsPanel {
     // ---- weather city ------------------------------------------------------------------------
 
     private void askCity() {
+        inputFor = "city";
+        city.setHint("Type a city, then OK");
+        city.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
         city.setText("");
         city.setVisibility(View.VISIBLE);
         city.requestFocus();

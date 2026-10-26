@@ -80,6 +80,11 @@ and sound settings, a memory boost and standby.
 **Tonight's pick** puts a top-rated show beside the clock (from TVmaze); OK finds its trailer.
 **Gentle Sleep** fades the volume over the timer's last minute, then puts the TV to standby.
 **Live Inputs** turns a set-top box or console that just switched on into the first tile.
+**Block ads**, in Settings, stops ad and tracker servers for every app at once through Android's
+own Private DNS: no VPN, nothing running in the background. Pick a filter (Hagezi Pro++, AdGuard,
+Control D, Mullvad, AdGuard Family) or type your own, and *Find the fastest* measures each one from
+your TV. If the internet stops working with it on, it switches itself back off.
+
 **Settings**, from the sidebar: glass or original tiles, app names, widgets, a **pure black**
 wallpaper for OLED screens, weather city, hidden apps, switches for every extra, and **Updates**,
 which installs new releases from GitHub in place (Android asks you to confirm).

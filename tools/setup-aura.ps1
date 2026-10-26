@@ -29,6 +29,8 @@ if (((& $adb -s $Tv get-state 2>&1) -join '') -notmatch 'device') { throw "TV $T
 & $adb -s $Tv shell cmd notification allow_listener app.aura.home/app.aura.home.MediaWatch
 # Continue Watching reads Android TV's Watch Next list
 & $adb -s $Tv shell pm grant app.aura.home android.permission.READ_TV_LISTINGS
+# Settings > Block ads points the TV's Private DNS at AdGuard DNS; this lets Aura change that one setting
+& $adb -s $Tv shell pm grant app.aura.home android.permission.WRITE_SECURE_SETTINGS
 # Settings > Updates installs new releases from GitHub (Android still asks to confirm each one)
 & $adb -s $Tv shell appops set app.aura.home REQUEST_INSTALL_PACKAGES allow
 # Test it before relying on it: on the Acer DIX41RKF, Google Play services switched location back off

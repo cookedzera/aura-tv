@@ -15,6 +15,8 @@
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <!-- Settings > Updates: installs a newer release from GitHub, after Android's own confirmation -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Settings > Block ads switches the TV's Private DNS to AdGuard DNS; granted once over ADB at setup -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <!-- usage history for For You and Today; activated once over ADB with "appops set ... GET_USAGE_STATS allow" -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
