@@ -252,6 +252,30 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         handler.removeCallbacks(warmCc);
         handler.postDelayed(warmCc, 1500);
         if (Prefs.on(this, Prefs.STACK_AUTO) && fyW.getVisibility() == View.VISIBLE) stack.start();
+        askForListings();
+        showUpdate();
+    }
+
+    /**
+     * Continue Watching needs the TV listings permission. Setup grants it over ADB, but it can be
+     * lost (a reinstall, a reset), so Aura asks on screen when it's missing, at most once a week.
+     */
+    private void askForListings() {
+        String perm = "android.permission.READ_TV_LISTINGS";
+        if (splash != null || checkSelfPermission(perm) == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+        long asked = prefs.getLong("listings_asked", 0), now = System.currentTimeMillis();
+        if (now - asked < 7L * 86_400_000) return;
+        prefs.edit().putLong("listings_asked", now).apply();
+        handler.postDelayed(() -> {
+            if (resumed && !ccOpen && !settings.isOpen()) requestPermissions(new String[]{perm}, 41);
+        }, 1500);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        super.onRequestPermissionsResult(code, perms, results);
+        // Continue Watching appears as soon as it's allowed
+        if (code == 41 && results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) refreshWidgets(true);
     }
 
     @Override
@@ -582,6 +606,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         col.addView(Ui.rule(this, 0x33FFFFFF), rl);
         addSide(col, R.drawable.ic_tune, "Control Center", () -> openCc(false), false);
         addSide(col, R.drawable.ic_settings, "Settings", this::openSettings, false);
+        // a small red dot on Settings while a new version of Aura waits, as on iOS
+        updateDot = redDot(this);
+        ((FrameLayout) side.get(side.size() - 1)).addView(updateDot, frame(Ui.dp(8), Ui.dp(8), Gravity.TOP | Gravity.END, 0, Ui.dp(6), Ui.dp(6), 0));
         sidebar.addView(col, new FrameLayout.LayoutParams(MATCH, WRAP));
         home.addView(sidebar, frame(Ui.dp(58), WRAP, Gravity.START | Gravity.CENTER_VERTICAL, Ui.dp(22), 0, 0, 0));
 
@@ -593,6 +620,46 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tip.setVisibility(View.INVISIBLE);
         home.addView(tip, frame(WRAP, Ui.dp(30), Gravity.TOP | Gravity.START, Ui.dp(22 + 58 + 12), 0, 0, 0));
     }
+
+    private View updateDot;
+
+    /** The small red notification dot, with a hairline ring so it reads on any colour. */
+    static View redDot(Context c) {
+        View d = new View(c);
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        g.setColor(0xFFFF453A);
+        g.setStroke(Math.max(1, Ui.hair()), 0x66000000);
+        d.setBackground(g);
+        d.setVisibility(View.GONE);
+        return d;
+    }
+
+    /** The dot follows whether a new version is waiting and unseen; the message comes once per version. */
+    private void showUpdate() {
+        handler.removeCallbacks(tellUpdate);
+        updateDot.setVisibility(Updater.unseen(this) ? View.VISIBLE : View.GONE);
+        if (Updater.pending(this) != null) handler.postDelayed(tellUpdate, 2500);
+    }
+
+    /**
+     * The one-time message, shown only when it can really be seen: after the boot screen, on the
+     * home screen itself. Until then it waits, and only a message actually shown counts as told.
+     */
+    private final Runnable tellUpdate = new Runnable() {
+        @Override
+        public void run() {
+            if (!resumed) return;
+            if (splash != null || ccOpen || settings.isOpen() || photo) {
+                handler.postDelayed(this, 2000);
+                return;
+            }
+            String v = Updater.pending(HomeActivity.this);
+            if (v != null && Updater.tellOnce(HomeActivity.this)) {
+                showHud(R.drawable.ic_bolt, "Aura " + v + " is out  ·  Settings → Updates", 5000);
+            }
+        }
+    };
 
     private void addSide(LinearLayout col, int iconRes, String label, Runnable action, boolean current) {
         Pad p = new Pad(this, null, 21, 0f);
@@ -815,10 +882,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         for (String pkg : order) sorted.add(find(pkg));
         for (AppRepo.App a : apps) if (!order.contains(a.pkg)) sorted.add(a);
         sorted.removeAll(hiddenApps());
-        boolean glassTiles = Prefs.on(this, Prefs.GLASS_TILES), namesAlways = Prefs.on(this, Prefs.NAMES_ALWAYS);
+        String style = Prefs.tileStyle(this);
+        boolean glassTiles = style.equals("glass"), namesAlways = Prefs.on(this, Prefs.NAMES_ALWAYS);
         for (final AppRepo.App a : sorted) {
-            // glass panes with the app's mark, tinted in its colour (or, if chosen, the original banners)
-            final Cell cell = new Cell(this, glassTiles ? Tiles.glass(a) : Tiles.app(a), a.color, a.label, a.pkg, TILE_W, TILE_H);
+            // glass panes tinted in the app's colour, its colour vivid, midnight, or the original banners
+            Tiles.Painter art = glassTiles ? Tiles.glass(a) : style.equals("vivid") ? Tiles.vivid(a)
+                    : style.equals("midnight") ? Tiles.midnight(a) : Tiles.app(a);
+            final Cell cell = new Cell(this, art, a.color, a.label, a.pkg, TILE_W, TILE_H);
             if (glassTiles) cell.card.glass = backdrop;
             cell.setNamesAlways(namesAlways);
             cell.card.sway = true;
@@ -899,13 +969,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             final Object[] r = recent;
             // what you're partway through outranks habits
             final List<Continue.Item> cw = habits ? Continue.all(app, 4) : null;
+            final Extras x = habits ? extras(app) : null;
             final long data = dataToday(app, c.getTimeInMillis());
             runOnUiThread(() -> {
                 if (isDestroyed()) return;
                 applySky(now, rise, set, up, next, phase);
                 applyToday(today, top);
                 showData(data);
-                if (s != null) applyStack(cw, s, r, top, now);
+                if (s != null) applyStack(cw, s, r, top, now, x);
             });
         });
     }
@@ -1005,28 +1076,72 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tdMem.setText(mi.availMem / (1024 * 1024) + " MB free");
     }
 
+    /** What the stack shows beyond your own history: new releases on your apps and tonight's pick, art decoded. */
+    private static final class Extras {
+        final List<Fresh.Show> shows = new ArrayList<>();
+        final List<android.graphics.Bitmap> art = new ArrayList<>();
+        Picks.Pick pick;
+        android.graphics.Bitmap pickArt;
+    }
+
+    /** Off the main thread: up to four new releases and one random pick, with their pictures. */
+    private static Extras extras(Context c) {
+        Extras x = new Extras();
+        for (Fresh.Show s : Fresh.load(c)) {
+            if (x.shows.size() >= 4) break;
+            android.graphics.Bitmap b = Fresh.art(s);
+            if (b == null) continue;
+            x.shows.add(s);
+            x.art.add(b);
+        }
+        if (Prefs.on(c, Prefs.PICKS)) {
+            List<Picks.Pick> pool = Picks.load(c);
+            if (!pool.isEmpty()) {
+                // the same pick all evening, a new one tomorrow
+                Picks.Pick p = pool.get((int) ((System.currentTimeMillis() / 86_400_000L) % pool.size()));
+                x.pickArt = Picks.poster(p);
+                if (x.pickArt != null) x.pick = p;
+            }
+        }
+        return x;
+    }
+
     /**
-     * The smart stack's cards, most useful first: everything you're partway through, your usual
-     * app for this hour, what you opened last, and what you've watched most today.
+     * The smart stack's cards, most useful first: a new episode of something you're watching,
+     * everything you're partway through, your usual app for this hour, what's new today on your
+     * apps, what you opened last, what you've watched most today, and tonight's pick.
      */
-    private void applyStack(List<Continue.Item> cw, Map<String, Float> score, Object[] recent, String top, long now) {
+    private void applyStack(List<Continue.Item> cw, Map<String, Float> score, Object[] recent, String top, long now, Extras x) {
         List<SmartStack.Slide> out = new ArrayList<>();
         Set<String> used = new HashSet<>();
+        Set<Fresh.Show> claimed = new HashSet<>();
         for (Continue.Item it : cw) {
             SmartStack.Slide s = new SmartStack.Slide();
             AppRepo.App owner = it.pkg == null ? null : find(it.pkg);
-            s.kicker = "CONTINUE WATCHING" + (owner != null ? "  ·  " + owner.label.toUpperCase(Locale.getDefault()) : "");
+            String app = owner != null ? "  ·  " + owner.label.toUpperCase(Locale.getDefault()) : "";
+            Fresh.Show fresh = x == null ? null : sameShow(it.title, x.shows);
+            s.kicker = (fresh != null ? "NEW EPISODE OUT" : "CONTINUE WATCHING") + app;
             s.title = it.title;
-            s.sub = it.sub;
+            s.sub = fresh != null && !fresh.episode.isEmpty() ? fresh.episode : it.sub;
             s.art = it.art;
             s.progress = it.progress;
             s.intent = it.intent;
             s.label = it.title;
+            s.fresh = fresh != null;
+            // what you're watching stays a little longer than a suggestion
+            s.dwellMs = 9_000;
             if (owner != null) {
                 s.color = owner.color;
+                s.icon = owner.icon;
                 if (s.art == null) s.mark = Tiles.glass(owner);
             }
-            out.add(s);
+            // a new episode of something you're already watching goes first
+            if (fresh != null) {
+                claimed.add(fresh);
+                out.add(0, s);
+            } else {
+                out.add(s);
+            }
         }
         AppRepo.App usual = null;
         float best = 1.2f; // about two recent visits at this hour before it counts as a habit
@@ -1044,10 +1159,44 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             out.add(appSlide(usual, "YOUR " + hour + " USUAL", "You tend to open it around this time"));
             used.add(usual.pkg);
         }
+        // new today on the streaming apps you have, with the show's own artwork
+        for (int i = 0; x != null && i < x.shows.size(); i++) {
+            Fresh.Show f = x.shows.get(i);
+            AppRepo.App owner = find(f.pkg);
+            if (claimed.contains(f) || owner == null) continue;
+            SmartStack.Slide s = new SmartStack.Slide();
+            s.kicker = "NEW TODAY  ·  " + owner.label.toUpperCase(Locale.getDefault());
+            s.title = f.name;
+            s.sub = f.episode.isEmpty() ? "Out now on " + owner.label : f.episode;
+            s.art = x.art.get(i);
+            s.color = owner.color;
+            s.icon = owner.icon;
+            s.fresh = true;
+            s.intent = owner.launch;
+            s.label = owner.label;
+            out.add(s);
+        }
         AppRepo.App last = recent != null ? find((String) recent[0]) : null;
         if (last != null && used.add(last.pkg)) out.add(appSlide(last, "JUMP BACK IN", "Opened " + Habits.ago(now - (Long) recent[1])));
         AppRepo.App most = top != null && watchable(top) ? find(top) : null;
         if (most != null && used.add(most.pkg)) out.add(appSlide(most, "MOST WATCHED TODAY", "Where most of today's screen time went"));
+        if (x != null && x.pick != null) {
+            SmartStack.Slide s = new SmartStack.Slide();
+            s.kicker = "TONIGHT'S PICK  ·  TOP RATED";
+            s.title = x.pick.name;
+            s.sub = x.pick.line;
+            s.art = x.pickArt;
+            s.color = 0xFFE8B04A;
+            Intent yt = new Intent(Intent.ACTION_SEARCH).setPackage("com.google.android.youtube.tv")
+                    .putExtra(android.app.SearchManager.QUERY, x.pick.query);
+            s.intent = yt.resolveActivity(getPackageManager()) != null ? yt
+                    : new Intent("android.search.action.GLOBAL_SEARCH").putExtra(android.app.SearchManager.QUERY, x.pick.query);
+            s.label = x.pick.name + " trailer";
+            s.dwellMs = 6_000;
+            out.add(s);
+        }
+        // nine cards at most, so the dots stay a glance; the pick (last) always keeps its place
+        while (out.size() > 9) out.remove(out.size() - 2);
         if (out.isEmpty()) {
             for (Cell cell : cells) {
                 AppRepo.App a = watchable(cell.tag) ? find(cell.tag) : null;
@@ -1060,6 +1209,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         stack.setSlides(out);
     }
 
+    /** A release of the show you're partway through: names matched loosely, ignoring case and punctuation. */
+    private static Fresh.Show sameShow(String title, List<Fresh.Show> shows) {
+        String t = title == null ? "" : title.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        if (t.length() < 3) return null;
+        for (Fresh.Show s : shows) {
+            String n = s.name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+            if (n.length() >= 3 && (t.startsWith(n) || n.startsWith(t))) return s;
+        }
+        return null;
+    }
+
     private SmartStack.Slide appSlide(AppRepo.App a, String kicker, String sub) {
         SmartStack.Slide s = new SmartStack.Slide();
         s.kicker = kicker;
@@ -1067,8 +1227,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         s.sub = sub;
         s.mark = Tiles.glass(a);
         s.color = a.color;
+        s.icon = a.icon;
         s.intent = a.launch;
         s.label = a.label;
+        s.dwellMs = 6_000;
         return s;
     }
 
@@ -1433,6 +1595,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     if (widgetAt < widgets.size() - 1) focusWidget(widgetAt + 1);
                 } else if (code == KeyEvent.KEYCODE_DPAD_DOWN && !cells.isEmpty()) {
                     focusGrid(Math.min(cells.size() - 1, colForWidget(widgetAt)));
+                } else if (code == KeyEvent.KEYCODE_DPAD_UP && !held && widgets.get(widgetAt) == fyW) {
+                    // nothing sits above the stack, so Up flips to its next card, as a swipe would on iOS
+                    stack.flip();
                 }
                 return true;
             default: {
@@ -1685,8 +1850,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (!digital || info.isHidden(this)) continue;
             if (tim.getInputState(info.getId()) != TvInputManager.INPUT_STATE_CONNECTED) continue;
             CharSequence custom = info.loadCustomLabel(this);
-            String label = String.valueOf(custom != null && custom.length() > 0 ? custom : info.loadLabel(this));
-            out.add(new String[]{info.getId(), label.replaceAll("(?i)^hdmi\\s*(\\d)", "HDMI $1")});
+            String label = custom != null && custom.length() > 0 ? String.valueOf(custom)
+                    : Cec.name(this, String.valueOf(info.loadLabel(this)).replaceAll("(?i)^hdmi\\s*(\\d)", "HDMI $1"));
+            out.add(new String[]{info.getId(), label});
         }
         return out;
     }
@@ -1833,6 +1999,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 break;
             case "widgets":
                 layoutWidgets(true);
+                break;
+            case "update":
+                updateDot.setVisibility(Updater.unseen(this) ? View.VISIBLE : View.GONE);
                 break;
             case "photos":
             case "daily":

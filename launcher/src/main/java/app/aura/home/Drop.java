@@ -48,9 +48,13 @@ final class Drop {
         void onFailed(String name, String why);
 
         void onChanged();
+
+        /** An app arrived and Android is asking, on the TV, whether to install it. */
+        void onApk(String name);
     }
 
     private static final int PORT = 8686;
+    private static final long MAX_APK = 500L << 20;
     private static final String ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
 
     private final Context app;
@@ -179,6 +183,10 @@ final class Drop {
         }
         String name = args.containsKey("name") ? args.get("name") : "";
         int index = number(args.get("i")), count = Math.max(1, number(args.get("n")));
+        if (name.toLowerCase(Locale.ROOT).endsWith(".apk")) {
+            apk(s, in, len, name, index, count);
+            return;
+        }
         if (len <= 0 || len > Mine.MAX_BYTES) {
             fail(s, name, 413, len <= 0 ? "Nothing arrived" : "Too big for the TV (40 MB at most)");
             return;
@@ -214,6 +222,37 @@ final class Drop {
         } catch (Mine.Unsupported e) {
             fail(s, name, 415, e.getMessage());
         }
+    }
+
+    /**
+     * An app sent from the phone streams straight into Android's installer, which then asks on
+     * the TV whether to install it. Nothing installs without that confirmation.
+     */
+    private void apk(Socket s, InputStream in, long len, String name, int index, int count) throws IOException, JSONException {
+        if (len <= 0 || len > MAX_APK) {
+            fail(s, name, 413, len <= 0 ? "Nothing arrived" : "Too big (500 MB at most)");
+            return;
+        }
+        if (!Updater.allowed(app)) {
+            fail(s, name, 403, "The TV doesn't let Aura install apps yet: run setup-aura.ps1 once");
+            return;
+        }
+        final long[] shown = {0};
+        try {
+            Updater.stream(app, in, len, null, (done, total) -> {
+                long now = SystemClock.uptimeMillis();
+                if (now - shown[0] > 120 || done == total) {
+                    shown[0] = now;
+                    main.post(() -> listener.onProgress(name, done, total, index, count));
+                }
+            });
+        } catch (IOException e) {
+            main.post(() -> listener.onFailed(name, "The upload stopped part-way"));
+            throw e;
+        }
+        main.post(() -> listener.onApk(name));
+        send(s, 200, "application/json", new JSONObject().put("ok", true).put("apk", true).put("title", name)
+                .toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private void fail(Socket s, String name, int code, String why) throws IOException, JSONException {
@@ -305,7 +344,7 @@ final class Drop {
 
     private static void send(Socket s, int code, String type, byte[] body, String extra) throws IOException {
         String reason = code == 200 ? "OK" : code == 302 ? "Found" : code == 404 ? "Not Found"
-                : code == 413 ? "Payload Too Large" : code == 415 ? "Unsupported Media Type" : "Error";
+                : code == 403 ? "Forbidden" : code == 413 ? "Payload Too Large" : code == 415 ? "Unsupported Media Type" : "Error";
         String h = "HTTP/1.1 " + code + " " + reason + "\r\nContent-Type: " + type + "\r\nContent-Length: " + body.length
                 + "\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n" + extra + "\r\n";
         OutputStream o = s.getOutputStream();

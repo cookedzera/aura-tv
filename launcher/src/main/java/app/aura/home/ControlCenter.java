@@ -640,8 +640,9 @@ final class ControlCenter {
 
     private String label(TvInputInfo info) {
         CharSequence custom = info.loadCustomLabel(act);
-        String s = String.valueOf(custom != null && custom.length() > 0 ? custom : info.loadLabel(act));
-        return s.replaceAll("(?i)^hdmi\\s*(\\d)", "HDMI $1");
+        if (custom != null && custom.length() > 0) return String.valueOf(custom);
+        // a name you gave the input wins; otherwise the device's own name over HDMI-CEC
+        return Cec.name(act, String.valueOf(info.loadLabel(act)).replaceAll("(?i)^hdmi\\s*(\\d)", "HDMI $1"));
     }
 
     /** One input in the switcher: port glyph, name, and a dot when something is plugged in. */
@@ -710,6 +711,8 @@ final class ControlCenter {
         final long before = freeBytes();
         boostValue.setText("Freeing…");
         new Thread(() -> {
+            // who holds the memory before freeing it, so the result can name them
+            List<Ram.Use> heavy = Reports.allowed(act) ? Ram.heaviest(act) : new ArrayList<>();
             for (ApplicationInfo ai : act.getPackageManager().getInstalledApplications(0)) {
                 String p = ai.packageName;
                 if (KEEP_ALIVE.contains(p) || p.startsWith("com.realtek") || p.equals(act.getPackageName())) continue;
@@ -717,11 +720,59 @@ final class ControlCenter {
             }
             SystemClock.sleep(900);
             final long freed = Math.max(0, freeBytes() - before) / (1024 * 1024);
+            final String who = heaviestFreed(heavy);
+            // some TVs (Android 11 here) refuse to close other apps for a launcher; then say who's
+            // holding memory instead of claiming a saving that didn't happen
+            final String holders = who == null ? holders(heavy) : null;
             act.runOnUiThread(() -> {
                 refreshMemory();
-                host.hud(R.drawable.ic_bolt, freed >= 8 ? "Freed " + freed + " MB of memory" : "Memory is already lean");
+                String msg = who != null ? "Freed " + freed + " MB  ·  " + who
+                        : holders != null ? holders + " · the TV frees them when it needs room"
+                        : "Memory is already lean";
+                host.hud(R.drawable.ic_bolt, msg);
             });
         }, "boost").start();
+    }
+
+    /**
+     * "Netflix was holding 80 MB": the biggest app whose memory went, by its own name. An app
+     * that restarted a small helper still counts if most of its memory was given back.
+     */
+    private String heaviestFreed(List<Ram.Use> before) {
+        if (before.isEmpty()) return null;
+        java.util.Map<String, Long> now = new java.util.HashMap<>();
+        for (Ram.Use u : Ram.heaviest(act)) now.put(u.pkg, u.kb);
+        for (Ram.Use u : before) {
+            long left = now.containsKey(u.pkg) ? now.get(u.pkg) : 0;
+            if (u.kb - left < 20 * 1024 || left > u.kb / 2 || u.pkg.equals(act.getPackageName())) continue;
+            try {
+                CharSequence name = act.getPackageManager().getApplicationLabel(act.getPackageManager().getApplicationInfo(u.pkg, 0));
+                return name + " was holding " + ((u.kb - left) / 1024) + " MB";
+            } catch (android.content.pm.PackageManager.NameNotFoundException ignored) {
+                // a system process rather than an app: look further down the list
+            }
+        }
+        return null;
+    }
+
+    /** "Netflix 160 MB, Sony LIV 90 MB": the two biggest apps waiting in the background, by name. */
+    private String holders(List<Ram.Use> heavy) {
+        StringBuilder b = new StringBuilder();
+        int n = 0;
+        android.content.pm.PackageManager pm = act.getPackageManager();
+        for (Ram.Use u : heavy) {
+            if (n >= 2 || u.kb < 30 * 1024) break;
+            if (u.pkg.equals(act.getPackageName()) || KEEP_ALIVE.contains(u.pkg)) continue;
+            try {
+                android.content.pm.ApplicationInfo ai = pm.getApplicationInfo(u.pkg, 0);
+                // the apps you open, not the TV's own services
+                if ((ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0 && pm.getLeanbackLaunchIntentForPackage(u.pkg) == null) continue;
+                b.append(n == 0 ? "" : ", ").append(pm.getApplicationLabel(ai)).append(' ').append(u.kb / 1024).append(" MB");
+                n++;
+            } catch (android.content.pm.PackageManager.NameNotFoundException ignored) {
+            }
+        }
+        return n == 0 ? null : b.toString();
     }
 
     private long freeBytes() {

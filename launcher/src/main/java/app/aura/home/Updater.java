@@ -79,6 +79,46 @@ final class Updater {
         return false;
     }
 
+    // ---- noticing a new version ----------------------------------------------------------------
+
+    /**
+     * From the daily background job: remember the newest version on GitHub, so home can point it
+     * out. One small request at most every few hours; never downloads anything by itself.
+     */
+    static void notice(Context c) {
+        try {
+            Release r = latest();
+            if (r != null) Prefs.of(c).edit().putString("update_ver", r.version).apply();
+        } catch (Exception ignored) {
+            // offline or rate-limited: the next run tries again
+        }
+    }
+
+    /** The newer version waiting on GitHub, or null when Aura is up to date. */
+    static String pending(Context c) {
+        String v = Prefs.of(c).getString("update_ver", null);
+        return v != null && newer(v, installed(c)) ? v : null;
+    }
+
+    /** The red dot shows until you've opened Updates for this version. */
+    static boolean unseen(Context c) {
+        String v = pending(c);
+        return v != null && !v.equals(Prefs.of(c).getString("update_seen", ""));
+    }
+
+    static void seen(Context c) {
+        String v = pending(c);
+        if (v != null) Prefs.of(c).edit().putString("update_seen", v).apply();
+    }
+
+    /** The one-time message: true the first time for each new version, then never again. */
+    static boolean tellOnce(Context c) {
+        String v = pending(c);
+        if (v == null || v.equals(Prefs.of(c).getString("update_told", ""))) return false;
+        Prefs.of(c).edit().putString("update_told", v).apply();
+        return true;
+    }
+
     static String installed(Context c) {
         try {
             return c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;
@@ -94,30 +134,45 @@ final class Updater {
 
     /** Downloads the release into an install session and commits it; Android then asks to confirm. */
     static void install(Context c, Release r, Progress p) throws IOException {
+        HttpURLConnection con = open(r.apk);
+        try (InputStream in = con.getInputStream()) {
+            long total = con.getContentLengthLong() > 0 ? con.getContentLengthLong() : r.size;
+            stream(c, in, total, c.getPackageName(), p);
+        } finally {
+            con.disconnect();
+        }
+    }
+
+    /**
+     * Streams an APK into an install session and commits it; Android then shows its own confirm
+     * screen. {@code pkg} pins the session to one app (Aura's own updates), or null for any app,
+     * such as one sent from a phone. Nothing is written to storage first.
+     */
+    static void stream(Context c, InputStream in, long total, String pkg, Progress p) throws IOException {
         PackageInstaller pi = c.getPackageManager().getPackageInstaller();
         PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
-        params.setAppPackageName(c.getPackageName());
+        if (pkg != null) params.setAppPackageName(pkg);
         int id = pi.createSession(params);
-        HttpURLConnection con = open(r.apk);
         try (PackageInstaller.Session s = pi.openSession(id)) {
-            long total = con.getContentLengthLong() > 0 ? con.getContentLengthLong() : r.size;
-            try (InputStream in = con.getInputStream(); OutputStream out = s.openWrite("aura.apk", 0, total > 0 ? total : -1)) {
+            try (OutputStream out = s.openWrite("app.apk", 0, total > 0 ? total : -1)) {
                 byte[] buf = new byte[64 * 1024];
                 long done = 0;
-                for (int n; (n = in.read(buf)) > 0; ) {
+                while (total <= 0 || done < total) {
+                    int n = in.read(buf, 0, total > 0 ? (int) Math.min(buf.length, total - done) : buf.length);
+                    if (n < 0) {
+                        if (total > 0) throw new IOException("cut short");
+                        break;
+                    }
                     out.write(buf, 0, n);
                     done += n;
                     p.onProgress(done, total);
                 }
                 s.fsync(out);
             }
-            Intent done = new Intent(c, Done.class);
-            s.commit(PendingIntent.getBroadcast(c, id, done, PendingIntent.FLAG_UPDATE_CURRENT).getIntentSender());
+            s.commit(PendingIntent.getBroadcast(c, id, new Intent(c, Done.class), PendingIntent.FLAG_UPDATE_CURRENT).getIntentSender());
         } catch (IOException | RuntimeException e) {
             pi.abandonSession(id);
             throw e;
-        } finally {
-            con.disconnect();
         }
     }
 
@@ -133,8 +188,9 @@ final class Updater {
                 String why = i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
                 // a build signed with someone else's key can't replace this one
                 boolean key = why != null && why.toUpperCase(java.util.Locale.ROOT).contains("SIGNATURE");
-                Toast.makeText(c, key ? "This update is signed with a different key: uninstall Aura first, then install it"
-                        : "The update didn't install" + (why != null ? ": " + why : ""), Toast.LENGTH_LONG).show();
+                boolean cancelled = status == PackageInstaller.STATUS_FAILURE_ABORTED;
+                if (!cancelled) Toast.makeText(c, key ? "Signed with a different key than the installed app: uninstall that first"
+                        : "It didn't install" + (why != null ? ": " + why : ""), Toast.LENGTH_LONG).show();
             }
         }
     }

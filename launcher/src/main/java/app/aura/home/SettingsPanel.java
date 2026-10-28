@@ -130,7 +130,7 @@ final class SettingsPanel {
         scroll.setFadingEdgeLength(Ui.dp(24));
         scroll.setClipToPadding(false);
         // room on every side for a focused row to grow into, so it's never clipped
-        scroll.setPadding(Ui.dp(14), Ui.dp(14), Ui.dp(14), Ui.dp(14));
+        scroll.setPadding(Ui.dp(14), Ui.dp(8), Ui.dp(14), Ui.dp(8));
         scroll.setClipChildren(false);
         rows = new LinearLayout(a);
         rows.setOrientation(LinearLayout.VERTICAL);
@@ -138,7 +138,8 @@ final class SettingsPanel {
         scroll.addView(rows, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         right.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         // tall enough that the whole main list fits without scrolling: no row is ever cut at an edge
-        FrameLayout.LayoutParams rl = new FrameLayout.LayoutParams(Ui.dp(424), Ui.dp(530), Gravity.END | Gravity.CENTER_VERTICAL);
+        // 13 rows of 35 dp with 4 dp between, and room to grow, inside a 540 dp-tall TV screen
+        FrameLayout.LayoutParams rl = new FrameLayout.LayoutParams(Ui.dp(424), Ui.dp(532), Gravity.END | Gravity.CENTER_VERTICAL);
         rl.rightMargin = Ui.dp(78);
         panel.addView(right, rl);
         panel.setVisibility(View.GONE);
@@ -289,7 +290,7 @@ final class SettingsPanel {
             if (!updateState.equals("checking") && !updateState.equals("downloading")) add("Check again", "", "u:check", this::checkUpdate);
         } else if (page.equals("drop")) {
             Ui.fit(title, "From your phone", Ui.dp(300), 52, 30);
-            note.setText("Point your phone's camera at the code, then choose photos or GIFs. They land on your wall and stay on the TV.");
+            note.setText("Point your phone's camera at the code, then choose photos, GIFs or apps. Photos land on your wall; an app asks here before it installs.");
             LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200));
             cl.bottomMargin = Ui.dp(8);
             rows.addView(dropCard, cl);
@@ -337,14 +338,23 @@ final class SettingsPanel {
             Ui.fit(title, "Settings", Ui.dp(300), 52, 30);
             Weather.Now w = Weather.now(act);
             note.setText("Changes apply at once. Everything here can be undone the same way.");
-            toggle("Tiles", Prefs.GLASS_TILES, "Glass", "Original banners", "tiles");
+            int si = java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act));
+            add("Tiles", Prefs.TILE_NAMES[Math.max(0, si)], "tiles", () -> {
+                // OK steps through the styles; the grid changes straight away behind the panel
+                String next = Prefs.TILE_STYLES[(Math.max(0, si) + 1) % Prefs.TILE_STYLES.length];
+                Prefs.of(act).edit().putString(Prefs.TILE_STYLE, next).apply();
+                host.applied("tiles");
+                build();
+                focusTag("tiles");
+            });
             toggle("App names", Prefs.NAMES_ALWAYS, "Always", "On focus", "names");
             int hiddenW = Prefs.hiddenWidgets(act).size();
             add("Widgets", hiddenW == 0 ? "All shown" : (3 - hiddenW) + " of 3 shown", "widgets", () -> go("widgets"));
             add("Wallpaper", Prefs.on(act, Prefs.BLACK) ? "Pure black" : "Photographs", "wallpaper", () -> go("wallpaper"));
             int mine = Mine.count(act);
-            add("From your phone", mine > 0 ? mine + (mine == 1 ? " photo" : " photos") : "Photos and GIFs", "drop", this::openDrop);
+            add("From your phone", mine > 0 ? mine + (mine == 1 ? " photo" : " photos") : "Photos, GIFs, apps", "drop", this::openDrop);
             add("Block ads", Shield.on(act) ? "On · " + Shield.name(act) : "Off", "shield", () -> go("shield"));
+            add("Animations", animLabel(), "anim", this::cycleAnim);
             toggle("Tonight's pick", Prefs.PICKS, "On", "Off", "picks");
             toggle("Weather", Prefs.WEATHER, "On", "Off", "weather");
             boolean manual = Prefs.of(act).getBoolean("geo_manual", false);
@@ -356,10 +366,21 @@ final class SettingsPanel {
                 build();
             });
             add("Hidden apps", String.valueOf(Prefs.hidden(act).size()), "hidden", () -> go("apps"));
-            add("Updates", "Version " + Updater.installed(act), "updates", () -> {
+            String waiting = Updater.pending(act);
+            add("Updates", waiting != null ? "Aura " + waiting + " is ready" : "Version " + Updater.installed(act), "updates", () -> {
+                // opening it counts as seen: the red dots go
+                Updater.seen(act);
+                host.applied("update");
                 go("updates");
                 checkUpdate();
             });
+            if (Updater.unseen(act)) {
+                View dot = HomeActivity.redDot(act);
+                dot.setVisibility(View.VISIBLE);
+                FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(Ui.dp(7), Ui.dp(7), Gravity.START | Gravity.CENTER_VERTICAL);
+                dl.leftMargin = Ui.dp(5);
+                ((FrameLayout) rows.getChildAt(rows.getChildCount() - 1)).addView(dot, dl);
+            }
             add("Android settings", "", "android", () -> host.open(new Intent(Settings.ACTION_SETTINGS), panel));
         }
         if (keep != null) {
@@ -372,6 +393,8 @@ final class SettingsPanel {
             Prefs.set(act, key, !Prefs.on(act, key));
             host.applied(what);
             build();
+            // rebuilding the app grid (tiles, names) takes focus away: stay on the row you pressed
+            focusTag(key);
         });
     }
 
@@ -380,6 +403,40 @@ final class SettingsPanel {
     }
 
     // ---- from your phone ---------------------------------------------------------------------
+
+    // ---- animation speed ------------------------------------------------------------------------
+
+    private static final String[] ANIM_KEYS = {Settings.Global.WINDOW_ANIMATION_SCALE,
+            Settings.Global.TRANSITION_ANIMATION_SCALE, Settings.Global.ANIMATOR_DURATION_SCALE};
+
+    private float animScale() {
+        return Settings.Global.getFloat(act.getContentResolver(), Settings.Global.ANIMATOR_DURATION_SCALE, 1f);
+    }
+
+    private String animLabel() {
+        float s = animScale();
+        return s <= 0f ? "Off" : s < 0.75f ? "Fast" : s > 1.25f ? "Slow" : "Normal";
+    }
+
+    /**
+     * The whole TV's animation speed, the developer-options trick: Normal, Fast (half as long:
+     * every app and menu feels quicker), or Off. Aura's own motion follows the same setting.
+     */
+    private void cycleAnim() {
+        if (!Shield.allowed(act)) {
+            host.hud(R.drawable.ic_info, "Run setup-aura.ps1 once to let Aura change this");
+            return;
+        }
+        float s = animScale(), next = s > 0.75f ? 0.5f : s > 0f ? 0f : 1f;
+        try {
+            for (String k : ANIM_KEYS) Settings.Global.putFloat(act.getContentResolver(), k, next);
+        } catch (SecurityException e) {
+            host.hud(R.drawable.ic_info, "The TV didn't allow that change");
+            return;
+        }
+        host.hud(R.drawable.ic_bolt, next == 0.5f ? "Everything moves twice as fast" : next == 0f ? "Animations off" : "Animations back to normal");
+        build();
+    }
 
     // ---- block ads ----------------------------------------------------------------------------
 
@@ -519,6 +576,8 @@ final class SettingsPanel {
             }
             final Updater.Release found = r;
             final String s = state;
+            // what the page just found counts too: home's dot and message stay in step
+            if (found != null) Prefs.of(act).edit().putString("update_ver", found.version).apply();
             act.runOnUiThread(() -> {
                 release = found;
                 updateState = s;
@@ -602,7 +661,22 @@ final class SettingsPanel {
             @Override
             public void onChanged() {
                 host.applied("photos");
+                // a photo removed from the phone leaves the card here too
+                for (int i = dropThumbs.getChildCount() - 1; i >= 0; i--) {
+                    Object id = dropThumbs.getChildAt(i).getTag();
+                    if (id instanceof String && !Mine.thumb(act, (String) id).isFile()) dropThumbs.removeViewAt(i);
+                }
+                int n = Mine.count(act);
+                dropTitle.setText(n == 0 ? "Waiting for your phone" : "Removed from your wall");
+                dropSub.setText(n == 0 ? "Same Wi-Fi, no app needed" : n + (n == 1 ? " photo" : " photos") + " from your phone");
                 build();
+            }
+
+            @Override
+            public void onApk(String name) {
+                dropTitle.setText("Install " + shorten(name.replaceFirst("(?i)\\.apk$", "")) + "?");
+                dropSub.setText("Confirm on the TV to install it");
+                dropMeter.setVisibility(View.INVISIBLE);
             }
         });
         dropCard = dropCard(drop.start());
@@ -659,6 +733,7 @@ final class SettingsPanel {
         android.graphics.Bitmap b = android.graphics.BitmapFactory.decodeFile(Mine.thumb(act, id).getPath());
         if (b == null) return;
         android.widget.ImageView iv = new android.widget.ImageView(act);
+        iv.setTag(id);
         iv.setImageBitmap(b);
         iv.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
         iv.setClipToOutline(true);
@@ -770,8 +845,8 @@ final class SettingsPanel {
         }
         p.addView(r, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         p.onClick = run;
-        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(40));
-        l.topMargin = Ui.dp(5);
+        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(35));
+        l.topMargin = Ui.dp(4);
         rows.addView(p, l);
     }
 

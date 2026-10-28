@@ -58,7 +58,55 @@ final class Tiles {
      * background keyed out), or, when the banner has no flat background to key, the app's own icon.
      */
     static Painter glass(AppRepo.App a) {
+        return (c, w, h) -> mark(c, a, w, h);
+    }
+
+    /**
+     * Vivid: the app's own colour as a rich, saturated gradient, lit from the top left, with its
+     * white mark on it, the way app icons look on iOS. Opaque, painted once: as cheap as a tile gets.
+     */
+    static Painter vivid(AppRepo.App a) {
         return (c, w, h) -> {
+            int base = saturate(a.color, 1.25f, 0.62f);
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+            p.setShader(new LinearGradient(0, 0, w * 0.7f, h, Ui.mix(base, 0xFFFFFFFF, 0.10f), Ui.mix(base, 0xFF000000, 0.45f),
+                    Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, w, h, p);
+            // a soft light from above, like a lamp on a glossy surface
+            p.setShader(new RadialGradient(w * 0.3f, -h * 0.35f, w * 0.85f, 0x3DFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, w, h, p);
+            mark(c, a, w, h);
+        };
+    }
+
+    /**
+     * Midnight: near-black, with a faint glow of the app's colour rising from below and its white
+     * mark. Calm in a dark room, and kind to OLED screens.
+     */
+    static Painter midnight(AppRepo.App a) {
+        return (c, w, h) -> {
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+            p.setShader(new LinearGradient(0, 0, 0, h, 0xFF15181E, 0xFF07080B, Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, w, h, p);
+            int glow = saturate(a.color, 1.2f, 0.7f);
+            p.setShader(new RadialGradient(w * 0.5f, h * 1.25f, w * 0.75f, Ui.withAlpha(glow, 0x70), Ui.withAlpha(glow, 0), Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, w, h, p);
+            mark(c, a, w, h);
+        };
+    }
+
+    /** The colour made livelier: saturation scaled, brightness at least {@code minValue}. */
+    private static int saturate(int color, float sat, float minValue) {
+        float[] hsv = new float[3];
+        android.graphics.Color.colorToHSV(color, hsv);
+        hsv[1] = Math.min(1f, hsv[1] * sat);
+        hsv[2] = Math.max(minValue, hsv[2]);
+        return android.graphics.Color.HSVToColor(hsv);
+    }
+
+    /** The app's white mark lifted off its banner, or its own icon as a rounded tile, centred. */
+    private static void mark(Canvas c, AppRepo.App a, int w, int h) {
+        {
             String key = a.pkg + "@" + w + "x" + h;
             if (!LOGOS.containsKey(key)) LOGOS.put(key, a.banner != null ? lift(a.banner, w, h) : null);
             Bitmap logo = LOGOS.get(key);
@@ -84,7 +132,7 @@ final class Tiles {
                 p.setShader(sh);
                 c.drawRoundRect(x, y, x + s, y + s, s * 0.24f, s * 0.24f, p);
             }
-        };
+        }
     }
 
     /**

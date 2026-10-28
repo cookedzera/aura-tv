@@ -13,9 +13,12 @@ public class DailyJob extends JobService {
     @Override
     public boolean onStartJob(JobParameters params) {
         worker = new Thread(() -> {
+            // one small request, first: the photo import below spaces its requests and takes minutes
+            Updater.notice(getApplicationContext());
             boolean complete = Daily.run(getApplicationContext());
             try {
                 Picks.refresh(getApplicationContext());
+                Fresh.refresh(getApplicationContext());
             } catch (java.io.IOException e) {
                 complete = false;
             } catch (InterruptedException e) {

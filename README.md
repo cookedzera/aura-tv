@@ -34,12 +34,15 @@
 <td width="58%"><img src="docs/home.png" alt="Aura's home screen"></td>
 <td>
 
-**Glass tiles.** Each app's logo is lifted off its own banner and set as a white mark on glass
-tinted in the app's colour. Logos that can't be lifted keep their icon, on glass.
+**Four tile styles.** *Glass*: each app's logo lifted off its banner as a white mark on glass tinted
+in its colour. *Vivid*: the app's own colour, lit from above, like iOS icons. *Midnight*: near-black
+with a soft glow of its colour. Or the *original* banners. Pick one in Settings.
 
-**A Smart Stack.** Full-bleed cards that change on their own: every show you're partway through
-(from Android TV's *Continue Watching* list, with the time left), the app you usually open at this
-hour, what you opened last, and what you've watched most today. It holds still while you look at it.
+**A Smart Stack.** Full-bleed cards that flip upward on their own, like iOS widgets: every show
+you're partway through (Android TV's *Continue Watching*, with the time left), a **NEW** badge when a
+new episode is out, what's new today on the streaming apps you have (Indian releases first), your
+usual app for this hour, what you opened last, and tonight's top-rated pick. <kbd>↑</kbd> flips by
+hand; it holds still while you look at it.
 
 **Sky and Today.** *Sky* draws the sun on its arc with the next sunset, for your city. *Today* shows
 time in apps, the internet you've used today (handy on a phone's hotspot) and free memory, and turns
@@ -76,7 +79,9 @@ Press <kbd>Menu</kbd>. A frosted board rises with the time set large beside it: 
 Wi-Fi, Bluetooth, the sleep timer and photo mode, a tall volume slider, your HDMI inputs, picture
 and sound settings, a memory boost and standby.
 
-**Wi-Fi** opens as a sheet: on/off, disconnect, nearby networks with a password field.
+**Wi-Fi** opens as a sheet: the network's name, band and link speed, on/off, disconnect, nearby
+networks with a password field, and a **speed test** (ping, download, upload) that stores nothing.
+**Memory** names the apps holding it. Inputs carry your devices' own names over HDMI-CEC.
 **Tonight's pick** puts a top-rated show beside the clock (from TVmaze); OK finds its trailer.
 **Gentle Sleep** fades the volume over the timer's last minute, then puts the TV to standby.
 **Live Inputs** turns a set-top box or console that just switched on into the first tile.
@@ -84,6 +89,8 @@ and sound settings, a memory boost and standby.
 own Private DNS: no VPN, nothing running in the background. Pick a filter (Hagezi Pro++, AdGuard,
 Control D, Mullvad, AdGuard Family) or type your own, and *Find the fastest* measures each one from
 your TV. If the internet stops working with it on, it switches itself back off.
+**Animations** sets the whole TV's animation speed (Normal, Fast, Off), and a new release of Aura
+is announced once, with a small red dot on Settings until you've looked.
 
 **Settings**, from the sidebar: glass or original tiles, app names, widgets, a **pure black**
 wallpaper for OLED screens, weather city, hidden apps, switches for every extra, and **Updates**,
@@ -114,7 +121,8 @@ with the phone's camera, pick photos or GIFs in the page that opens, and they la
 moment later. No app, no account and no cloud: Aura runs a tiny web server only while that code is
 on screen, reachable only on your network through a one-time link. Portrait shots are framed whole on a
 blurred copy of themselves, GIFs play, and a switch shows only your photos. Remove any of them from
-the TV (*Your photos*) or from the phone's page.
+the TV (*Your photos*) or from the phone's page. Send an **app** (.apk) the same way and the TV asks
+before installing it: no separate send-to-TV app needed.
 
 Leave the TV for a while and the photograph sharpens into **photo mode**; the screensaver uses the
 same story card, with the time and the weather.

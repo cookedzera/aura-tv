@@ -99,9 +99,7 @@ final class Habits {
     static long todayMs(Context c) {
         if (!granted(c)) return -1;
         long total = 0;
-        for (UsageStats s : today(c).values()) {
-            if (!s.getPackageName().equals(c.getPackageName())) total += s.getTotalTimeInForeground();
-        }
+        for (Map.Entry<String, Long> e : today(c).entrySet()) if (!e.getKey().equals(c.getPackageName())) total += e.getValue();
         return total;
     }
 
@@ -110,22 +108,107 @@ final class Habits {
         if (!granted(c)) return null;
         String best = null;
         long most = 5 * 60_000L;
-        for (UsageStats s : today(c).values()) {
-            if (s.getPackageName().equals(c.getPackageName()) || s.getTotalTimeInForeground() <= most) continue;
-            most = s.getTotalTimeInForeground();
-            best = s.getPackageName();
+        for (Map.Entry<String, Long> e : today(c).entrySet()) {
+            if (e.getKey().equals(c.getPackageName()) || e.getValue() <= most) continue;
+            most = e.getValue();
+            best = e.getKey();
         }
         return best;
     }
 
-    private static Map<String, UsageStats> today(Context c) {
+    /**
+     * Today's time per app, kept by Aura itself across restarts. Android writes its usage history
+     * to disk only every so often, so a TV switched off at the wall loses the last stretch and
+     * its own totals drop. Aura counts each boot from the events it's sure of, carries the total
+     * from earlier boots today, and never lets a restart take time away.
+     */
+    private static synchronized Map<String, Long> today(Context c) {
+        long now = System.currentTimeMillis(), boot = now - android.os.SystemClock.elapsedRealtime();
         Calendar cal = Calendar.getInstance();
         cal.set(Calendar.HOUR_OF_DAY, 0);
         cal.set(Calendar.MINUTE, 0);
         cal.set(Calendar.SECOND, 0);
         cal.set(Calendar.MILLISECOND, 0);
-        UsageStatsManager usm = c.getSystemService(UsageStatsManager.class);
-        return usm.queryAndAggregateUsageStats(cal.getTimeInMillis(), System.currentTimeMillis());
+        long midnight = cal.getTimeInMillis();
+        String day = String.valueOf(midnight);
+        android.content.SharedPreferences p = c.getSharedPreferences("aura_usage", Context.MODE_PRIVATE);
+        Map<String, Long> thisBoot = foreground(c, Math.max(midnight, boot), now);
+        Map<String, Long> carried;
+        if (!day.equals(p.getString("day", ""))) {
+            // first look today: whatever Android still holds from earlier boots is the starting point
+            carried = new HashMap<>();
+            UsageStatsManager usm = c.getSystemService(UsageStatsManager.class);
+            for (UsageStats s : usm.queryAndAggregateUsageStats(midnight, now).values()) {
+                long before = s.getTotalTimeInForeground() - (thisBoot.containsKey(s.getPackageName()) ? thisBoot.get(s.getPackageName()) : 0);
+                if (before > 0) carried.put(s.getPackageName(), before);
+            }
+        } else {
+            carried = read(p.getString("carried", "{}"));
+            if (Math.abs(p.getLong("boot", 0) - boot) > 60_000) {
+                // the TV restarted: the last boot's time joins what's carried, taking whichever is
+                // larger of what Aura last saw and what Android managed to save of it
+                Map<String, Long> last = read(p.getString("last", "{}"));
+                Map<String, Long> saved = foreground(c, Math.max(midnight, p.getLong("boot", midnight)), boot);
+                for (String k : saved.keySet()) if (!last.containsKey(k) || saved.get(k) > last.get(k)) last.put(k, saved.get(k));
+                for (Map.Entry<String, Long> e : last.entrySet()) {
+                    carried.put(e.getKey(), (carried.containsKey(e.getKey()) ? carried.get(e.getKey()) : 0) + e.getValue());
+                }
+            }
+        }
+        p.edit().putString("day", day).putLong("boot", boot).putString("carried", write(carried))
+                .putString("last", write(thisBoot)).apply();
+        Map<String, Long> total = new HashMap<>(carried);
+        for (Map.Entry<String, Long> e : thisBoot.entrySet()) {
+            total.put(e.getKey(), (total.containsKey(e.getKey()) ? total.get(e.getKey()) : 0) + e.getValue());
+        }
+        return total;
+    }
+
+    /** Time on screen per app between two moments, from the moments each came and went. */
+    private static Map<String, Long> foreground(Context c, long from, long to) {
+        Map<String, Long> out = new HashMap<>();
+        if (to <= from) return out;
+        UsageEvents events = c.getSystemService(UsageStatsManager.class).queryEvents(from, to);
+        UsageEvents.Event e = new UsageEvents.Event();
+        String front = null;
+        long since = from;
+        while (events.hasNextEvent()) {
+            events.getNextEvent(e);
+            int type = e.getEventType();
+            if (type == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                if (front != null && !front.equals(e.getPackageName())) add(out, front, e.getTimeStamp() - since);
+                if (front == null || !front.equals(e.getPackageName())) since = e.getTimeStamp();
+                front = e.getPackageName();
+            } else if (front != null && (type == UsageEvents.Event.MOVE_TO_BACKGROUND && front.equals(e.getPackageName())
+                    || type == UsageEvents.Event.SCREEN_NON_INTERACTIVE)) {
+                // standby counts as nobody watching
+                add(out, front, e.getTimeStamp() - since);
+                front = null;
+            }
+        }
+        if (front != null) add(out, front, to - since);
+        return out;
+    }
+
+    private static void add(Map<String, Long> m, String k, long ms) {
+        if (ms > 0) m.put(k, (m.containsKey(k) ? m.get(k) : 0) + ms);
+    }
+
+    private static Map<String, Long> read(String json) {
+        Map<String, Long> m = new HashMap<>();
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(json);
+            for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
+                String k = it.next();
+                m.put(k, o.optLong(k));
+            }
+        } catch (org.json.JSONException ignored) {
+        }
+        return m;
+    }
+
+    private static String write(Map<String, Long> m) {
+        return new org.json.JSONObject(m).toString();
     }
 
     static String duration(long ms) {

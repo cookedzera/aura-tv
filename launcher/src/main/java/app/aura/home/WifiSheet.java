@@ -170,14 +170,20 @@ final class WifiSheet extends GlassFrame {
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setVerticalFadingEdgeEnabled(true);
         scroll.setFadingEdgeLength(Ui.dp(18));
+        // room on every side for a focused row to grow into, so its rounded ends are never sliced off
         scroll.setClipToPadding(false);
-        scroll.setPadding(0, Ui.dp(6), 0, Ui.dp(6));
+        scroll.setClipChildren(false);
+        scroll.setPadding(Ui.dp(10), Ui.dp(8), Ui.dp(10), Ui.dp(8));
         list = new LinearLayout(a);
         list.setOrientation(LinearLayout.VERTICAL);
         list.setClipChildren(false);
         scroll.addView(list, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        sl.topMargin = Ui.dp(8);
+        sl.topMargin = Ui.dp(2);
+        // the padding above is pulled back out, so the rows stay aligned with the header
+        sl.leftMargin = sl.rightMargin = -Ui.dp(10);
+        col.setClipChildren(false);
+        col.setClipToPadding(false);
         col.addView(scroll, sl);
         addView(col, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setVisibility(View.GONE);
@@ -188,6 +194,8 @@ final class WifiSheet extends GlassFrame {
     }
 
     void open() {
+        // look the name up afresh each time: the TV may have moved networks while the sheet was shut
+        knownName = knownLink = null;
         setVisibility(View.VISIBLE);
         join.setVisibility(View.GONE);
         if (act.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -211,6 +219,7 @@ final class WifiSheet extends GlassFrame {
     }
 
     void close() {
+        if (speed != null) speed.cancel();
         handler.removeCallbacks(scan);
         if (listening) {
             act.unregisterReceiver(changes);
@@ -259,13 +268,15 @@ final class WifiSheet extends GlassFrame {
         // without location access WifiInfo hides the network's name; the older NetworkInfo still
         // carries it on many Android TV builds, so try that before giving up on the name
         if (current == null || current.isEmpty() || "<unknown ssid>".equals(current)) current = legacyName(cm);
+        if (current == null || current.isEmpty() || "<unknown ssid>".equals(current)) current = slowName(info);
         boolean named = current != null && !current.isEmpty() && !"<unknown ssid>".equals(current);
         SupplicantState state = info != null ? info.getSupplicantState() : null;
         NetworkCapabilities nc = cm == null ? null : cm.getNetworkCapabilities(cm.getActiveNetwork());
         boolean onWifi = nc != null && nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
         boolean connected = on && (onWifi || (info != null && info.getNetworkId() != -1 && state == SupplicantState.COMPLETED));
         if (!on) status.setText("Off");
-        else if (connected) status.setText(named ? "Connected to " + current : "Connected · the name shows when location is on");
+        // the name is on the network's own row below; the header carries the band and link speed
+        else if (connected) status.setText(knownLink != null ? "Connected  ·  " + knownLink : named ? "Connected to " + current : "Connected");
         else if (state == SupplicantState.ASSOCIATING || state == SupplicantState.AUTHENTICATING
                 || state == SupplicantState.FOUR_WAY_HANDSHAKE || state == SupplicantState.GROUP_HANDSHAKE) status.setText("Connecting…");
         else status.setText("Not connected");
@@ -335,17 +346,19 @@ final class WifiSheet extends GlassFrame {
                 }), rowParams());
             }
         }
+        if (connected) list.addView(speedRow(), rowParams());
         if (on) {
             list.addView(action("Other networks…", "", false,
                     () -> host.openSettings(new Intent(Settings.ACTION_WIFI_SETTINGS))), rowParams());
         }
+        boolean kept = false;
         if (keep != null) {
             for (int i = 0; i < list.getChildCount(); i++) {
-                if (keep.equals(list.getChildAt(i).getTag())) list.getChildAt(i).requestFocus();
+                if (keep.equals(list.getChildAt(i).getTag())) kept = list.getChildAt(i).requestFocus();
             }
-        } else if (isOpen() && focused != null && focused.getParent() == list && list.getChildCount() > 0) {
-            list.getChildAt(0).requestFocus();
         }
+        // the focused row was replaced (a name arrived, a network vanished): stay in the list
+        if (!kept && isOpen() && keep != null && list.getChildCount() > 0) list.getChildAt(0).requestFocus();
     }
 
     private static LinearLayout.LayoutParams rowParams() {
@@ -383,6 +396,72 @@ final class WifiSheet extends GlassFrame {
         return p;
     }
 
+    // ---- the network's name without location ------------------------------------------------
+
+    /** The name found by the slower routes, and the band and link speed with it, until the network changes. */
+    private String knownName, knownLink;
+    private int knownId = Integer.MIN_VALUE;
+    private boolean looking;
+
+    /**
+     * Android 11 hides the connected network's name from apps unless location services are on,
+     * which some TVs can't keep on. Two other routes: the saved network with the same ID, then the
+     * Wi-Fi service's own status report (readable with the DUMP permission granted at setup).
+     */
+    private String slowName(WifiInfo info) {
+        int id = info != null ? info.getNetworkId() : -1;
+        if (knownName != null && id == knownId) return knownName;
+        knownName = knownLink = null;
+        knownId = id;
+        if (id != -1) {
+            try {
+                List<WifiConfiguration> saved = wifi.getConfiguredNetworks();
+                if (saved != null) for (WifiConfiguration c : saved) if (c.networkId == id) return knownName = unquote(c.SSID);
+            } catch (SecurityException ignored) {
+            }
+        }
+        if (!looking && act.checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED) {
+            looking = true;
+            new Thread(() -> {
+                String[] found = fromReport();
+                act.runOnUiThread(() -> {
+                    looking = false;
+                    if (found == null) return;
+                    knownName = found[0];
+                    knownLink = found[1];
+                    if (isOpen()) rebuild();
+                });
+            }, "wifi-name").start();
+        }
+        return null;
+    }
+
+    /** Name, and "5 GHz · 526 Mbps link", from the line the Wi-Fi service writes about the current connection. */
+    private static String[] fromReport() {
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                "mWifiInfo SSID: \"?(.*?)\"?, BSSID.*?Link speed: (\\d+)Mbps.*?Frequency: (\\d+)MHz");
+        try {
+            Object b = Class.forName("android.os.ServiceManager").getMethod("getService", String.class).invoke(null, "wifi");
+            if (!(b instanceof android.os.IBinder)) return null;
+            android.os.ParcelFileDescriptor[] pipe = android.os.ParcelFileDescriptor.createPipe();
+            ((android.os.IBinder) b).dumpAsync(pipe[1].getFileDescriptor(), new String[0]);
+            pipe[1].close();
+            try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(
+                    new android.os.ParcelFileDescriptor.AutoCloseInputStream(pipe[0])))) {
+                for (String line; (line = r.readLine()) != null; ) {
+                    java.util.regex.Matcher m = p.matcher(line);
+                    if (m.find() && !m.group(1).isEmpty() && !"<unknown ssid>".equals(m.group(1))) {
+                        int mhz = Integer.parseInt(m.group(3));
+                        return new String[]{m.group(1), (mhz >= 5900 ? "6 GHz" : mhz >= 4900 ? "5 GHz" : "2.4 GHz") + "  ·  " + m.group(2) + " Mbps link"};
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // the report isn't readable on this TV: the sheet says "Connected" without a name
+        }
+        return null;
+    }
+
     @SuppressWarnings("deprecation")
     private static String legacyName(ConnectivityManager cm) {
         if (cm == null) return null;
@@ -413,6 +492,68 @@ final class WifiSheet extends GlassFrame {
         p.addView(r, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         p.onClick = run;
         return p;
+    }
+
+    // ---- speed test --------------------------------------------------------------------------
+
+    private SpeedTest speed;
+    /** The last result or the live reading, kept across rebuilds of the list. */
+    private String speedText = "";
+    private TextView speedLabel;
+
+    /** "Test speed", with the live reading on the right: latency, then download, then upload. */
+    private Pad speedRow() {
+        Pad p = action("Test speed", speedText.isEmpty() ? " " : speedText, false, this::runSpeed);
+        p.setTag("action:speed");
+        // a reading, not a label: plain figures at a size that reads from the sofa
+        TextView t = findTag(p);
+        if (t != null) {
+            t.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11.5f);
+            t.setTypeface(Ui.semibold);
+            t.setLetterSpacing(0f);
+            speedLabel = t;
+        }
+        return p;
+    }
+
+    private void runSpeed() {
+        if (speed != null) return;
+        speed = new SpeedTest();
+        final SpeedTest t = speed;
+        showSpeed("Measuring…");
+        new Thread(() -> t.run((phase, ping, down, up, done) -> act.runOnUiThread(() -> {
+            String p = ping < 0 ? "" : "  ·  " + ping + " ms";
+            String text;
+            if (done) text = ping < 0 ? "No connection" : "↓ " + mbps(down) + "   ↑ " + mbps(up) + " Mbps" + p;
+            else if (phase.equals("ping")) text = ping < 0 ? "No connection" : "Ping " + ping + " ms";
+            else if (phase.equals("down")) text = "↓ " + mbps(down) + " Mbps";
+            else text = "↓ " + mbps(down) + "   ↑ " + mbps(up) + " Mbps";
+            showSpeed(text);
+            if (done) speed = null;
+        })), "speed-test").start();
+    }
+
+    private static String mbps(double v) {
+        return v >= 100 ? String.valueOf(Math.round(v)) : String.format(java.util.Locale.ROOT, "%.1f", v);
+    }
+
+    /** Updates the row in place: rebuilding the list mid-test would move focus. */
+    private void showSpeed(String text) {
+        speedText = text;
+        if (speedLabel != null) speedLabel.setText(text);
+    }
+
+    /** The small caps label on the right of an action row. */
+    private static TextView findTag(View v) {
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = g.getChildCount() - 1; i >= 0; i--) {
+                TextView t = findTag(g.getChildAt(i));
+                if (t != null) return t;
+            }
+            return null;
+        }
+        return v instanceof TextView && ((TextView) v).getLetterSpacing() > 0.1f ? (TextView) v : null;
     }
 
     // ---- actions -----------------------------------------------------------------------------

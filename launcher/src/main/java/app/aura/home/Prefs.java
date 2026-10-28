@@ -29,6 +29,16 @@ final class Prefs {
         of(c).edit().putBoolean(key, v).apply();
     }
 
+    static final String TILE_STYLE = "set_tile_style";
+    static final String[] TILE_STYLES = {"glass", "vivid", "midnight", "original"};
+    static final String[] TILE_NAMES = {"Glass", "Vivid", "Midnight", "Original banners"};
+
+    /** How app tiles look; from before there were four, the old glass switch decides. */
+    static String tileStyle(Context c) {
+        String s = of(c).getString(TILE_STYLE, null);
+        return s != null ? s : on(c, GLASS_TILES) ? "glass" : "original";
+    }
+
     static final String WIDGET_ORDER = "set_widget_order", WIDGETS_HIDDEN = "set_widgets_hidden";
 
     /** The widgets' order, as indexes into their natural order (sky, stack, today). */

@@ -119,6 +119,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     private long wallStamp = -1;
     /** A photograph just sent from a phone, to go on next. */
     private String wanted;
+    /** The photo on show may have been removed or switched off: replace it as soon as possible. */
+    private boolean stale;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Random rnd = new Random();
@@ -197,9 +199,13 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         if (!loading && incoming == null) nextAt = 0;
     }
 
-    /** The list of photographs changed (a switch, or a photo removed): move on to the new set. */
+    /**
+     * The list of photographs changed (a switch, or a photo removed): move on to the new set. If
+     * a crossfade or load is under way, the move happens the moment it ends, not a cycle later.
+     */
     void reload() {
         wallStamp = -1;
+        stale = true;
         skip();
     }
 
@@ -334,8 +340,9 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         long now = SystemClock.uptimeMillis();
         boolean busy = incoming != null || intro < 1f || now - parallaxStart < PARALLAX_MS
                 || now - defocusStart < defocusMs;
-        // the drift alone moves ~1px/s, so a third of the rate is visually identical and spares the GPU
-        if (busy || (++frame % 3) == 0) {
+        // the drift alone moves ~1px/s, so a quarter of the rate is visually identical and spares
+        // the CPU and GPU on a TV that's also decoding video
+        if (busy || (++frame % 4) == 0) {
             step(now);
             invalidate();
             for (int i = 0; i < ticks.size(); i++) ticks.get(i).onTick(now);
@@ -344,7 +351,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
                 if (v.isShown() && v.getAlpha() > 0f) v.invalidate();
             }
         }
-        if (incoming == null && !loading && now >= nextAt && (walls.size() > 1 || wanted != null) && current != null) {
+        if (incoming == null && !loading && now >= nextAt && (walls.size() > 1 || wanted != null || stale) && current != null) {
             load(index + 1, false);
         }
         Choreographer.getInstance().postFrameCallback(this);
@@ -366,7 +373,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
                 current.alpha = 1f;
                 accent = accentTo;
                 // a photo sent from the phone meanwhile goes straight on next
-                nextAt = now + (wanted != null ? 0 : SHOW_MS);
+                nextAt = now + (wanted != null || stale ? 0 : SHOW_MS);
             }
         }
         float p = Math.min(1f, (now - parallaxStart) / (float) PARALLAX_MS);
@@ -493,6 +500,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         refreshWalls();
         if (walls.isEmpty()) return;
         loading = true;
+        // this load comes from the fresh list, so whatever made the old one stale is handled
+        stale = false;
         int f = wanted != null ? -1 : fresh(), want = -1;
         for (int k = 0; wanted != null && k < walls.size(); k++) if (wanted.equals(walls.get(k).path)) want = k;
         wanted = null;

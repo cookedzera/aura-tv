@@ -68,7 +68,7 @@ final class Daily {
                     .setPersisted(true)
                     .build());
         }
-        if ((!have(c, today()) || Picks.stale(c)) && js.getPendingJob(JOB_NOW) == null) {
+        if ((!have(c, today()) || Picks.stale(c) || Fresh.stale(c)) && js.getPendingJob(JOB_NOW) == null) {
             js.schedule(new JobInfo.Builder(JOB_NOW, job)
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                     .setMinimumLatency(20_000)
