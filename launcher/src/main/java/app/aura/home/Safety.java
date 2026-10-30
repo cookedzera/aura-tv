@@ -8,7 +8,6 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.provider.Settings;
 import android.text.TextUtils;
-import android.util.Log;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -64,7 +63,6 @@ final class Safety {
         long now = System.currentTimeMillis();
         List<String> lately = recent(p.getString("crashes", ""), now - WINDOW_MS);
         if (lately.size() < CRASHES) return null;
-        Log.w("AuraSafety", lately.size() + " crashes in five minutes");
         p.edit().putString("crashes", "").apply();
         boolean again = now - p.getLong("safe_at", 0) < AFTER_MS;
         if (!again) {
@@ -74,11 +72,9 @@ final class Safety {
             Prefs.of(c).edit().putString(Prefs.SAVER, "photos").apply();
             Previews.set(c, false);
             HomeKeys.set(c, false);
-            Log.w("AuraSafety", "safe mode: extras off");
             return "safe";
         }
         final String home = original(c);
-        Log.w("AuraSafety", "still crashing; giving Home back to " + home + (Adb.on(c) ? "" : " (not set up on this TV: can't)"));
         if (home == null || !Adb.on(c)) return null;
         final Context app = c.getApplicationContext();
         new Thread(() -> Adb.run(app, "cmd package set-home-activity " + home), "give-home").start();

@@ -13,7 +13,6 @@ import android.provider.Settings;
 import android.text.TextUtils;
 import android.view.InputDevice;
 import android.view.KeyEvent;
-import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 
 import java.util.HashMap;
@@ -44,7 +43,6 @@ public class HomeKeys extends AccessibilityService {
     private static final long REFRESH_MS = 30_000;
     /** Remote buttons given an app: "k<keycode>" (or "s<scancode>" for keys with no code) to a package. */
     static final String KEYS = "remote_keys";
-    private static final String TAG = "AuraKeys";
 
     /** Running in this process right now. */
     static volatile boolean live;
@@ -141,7 +139,6 @@ public class HomeKeys extends AccessibilityService {
             openable.put(pkg, ok);
         }
         if (ok) {
-            if (!pkg.equals(front)) Log.i(TAG, "in front: " + pkg);
             front = pkg;
             refilter();
             // a picture once the app has drawn its first screen, and again once it has loaded (a
@@ -209,7 +206,6 @@ public class HomeKeys extends AccessibilityService {
             return true;
         }
         if (teaching != null) {
-            if (!up) Log.i(TAG, "teaching: saw key " + key + " scan " + e.getScanCode());
             if (SystemClock.uptimeMillis() > teachUntil) {
                 teaching = null;
                 refilterSoon();
@@ -220,7 +216,6 @@ public class HomeKeys extends AccessibilityService {
                     final int scan = e.getScanCode();
                     teaching = null;
                     eatUp = key;
-                    Log.i(TAG, "taught: key " + key + " scan " + scan);
                     handler.post(() -> {
                         t.got(key, scan);
                         refilter();
@@ -240,7 +235,6 @@ public class HomeKeys extends AccessibilityService {
         String app = mapped(this, key, e.getScanCode());
         if (app != null) {
             if (up && !e.isCanceled()) {
-                Log.i(TAG, "button " + key + " opens " + app);
                 launch(this, app);
             }
             return true;
@@ -324,7 +318,6 @@ public class HomeKeys extends AccessibilityService {
         if (now - shotAt < 1100) return;
         shotAt = now;
         shotOf.put(pkg, now);
-        Log.i(TAG, "picture of " + pkg);
         try {
             takeScreenshot(android.view.Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
                 @Override
@@ -335,12 +328,10 @@ public class HomeKeys extends AccessibilityService {
                 @Override
                 public void onFailure(int error) {
                     // no picture this time: the card keeps the last one, or what you were watching
-                    Log.w(TAG, "picture of " + pkg + " failed: " + error);
                 }
             });
         } catch (RuntimeException e) {
             // not allowed on this TV: cards stay as they are
-            Log.w(TAG, "picture of " + pkg + " not allowed: " + e);
         }
     }
 
@@ -379,7 +370,6 @@ public class HomeKeys extends AccessibilityService {
     /** Waits for the next button on the remote (30 seconds at most). False when the service isn't running. */
     static boolean teach(Taught t) {
         HomeKeys s = running;
-        Log.i(TAG, "teach: service " + (s == null ? "not running" : "running"));
         if (s == null) return false;
         teaching = t;
         teachUntil = SystemClock.uptimeMillis() + TEACH_MS;
@@ -398,7 +388,6 @@ public class HomeKeys extends AccessibilityService {
     static void taught(int code, int scan) {
         Taught t = teaching;
         if (t == null) return;
-        Log.i(TAG, "taught on Aura's screen: key " + code + " scan " + scan);
         teaching = null;
         t.got(code, scan);
         HomeKeys s = running;

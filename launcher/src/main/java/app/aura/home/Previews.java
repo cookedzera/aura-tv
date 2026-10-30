@@ -85,24 +85,20 @@ final class Previews {
                 small = Bitmap.createBitmap(p, W, H, Bitmap.Config.ARGB_8888);
                 full.recycle();
             } catch (RuntimeException | OutOfMemoryError e) {
-                android.util.Log.w("AuraKeys", "picture of " + pkg + " unreadable: " + e);
                 return;
             }
             // protected: whatever was kept before (or the fallback) stays
             if (small == null || blank(small)) {
-                android.util.Log.i("AuraKeys", "picture of " + pkg + " was black (protected): not kept");
                 return;
             }
             // the app hadn't drawn yet (some, like YouTube, leave the last app on screen while they
             // start): a picture that's the previous app's screen again isn't this app's
             Bitmap prev = last;
             if (prev != null && !pkg.equals(lastPkg) && same(small, prev)) {
-                android.util.Log.i("AuraKeys", "picture of " + pkg + " still showed " + lastPkg + ": not kept");
                 return;
             }
             last = small;
             lastPkg = pkg;
-            android.util.Log.i("AuraKeys", "picture of " + pkg + " kept");
             fresh = small;
             freshPkg = pkg;
             File f = file(c, pkg), part = new File(f.getPath() + ".part");
