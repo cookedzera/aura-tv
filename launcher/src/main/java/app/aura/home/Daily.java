@@ -58,17 +58,17 @@ final class Daily {
 
     /** A check every few hours whenever there's a network, plus one shortly if today's photo isn't in yet. */
     static void schedule(Context c) {
-        JobScheduler js = c.getSystemService(JobScheduler.class);
+        JobScheduler js = Compat.svc(c, JobScheduler.class);
         if (js == null) return;
         ComponentName job = new ComponentName(c, DailyJob.class);
-        if (js.getPendingJob(JOB_DAILY) == null) {
+        if (!Compat.pending(js, JOB_DAILY)) {
             js.schedule(new JobInfo.Builder(JOB_DAILY, job)
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                     .setPeriodic(6 * 3_600_000L)
                     .setPersisted(true)
                     .build());
         }
-        if ((!have(c, today()) || Picks.stale(c) || Fresh.stale(c)) && js.getPendingJob(JOB_NOW) == null) {
+        if ((!have(c, today()) || Picks.stale(c) || Fresh.stale(c)) && !Compat.pending(js, JOB_NOW)) {
             js.schedule(new JobInfo.Builder(JOB_NOW, job)
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                     .setMinimumLatency(20_000)
@@ -355,7 +355,7 @@ final class Daily {
     private static JSONArray prune(Context c, JSONArray index) {
         List<JSONObject> all = new ArrayList<>();
         for (int i = 0; i < index.length(); i++) all.add(index.optJSONObject(i));
-        all.sort((a, b) -> b.optString("day").compareTo(a.optString("day")));
+        java.util.Collections.sort(all, (a, b) -> b.optString("day").compareTo(a.optString("day")));
         JSONArray out = new JSONArray();
         for (int i = 0; i < all.size(); i++) {
             if (i < KEEP) out.put(all.get(i));

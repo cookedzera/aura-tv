@@ -136,7 +136,7 @@ final class SmartStack extends FrameLayout {
     }
 
     Slide current() {
-        return slides.isEmpty() ? null : slides.get(Math.floorMod(at, slides.size()));
+        return slides.isEmpty() ? null : slides.get(Compat.mod(at, slides.size()));
     }
 
     /** While focused (or covered) the stack holds still. */
@@ -171,7 +171,7 @@ final class SmartStack extends FrameLayout {
     /** Shows card {@code i}; {@code dir} 1 flips up to it, 0 shows it in place. */
     private void show(int i, int dir) {
         if (slides.isEmpty()) return;
-        at = Math.floorMod(i, slides.size());
+        at = Compat.mod(i, slides.size());
         Slide s = slides.get(at);
         dots.moveTo(at, dir != 0);
         if (dir == 0) {

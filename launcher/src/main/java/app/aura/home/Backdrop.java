@@ -102,6 +102,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     private static final class Slide {
         Wallpaper wall;
         Bitmap sharp, soft, blur;
+        /** Sharp and soft already mixed at the home screen's steady softness, screen-sized; null for GIFs. */
+        Bitmap steady;
         /** A GIF's frames, played by the render thread; {@code sharp} keeps its first frame for the glass. */
         Drawable anim;
         ColorFilter animFilter;
@@ -430,8 +432,26 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         drawSlide(c, incoming, ia);
     }
 
+    /**
+     * The softness the home screen rests at. At exactly that level each photograph is drawn from
+     * its pre-mixed copy: one full-screen pass instead of two, which on this GPU is the difference
+     * between a frame inside 16 ms and one that misses it. Negative: no pre-mixed copies (screensaver).
+     */
+    private float steadyDefocus = -1f;
+
+    void setSteadyDefocus(float d) {
+        steadyDefocus = d;
+    }
+
     private void drawSlide(Canvas c, Slide s, float ia) {
         if (s == null || s.sharp == null) return;
+        if (s.steady != null && s.anim == null && Math.abs(defocus - steadyDefocus) < 0.004f) {
+            tmp.set(s.m);
+            tmp.preScale(s.sw / (float) s.steady.getWidth(), s.sh / (float) s.steady.getHeight());
+            paint.setAlpha(Math.round(255 * s.alpha * ia));
+            c.drawBitmap(s.steady, tmp, paint);
+            return;
+        }
         // fully defocused, the soft copy covers everything: skip the sharp fill
         if (defocus < 0.995f || s.soft == null) {
             int a = Math.round(255 * s.alpha * ia);
@@ -505,7 +525,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         int f = wanted != null ? -1 : fresh(), want = -1;
         for (int k = 0; wanted != null && k < walls.size(); k++) if (wanted.equals(walls.get(k).path)) want = k;
         wanted = null;
-        final int idx = want >= 0 ? want : f >= 0 ? f : pick(i);
+        final int idx = want >= 0 ? want : f >= 0 ? f : deal();
         if (f >= 0) prefs.edit().putString("daily_seen", walls.get(f).day).apply();
         final int gen = generation;
         final Wallpaper w = walls.get(idx);
@@ -525,16 +545,67 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         });
     }
 
-    /** Sky Sync: the next photograph in the rotation whose light matches the sky outside right now. */
-    private int pick(int from) {
+    private static String key(Wallpaper w) {
+        return w.onDisk() ? w.path : w.black ? "black" : w.file;
+    }
+
+    /**
+     * The next photograph, from a shuffled deck the home screen and the screensaver share. Each kept
+     * its own place in the rotation before, and the home screen wrote its (older) place back over
+     * the screensaver's, so the screensaver kept starting from the same few photographs. Now the
+     * deck lives in the settings and is read afresh every turn: nothing repeats until everything
+     * has been shown, restarts included. New photographs join at random places. Sky Sync deals the
+     * next card whose light suits the sky outside; the others wait their turn in the deck.
+     */
+    private int deal() {
         int n = walls.size();
-        Sun.Phase phase = Sun.phase(System.currentTimeMillis());
-        for (int k = 0; k < n; k++) {
-            int j = ((from + k) % n + n) % n;
-            // the daily photographs are the fresh ones: they take their turn whatever the light
-            if (walls.get(j).onDisk() || Sun.suits(walls.get(j).mood, phase)) return j;
+        java.util.Map<String, Integer> at = new java.util.HashMap<>();
+        for (int k = 0; k < n; k++) at.put(key(walls.get(k)), k);
+        String[] saved = android.text.TextUtils.split(prefs.getString("wall_deck", ""), "\n");
+        java.util.Set<String> known = new java.util.HashSet<>(java.util.Arrays.asList(
+                android.text.TextUtils.split(prefs.getString("wall_known", ""), "\n")));
+        List<String> deck = new ArrayList<>();
+        for (String k : saved) if (at.containsKey(k)) deck.add(k);
+        List<String> recent = new ArrayList<>();
+        for (String k : android.text.TextUtils.split(prefs.getString("wall_recent", ""), "\n")) if (at.containsKey(k)) recent.add(k);
+        for (String k : at.keySet()) {
+            if (!known.contains(k)) {
+                deck.add(rnd.nextInt(deck.size() + 1), k);
+                known.add(k);
+            }
         }
-        return ((from % n) + n) % n;
+        Sun.Phase phase = Sun.phase(System.currentTimeMillis());
+        int pick = suiting(deck, at, phase);
+        if (pick < 0) {
+            // the deck is spent (or holds nothing for this light): a fresh shuffle, with the dozen
+            // shown most recently at the back, oldest first, so none of them comes straight back
+            deck.clear();
+            for (String k : at.keySet()) if (!recent.contains(k)) deck.add(k);
+            java.util.Collections.shuffle(deck, rnd);
+            deck.addAll(recent);
+            known.clear();
+            known.addAll(at.keySet());
+            pick = suiting(deck, at, phase);
+            if (pick < 0) pick = 0;
+        }
+        String k = deck.remove(pick);
+        recent.remove(k);
+        recent.add(k);
+        int keep = Math.max(1, Math.min(12, n / 2));
+        while (recent.size() > keep) recent.remove(0);
+        prefs.edit().putString("wall_deck", android.text.TextUtils.join("\n", deck))
+                .putString("wall_known", android.text.TextUtils.join("\n", known))
+                .putString("wall_recent", android.text.TextUtils.join("\n", recent)).apply();
+        return at.get(k);
+    }
+
+    /** The first card in {@code deck} whose light suits {@code phase} (imports always do), or -1. */
+    private int suiting(List<String> deck, java.util.Map<String, Integer> at, Sun.Phase phase) {
+        for (int k = 0; k < deck.size(); k++) {
+            Wallpaper w = walls.get(at.get(deck.get(k)));
+            if (w.onDisk() || w.black || Sun.suits(w.mood, phase)) return k;
+        }
+        return -1;
     }
 
     private void begin(Slide s) {
@@ -615,6 +686,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             }
             s.blur = blur(b);
             s.soft = soften(b);
+            if (s.anim == null && steadyDefocus > 0f) s.steady = mix(b, s.soft, steadyDefocus);
             s.lumaTop = luma(s.blur, 0f, 0f, 0.62f, 0.66f);
             s.lumaBottom = luma(s.blur, 0f, 0.6f, 1f, 1f);
             return s;
@@ -637,6 +709,31 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
                 if (k < 1f) d.setTargetSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
             });
         } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * {@code sharp} with {@code soft} laid over it at {@code k}, exactly as the two draws would
+     * composite, at no more than the screen's size (it is only ever drawn filling the screen).
+     */
+    private Bitmap mix(Bitmap sharp, Bitmap soft, float k) {
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        int sw = Math.max(dm.widthPixels, dm.heightPixels), sh = Math.min(dm.widthPixels, dm.heightPixels);
+        float sc = Math.min(1f, Math.max(sw / (float) sharp.getWidth(), sh / (float) sharp.getHeight()));
+        int w = Math.max(1, Math.round(sharp.getWidth() * sc)), h = Math.max(1, Math.round(sharp.getHeight() * sc));
+        try {
+            Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(out);
+            Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
+            android.graphics.Rect all = new android.graphics.Rect(0, 0, w, h);
+            c.drawBitmap(sharp, null, all, p);
+            p.setAlpha(Math.round(255 * k));
+            c.drawBitmap(soft, null, all, p);
+            out.prepareToDraw();
+            return out;
+        } catch (OutOfMemoryError e) {
+            // without it, the two draws still work
             return null;
         }
     }

@@ -3,250 +3,235 @@
 </p>
 
 <p align="center">
-  <b>Your TV's home screen, rebuilt as frosted glass over living photographs.</b><br>
-  <sub>No ads · no sponsored rows · no account · a steady 60&nbsp;fps on a 1.5&nbsp;GB TV</sub>
+  <b>A calmer home screen for Android TV.</b><br>
+  <sub>Frosted glass over living photographs · a museum, the real wind and tonight's sky as your screensaver · no ads, no account</sub>
 </p>
 
 <p align="center">
-  <img alt="Android TV 8.0+" src="https://img.shields.io/badge/Android%20TV-8.0%2B-0d1630?style=flat-square&labelColor=05070c">
-  <img alt="60 fps" src="https://img.shields.io/badge/frames-60%20fps-ffa65c?style=flat-square&labelColor=05070c">
-  <img alt="No Gradle" src="https://img.shields.io/badge/build-no%20Gradle%2C%20no%20AndroidX-fff0c8?style=flat-square&labelColor=05070c">
-  <img alt="2.8 MB" src="https://img.shields.io/badge/APK-2.8%20MB-c9b6ff?style=flat-square&labelColor=05070c">
+  <img alt="Android TV 5.1+" src="https://img.shields.io/badge/Android%20TV-5.1%2B-0d1630?style=flat-square&labelColor=05070c">
+  <img alt="No computer needed" src="https://img.shields.io/badge/setup-no%20computer%20needed-7be0a8?style=flat-square&labelColor=05070c">
+  <img alt="3 MB" src="https://img.shields.io/badge/APK-3%20MB-c9b6ff?style=flat-square&labelColor=05070c">
+  <img alt="No ads" src="https://img.shields.io/badge/ads-none-ffa65c?style=flat-square&labelColor=05070c">
   <img alt="MIT" src="https://img.shields.io/badge/license-MIT-7fb2ff?style=flat-square&labelColor=05070c">
 </p>
 
 <p align="center">
-  <img src="docs/tour.webp" alt="A tour of Aura on a real TV: boot, the Smart Stack, a sky moment, rearranging, Control Center, Wi-Fi, Settings, photo mode" width="92%">
+  <img src="docs/tour.webp" alt="A tour of Aura on a real TV" width="92%">
+</p>
+
+<p align="center">
+  <a href="#-install-in-two-minutes"><b>Install</b></a> &nbsp;·&nbsp;
+  <a href="#-whats-inside"><b>What's inside</b></a> &nbsp;·&nbsp;
+  <a href="#-the-remote"><b>The remote</b></a> &nbsp;·&nbsp;
+  <a href="#-if-something-isnt-right"><b>Help</b></a> &nbsp;·&nbsp;
+  <a href="../../releases/latest"><b>Download</b></a>
 </p>
 
 <br>
 
-> **Aura** replaces the stock Android TV launcher with something calmer: a glass sidebar, three
-> quiet widgets, your apps as frosted tiles, and a photograph that drifts behind it all and follows
-> the real sun outside. Every pixel of it was tuned on a budget 1.5&nbsp;GB TV, frame by frame.
+## ⚡ Install in two minutes
+
+Everything happens on the TV with the remote. No computer, no account.
+
+<table>
+<tr><td width="44"><h3>1</h3></td><td>
+
+**Get Downloader.** Open the Play Store on the TV, search **Downloader** (by AFTVnews, free) and install it.
+
+</td></tr>
+<tr><td><h3>2</h3></td><td>
+
+**Type Aura's address** into Downloader's box and press *Go*:
+
+```
+github.com/cookedzera/aura-tv/releases/latest/download/Aura.apk
+```
+
+It always points to the newest version.
+
+</td></tr>
+<tr><td><h3>3</h3></td><td>
+
+**Allow and install.** The first time, Android asks you to let Downloader install apps: switch it on, press <kbd>Back</kbd>, then *Install*. If Play Protect warns about an unknown app, choose *Install anyway*.
+
+</td></tr>
+<tr><td><h3>4</h3></td><td>
+
+**Open Aura.** It's in your apps now. A short welcome asks for a tile look and which extras you'd like, then offers **Make Aura your home**: say yes to Android's question and the Home button opens Aura from then on.
+
+</td></tr>
+<tr><td><h3>5</h3></td><td>
+
+**Optional: switch everything on.** In Aura, *Settings → Set up on this TV*. Turn on the TV's *network debugging* (the page links to Developer options), press **Connect**, tick *Always allow* when Android asks, then **Switch everything on**. That's the whole setup that used to need a PC.
+
+</td></tr>
+</table>
+
+New versions arrive in *Settings → Updates*. To go back, uninstall Aura from Android's settings and Home returns to the TV's own launcher.
 
 <br>
 
-## ✦ 01 &nbsp;·&nbsp; The home screen
+## ✦ What's inside
 
-<table>
-<tr>
-<td width="58%"><img src="docs/home.png" alt="Aura's home screen"></td>
-<td>
+### Your home screen
 
-**Four tile styles.** *Glass*: each app's logo lifted off its banner as a white mark on glass tinted
-in its colour. *Vivid*: the app's own colour, lit from above, like iOS icons. *Midnight*: near-black
-with a soft glow of its colour. Or the *original* banners. Pick one in Settings.
+<p align="center"><img src="docs/home.jpg" alt="Aura's home screen" width="92%"></p>
 
-**A Smart Stack.** Full-bleed cards that flip upward on their own, like iOS widgets: every show
-you're partway through (Android TV's *Continue Watching*, with the time left), a **NEW** badge when a
-new episode is out, what's new today on the streaming apps you have (Indian releases first), your
-usual app for this hour, what you opened last, and tonight's top-rated pick. <kbd>↑</kbd> flips by
-hand; it holds still while you look at it.
+Your apps as frosted tiles in one of four looks (*Glass*, *Vivid*, *Midnight* or the apps' *Original* banners), over a photograph that follows the real sun outside: night skies after dark, golden hour at dusk, and Wikimedia's *Picture of the Day* every morning. Above them, three quiet widgets:
+- **Sky:** the sun's arc and the next sunrise or sunset;
+- **Smart Stack:** what you're partway through, new episodes and tonight's pick;
+- **Today:** time in apps, data used and free memory, turning into **Now Playing** while something plays.
 
-**Sky and Today.** *Sky* draws the sun on its arc with the next sunset, for your city. *Today* shows
-time in apps, the internet you've used today (handy on a phone's hotspot) and free memory, and turns
-into **Now Playing** (OK plays or pauses) while something plays.
+Hold <kbd>OK</kbd> on an app to move it, hide it, put it in a folder or uninstall it. Rest on an app and **Top Shelf** lines up its shows above the row.
 
-**Yours to arrange.** Hold <kbd>OK</kbd> on an app for a small glass menu: move it, hide it, open its
-info or uninstall it. Hold it on a widget to move it along the row or hide it; the others widen to
-fill its place.
+### Recent apps, like tvOS
 
-**Live previews.** Rest on a switched-on HDMI source and its picture appears inside the tile, muted.
+<p align="center"><img src="docs/switcher.jpg" alt="The recent apps deck" width="92%"></p>
 
-**Weather** sits next to the clock, and a soft light in the focused app's colour follows you around.
+Press <kbd>Home</kbd> twice. The app you're in stands large in the middle showing its last screen, older ones stack behind it on the left, and the green **● Playing now** marks whatever is playing. <kbd>▲</kbd> throws an app away (it stops for real once the TV is set up), *Close all* clears the lot and shows the memory you got back. Opening one grows its card into a launch screen, so the app's own loading never shows.
 
-</td>
-</tr>
-</table>
+### A screensaver worth looking at
 
-## ✦ 02 &nbsp;·&nbsp; Glass that doesn't cost frames
-
-<p align="center"><img src="docs/glass.svg" alt="Four layers of glass slide together into one draw" width="100%"></p>
-
-Real frosted glass usually means blurring the screen behind every panel, every frame. Aura blurs the
-photograph **once**, when it arrives, into a tiny 128&times;72 copy. Every pane samples its own slice of
-that copy, and the pane's tint, frost and highlight are folded into a single colour matrix. One
-rounded draw per pane, whether it's a tile, a widget, the sidebar or Control Center.
-
-## ✦ 03 &nbsp;·&nbsp; Control Center
-
-<table>
-<tr>
-<td>
-
-Press <kbd>Menu</kbd>. A frosted board rises with the time set large beside it: round toggles for
-Wi-Fi, Bluetooth, the sleep timer and photo mode, a tall volume slider, your HDMI inputs, picture
-and sound settings, a memory boost and standby.
-
-**Wi-Fi** opens as a sheet: the network's name, band and link speed, on/off, disconnect, nearby
-networks with a password field, and a **speed test** (ping, download, upload) that stores nothing.
-**Memory** names the apps holding it. Inputs carry your devices' own names over HDMI-CEC.
-**Tonight's pick** puts a top-rated show beside the clock (from TVmaze); OK finds its trailer.
-**Gentle Sleep** fades the volume over the timer's last minute, then puts the TV to standby.
-**Live Inputs** turns a set-top box or console that just switched on into the first tile.
-**Block ads**, in Settings, stops ad and tracker servers for every app at once through Android's
-own Private DNS: no VPN, nothing running in the background. Pick a filter (Hagezi Pro++, AdGuard,
-Control D, Mullvad, AdGuard Family) or type your own, and *Find the fastest* measures each one from
-your TV. If the internet stops working with it on, it switches itself back off.
-**Animations** sets the whole TV's animation speed (Normal, Fast, Off), and a new release of Aura
-is announced once, with a small red dot on Settings until you've looked.
-
-**Settings**, from the sidebar: glass or original tiles, app names, widgets, a **pure black**
-wallpaper for OLED screens, weather city, hidden apps, switches for every extra, and **Updates**,
-which installs new releases from GitHub in place (Android asks you to confirm).
-
-</td>
-<td width="58%"><img src="docs/control-center.png" alt="Control Center"></td>
-</tr>
-</table>
-
-## ✦ 04 &nbsp;·&nbsp; A new photograph every day
-
-<table>
-<tr>
-<td width="58%"><img src="docs/photo-mode.png" alt="Photo mode showing a Picture of the Day"></td>
-<td>
-
-Aura ships with 10 hand-picked landscapes, one for every light, and adds **Wikimedia Commons' Picture of the Day** in the
-background: wide, high-resolution, properly licensed, no account and no API key. Each one arrives
-with its title, a line about it, the photographer and the licence.
-
-**Sky Sync** matches the built-in photographs to the light outside, for your city: night skies after
-dark, golden hour at dusk. When the light turns (first light, sunrise, golden hour, sunset) a small
-**sky moment** card slides in and the photograph changes with it.
-
-**Your own photos and GIFs, from your phone.** *Settings → From your phone* shows a QR code. Scan it
-with the phone's camera, pick photos or GIFs in the page that opens, and they land on the wall a
-moment later. No app, no account and no cloud: Aura runs a tiny web server only while that code is
-on screen, reachable only on your network through a one-time link. Portrait shots are framed whole on a
-blurred copy of themselves, GIFs play, and a switch shows only your photos. Remove any of them from
-the TV (*Your photos*) or from the phone's page. Send an **app** (.apk) the same way and the TV asks
-before installing it: no separate send-to-TV app needed.
-
-Leave the TV for a while and the photograph sharpens into **photo mode**; the screensaver uses the
-same story card, with the time and the weather.
-
-</td>
-</tr>
-</table>
-
-## ✦ 05 &nbsp;·&nbsp; Measured, not guessed
-
-<p align="center"><img src="docs/speed.svg" alt="Before and after: missed frames and milliseconds per frame" width="100%"></p>
-
-<details>
-<summary><b>What made the difference</b></summary>
-<br>
-
-| Trap | What Aura does instead |
-|---|---|
-| Blurring behind every panel | One blurred copy per photograph, sampled by every pane |
-| Fades painted into offscreen layers | Containers fade by applying alpha straight to their draws |
-| Animating the *scale* of text | Panels slide and fade; text is never re-rasterised mid-animation |
-| Text shadows over photographs | Gradient shades the GPU paints for free |
-| Drawing what an overlay covers | Everything under Control Center stops drawing once the frost is opaque |
-| Looping idle animations | The photograph redraws at a third of the frame rate when nothing moves |
-| System lookups on the first frame | Readings are kept warm while the home screen idles |
-
-</details>
-
-<br>
-
-## ✦ 06 &nbsp;·&nbsp; Remote
+<p align="center"><img src="docs/screensavers.jpg" alt="Museum, Live wind, Tonight's sky and Photo mosaic screensavers" width="92%"></p>
 
 | | |
 |---|---|
-| <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> | Move through your apps · up from the top row reaches the widgets · left reaches the sidebar |
-| <kbd>OK</kbd> | Open |
-| hold <kbd>OK</kbd> | On an app: **Move** (the arrows carry it, <kbd>OK</kbd> saves), **Hide from home**, **App info**, **Uninstall** · on a widget: **Move left / right**, **Hide** |
-| <kbd>Back</kbd> | From lower rows, jump to the top · from the sidebar, return to the apps |
-| <kbd>Menu</kbd> | Control Center |
+| **Museum** | Masterpieces from the Art Institute of Chicago's open collection, each hung in a room lit for it, with a wall label. |
+| **Live wind** | The real wind around you right now, as thousands of drifting trails of light. |
+| **Tonight's sky** | The real sky over your city: 4,000 stars, the constellations, the Moon's real phase and the planets where they are. |
+| **Earth from space** | Time-lapses filmed from the International Space Station, downloaded over Wi-Fi, on TVs that can play them smoothly. |
+| **Photo mosaic** | Photographs three at a time, yours included, turning over gently. |
+
+**Auto** moves between them by the time of day and the weather. Choose one, preview it and set when it starts in *Settings → Wallpaper*.
+
+### Control Center
+
+<p align="center"><img src="docs/control-center.jpg" alt="Control Center" width="92%"></p>
+
+Press <kbd>Menu</kbd>: Wi-Fi (with a speed test), Bluetooth, a sleep timer that fades the volume out, your HDMI inputs by their real names, picture and sound settings, a memory boost and standby.
+
+### And a lot of small things
+
+| | |
+|---|---|
+| **A welcome** | On first open, pick a look and your extras, each with a small preview. All of it can be changed later. |
+| **Block ads** | Stops ad and tracker servers in every app at once, through Android's own Private DNS. Pick a filter, or let Aura find the fastest from your TV. |
+| **From your phone** | Scan a QR code and send photos, GIFs or apps to the TV. No app, no cloud. |
+| **The Home button in apps** | Home twice opens recent apps right over the app you're in; hold Home for Control Center. |
+| **Remote buttons** | Give any spare button on the remote an app of your choice. |
+| **Profiles** | Everyone keeps their own app order, folders, tiles and widgets. |
+| **Always comes back** | If Aura ever keeps crashing, it restarts with its extras off rather than leaving you stuck. |
+
+<p align="center"><img src="docs/welcome.jpg" alt="The welcome: choose a look, choose your extras" width="92%"></p>
 
 <br>
 
-## ✦ 07 &nbsp;·&nbsp; Install in four steps
+## 🎮 The remote
 
-You need a Windows PC on the same network as the TV, the Android SDK platform-tools (`adb`), and to
-build from source the Android SDK build-tools plus a JDK 11+ (Android Studio brings both).
+| Press | On the home screen |
+|---|---|
+| <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> | Move · up reaches the widgets · left reaches the sidebar |
+| <kbd>OK</kbd> | Open |
+| hold <kbd>OK</kbd> | Move, hide, add to folder, app info, uninstall |
+| <kbd>Home</kbd> twice | Recent apps |
+| <kbd>Menu</kbd> | Control Center |
+| <kbd>Back</kbd> | Close whatever is open |
 
-**1 &nbsp;·&nbsp; Let the PC talk to the TV.** On the TV turn on *Developer options* and *network
-debugging*, then note its IP address.
+| Press | Inside an app (with *Home button in apps* on) |
+|---|---|
+| <kbd>Home</kbd> twice | Recent apps over the app |
+| hold <kbd>Home</kbd> | Control Center over the app; <kbd>Back</kbd> returns to it |
+
+<br>
+
+## 🛟 If something isn't right
+
+<details>
+<summary><b>I installed it but can't find or open it</b></summary>
+<br>
+
+From 7.4, Aura appears in your apps like any other app and Downloader's *Open* button works. On 7.3, press <kbd>Home</kbd> and choose Aura, or update.
+</details>
+
+<details>
+<summary><b>Home still opens the old launcher</b></summary>
+<br>
+
+Open Aura and choose *Settings → Home button*, or press <kbd>Home</kbd> and pick **Aura → Always**. Google TV keeps Home for its own launcher: there, *Settings → Set up on this TV → Switch everything on* makes Aura home, and *Home button in apps* lets Home bring you back to Aura from any app.
+</details>
+
+<details>
+<summary><b>A black screen with sound from an HDMI tile</b></summary>
+<br>
+
+A switched-on HDMI device (a soundbar, a set-top box) shows up as the first tile. On some TVs its live picture filled the whole screen, so 7.4 turns live pictures off by default. Hold <kbd>OK</kbd> on the tile → *Hide from home*; *Settings → Hidden apps* brings it back.
+</details>
+
+<details>
+<summary><b>Netflix or Prime Video show no shows above their tile</b></summary>
+<br>
+
+Top Shelf shows what each app shares with Android TV. Netflix and Prime Video share their rows only with Google's own launcher, so on any other home screen they stay empty. JioHotstar, YouTube and many others share theirs.
+</details>
+
+<details>
+<summary><b>A remote button doesn't respond to Remote buttons</b></summary>
+<br>
+
+Some TVs keep certain buttons (Profile, a dedicated app button) for their own software before any app sees them. Those can't be given an app. Buttons that reach Android, like the Apps key or a colour button, can.
+</details>
+
+<details>
+<summary><b>What does Aura do with my data?</b></summary>
+<br>
+
+Nothing leaves the TV except what each feature fetches: your approximate city from your connection (GeoJS, unless you type one in) and the weather (Open-Meteo), photographs and screensaver clips (Wikimedia Commons), artworks (Art Institute of Chicago), tonight's pick (TVmaze), the speed test (Cloudflare) and updates (GitHub). The switcher's pictures of your apps stay in Aura's private storage and are deleted after two days or when you close the app. No analytics, no account.
+</details>
+
+<br>
+
+## 🔧 For tinkerers
+
+<details>
+<summary><b>Set up from a PC instead</b></summary>
+<br>
+
+On the TV turn on *Developer options* and *network debugging*, note its IP address, then on a Windows PC with `adb`:
 
 ```powershell
 $env:AURA_TV = "192.168.1.50:5555"
+.\tools\backup.ps1        # a snapshot first: everything can be put back from it
+.\tools\setup-aura.ps1    # makes Aura home and grants what the extras need
 ```
 
-**2 &nbsp;·&nbsp; Take a snapshot first.** Everything Aura changes can be put back from it.
-
-```powershell
-.\tools\backup.ps1
-```
-
-**3 &nbsp;·&nbsp; Build, or download.** Build straight from the SDK tools (a signing key is made on the
-first run), or take `Aura.apk` from [Releases](../../releases/latest) and save it as `launcher/Aura.apk`.
-
-```powershell
-.\tools\build.ps1
-```
-
-**4 &nbsp;·&nbsp; Make it home.** This also approves what the extras need: usage history (Smart
-Stack, Today), the TV listings (Continue Watching), media sessions (Now Playing), Wi-Fi control and
-installing updates.
-Add `-NearbyWifi` to list nearby networks too, which turns on location services.
-
-```powershell
-.\tools\setup-aura.ps1
-```
-
-Changed your mind? `.\tools\restore.ps1 -DryRun` shows every step, and `.\tools\restore.ps1 -RemoveAura`
-re-enables every package, restores your settings, hands Home back and uninstalls Aura.
-
-<details>
-<summary><b>Optional: speed tuning and debloat</b></summary>
-<br>
-
-- `.\tools\tune.ps1` compiles Aura ahead of time and stops five streaming apps running in the
-  background while you aren't using them. `-Undo` reverts it.
-- `.\tools\debloat.ps1` disables the ads, telemetry and junk packages of an **Acer / Dixon DIX41RKF**
-  Google TV with `pm disable-user` (nothing is uninstalled). Read the list and adjust it before using
-  it on any other TV.
-
-</details>
-
-<details>
-<summary><b>All the scripts</b></summary>
-<br>
+`.\tools\restore.ps1 -RemoveAura` puts the TV back exactly as the snapshot recorded it.
 
 | Script | Does |
 |---|---|
-| `backup.ps1` | Saves enabled/disabled packages, all settings and the home app to `backup/` (git-ignored: it's personal). |
-| `build.ps1` | aapt2 → javac → d8 → zipalign → apksigner, no Gradle. |
-| `setup-aura.ps1` | Installs Aura as home, screensaver and a force-lock-only device admin (for Standby and the sleep timer). |
-| `tune.ps1` | Background limits and an ahead-of-time compile. `-Undo` reverts. |
-| `debloat.ps1` | The reviewed disable list for the DIX41RKF, one reason per package. |
-| `restore.ps1` / `restore.bat` | Puts the TV back exactly as the backup recorded it. |
-| `prepare_wallpapers.py` | Fetches, grades and credits the built-in photographs. |
-| `make_icons.py` | Draws the line icons, launcher icon, TV banner and social preview. |
-| `make_tour.py` | Builds the animated tour at the top of this page from TV screenshots. |
-
+| `backup.ps1` / `restore.ps1` | Snapshot of packages and settings, and putting it all back. |
+| `setup-aura.ps1` | Home, screensaver, permissions, an ahead-of-time compile. |
+| `tune.ps1` | Background limits and compiling. `-Undo` reverts. |
+| `debloat.ps1` | A reviewed disable list for the Acer DIX41RKF Google TV. Read it before using it on another TV. |
 </details>
 
 <details>
-<summary><b>Under the hood</b></summary>
+<summary><b>Build it</b></summary>
 <br>
 
-- Plain Java on the Android framework, minSdk 26, a 2.8&nbsp;MB APK: ten photographs at about
-  250&nbsp;KB each and Inter cut down to the Latin it needs, its weight and size axes intact.
-- Remote input is routed by hand: grid maths for the apps, geometry for Control Center. Held keys
-  step at a steady pace instead of queueing, and holding <kbd>OK</kbd> is timed from the press, so
-  it works with IR remotes that barely repeat.
-- Pictures of the Day arrive through a JobScheduler job every six hours on any network, with a
-  descriptive User-Agent, spaced requests and back-off when Wikimedia asks. Only wide JPEGs are kept,
-  centre-cropped to the TV, the newest 40.
-- Tested on an Acer DIX41RKF: Realtek RTD2841A, Android 11, 720p, 1.5&nbsp;GB RAM. Android 11's
-  cached-app freezer can't run there (its 4.14 kernel lacks `freezer.killable`).
+No Gradle: `.\tools\build.ps1` drives aapt2, javac, d8, zipalign and apksigner from the Android SDK directly (Android Studio's JDK is fine). `-TestPackage` builds a copy under another package name, to test a first install beside the real one.
 
+Plain Java on the Android framework, no AndroidX. Runs from Android 5.1; extras that need newer Android simply don't appear on older TVs. Tuned on an Acer DIX41RKF: Realtek RTD2841, Android 11, 720p, 1.5&nbsp;GB of RAM.
+</details>
+
+<details>
+<summary><b>How the glass stays smooth</b></summary>
+<br>
+
+<p align="center"><img src="docs/glass.svg" alt="Four layers of glass slide together into one draw" width="100%"></p>
+
+The photograph is blurred once, when it arrives, into a tiny copy that every pane samples, with its tint folded into one colour matrix: one draw per pane. Panels slide rather than scale text, nothing under an opaque overlay keeps drawing, and still screens draw nothing at all.
+
+<p align="center"><img src="docs/speed.svg" alt="Before and after: missed frames and milliseconds per frame" width="100%"></p>
 </details>
 
 <br>
@@ -254,8 +239,15 @@ re-enables every package, restores your settings, hands Home back and uninstalls
 ## Credits
 
 Photographs from Wikimedia Commons Featured Pictures and Picture of the Day (CC BY, CC BY-SA, CC0
-and public domain), each credited on screen. Type: [Inter](https://rsms.me/inter/) by Rasmus
-Andersson, SIL Open Font License (`launcher/src/main/assets/fonts/LICENSE-Inter.txt`).
+and public domain), each credited on screen. Screensaver flyovers: time-lapses shot from the
+International Space Station by its crews, NASA Johnson Space Center, public domain, through
+Wikimedia Commons. Night sky: star positions from the XHIP Hipparcos compilation (Anderson &
+Francis 2012) and constellation figures after the IAU, both via
+[d3-celestial](https://github.com/ofrohn/d3-celestial) by Olaf Frohn (BSD-3-Clause); planets from
+NASA JPL's approximate Keplerian elements. Museum: artworks from the Art Institute of Chicago's
+open-access collection (public domain, CC0), via its public API. Live wind: weather data by
+[Open-Meteo](https://open-meteo.com) (CC BY 4.0); coastlines and borders from Natural Earth (public
+domain). Type: [Inter](https://rsms.me/inter/) by Rasmus Andersson, SIL Open Font License.
 
 ## License
 

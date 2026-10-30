@@ -17,13 +17,20 @@ import java.util.Map;
  */
 final class Habits {
     private static final long DAY = 86_400_000L;
+    /** UsageEvents.Event.SCREEN_NON_INTERACTIVE, which Android names from 9 on; older TVs simply never send it. */
+    private static final int SCREEN_OFF = 16;
 
     private Habits() { }
 
     static boolean granted(Context c) {
-        AppOpsManager ops = c.getSystemService(AppOpsManager.class);
-        return ops != null && ops.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
-                Process.myUid(), c.getPackageName()) == AppOpsManager.MODE_ALLOWED;
+        AppOpsManager ops = Compat.svc(c, AppOpsManager.class);
+        if (ops == null) return false;
+        // the same check under its older name before Android 10
+        @SuppressWarnings("deprecation")
+        int mode = android.os.Build.VERSION.SDK_INT >= 29
+                ? ops.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), c.getPackageName())
+                : ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), c.getPackageName());
+        return mode == AppOpsManager.MODE_ALLOWED;
     }
 
     /**
@@ -33,7 +40,7 @@ final class Habits {
     static Map<String, Float> forNow(Context c) {
         Map<String, Float> score = new HashMap<>();
         if (!granted(c)) return score;
-        UsageStatsManager usm = c.getSystemService(UsageStatsManager.class);
+        UsageStatsManager usm = Compat.svc(c, UsageStatsManager.class);
         long now = System.currentTimeMillis();
         UsageEvents events = usm.queryEvents(now - 28 * DAY, now);
         UsageEvents.Event e = new UsageEvents.Event();
@@ -70,7 +77,7 @@ final class Habits {
      */
     static Object[] recent(Context c, java.util.Set<String> allowed) {
         if (!granted(c)) return null;
-        UsageStatsManager usm = c.getSystemService(UsageStatsManager.class);
+        UsageStatsManager usm = Compat.svc(c, UsageStatsManager.class);
         long now = System.currentTimeMillis();
         UsageEvents events = usm.queryEvents(now - 7 * DAY, now);
         UsageEvents.Event e = new UsageEvents.Event();
@@ -84,6 +91,73 @@ final class Habits {
             }
         }
         return pkg == null ? null : new Object[]{pkg, when};
+    }
+
+    /**
+     * Up to {@code max} apps among {@code allowed}, most recently used first, each with when it was
+     * last on screen. For the app switcher. Off the main thread.
+     */
+    static java.util.LinkedHashMap<String, Long> recentList(Context c, java.util.Set<String> allowed, int max) {
+        java.util.LinkedHashMap<String, Long> out = new java.util.LinkedHashMap<>();
+        long now = System.currentTimeMillis();
+        Map<String, Long> last = new HashMap<>();
+        // without usage access, Aura's own list is still there
+        if (granted(c)) {
+            UsageEvents events = Compat.svc(c, UsageStatsManager.class).queryEvents(now - 7 * DAY, now);
+            UsageEvents.Event e = new UsageEvents.Event();
+            while (events.hasNextEvent()) {
+                events.getNextEvent(e);
+                if (e.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND && allowed.contains(e.getPackageName())) {
+                    last.put(e.getPackageName(), e.getTimeStamp());
+                }
+            }
+        }
+        // Android's history on some TVs only reaches back to the last power-on: Aura's own list
+        // of what it opened fills in the rest, and learns from what Android still remembers
+        android.content.SharedPreferences p = c.getSharedPreferences("aura_usage", Context.MODE_PRIVATE);
+        Map<String, Long> kept = read(p.getString("recent", "{}"));
+        for (Map.Entry<String, Long> k : kept.entrySet()) {
+            if (allowed.contains(k.getKey()) && (!last.containsKey(k.getKey()) || last.get(k.getKey()) < k.getValue())) last.put(k.getKey(), k.getValue());
+        }
+        p.edit().putString("recent", write(last)).apply();
+        // closed in the switcher: gone until it's used again
+        Map<String, Long> closed = read(p.getString("closed", "{}"));
+        for (Map.Entry<String, Long> k : closed.entrySet()) {
+            Long t = last.get(k.getKey());
+            if (t != null && t <= k.getValue()) last.remove(k.getKey());
+        }
+        java.util.List<Map.Entry<String, Long>> sorted = new java.util.ArrayList<>(last.entrySet());
+        java.util.Collections.sort(sorted, (a, b) -> Long.compare(b.getValue(), a.getValue()));
+        for (Map.Entry<String, Long> x : sorted) {
+            if (out.size() >= max) break;
+            out.put(x.getKey(), x.getValue());
+        }
+        return out;
+    }
+
+    /** An app was just opened from Aura: remembered for the switcher even across restarts. */
+    static void opened(Context c, String pkg) {
+        if (pkg == null) return;
+        android.content.SharedPreferences p = c.getSharedPreferences("aura_usage", Context.MODE_PRIVATE);
+        Map<String, Long> kept = read(p.getString("recent", "{}"));
+        kept.put(pkg, System.currentTimeMillis());
+        // the newest few dozen are plenty
+        if (kept.size() > 30) {
+            String oldest = null;
+            for (Map.Entry<String, Long> e : kept.entrySet()) if (oldest == null || e.getValue() < kept.get(oldest)) oldest = e.getKey();
+            kept.remove(oldest);
+        }
+        p.edit().putString("recent", write(kept)).apply();
+    }
+
+    /** Closed from the switcher: out of the list until it's next opened. */
+    static void close(Context c, String pkg) {
+        android.content.SharedPreferences p = c.getSharedPreferences("aura_usage", Context.MODE_PRIVATE);
+        Map<String, Long> closed = read(p.getString("closed", "{}"));
+        closed.put(pkg, System.currentTimeMillis());
+        Map<String, Long> kept = read(p.getString("recent", "{}"));
+        kept.remove(pkg);
+        p.edit().putString("closed", write(closed)).putString("recent", write(kept)).apply();
     }
 
     static String ago(long ms) {
@@ -137,7 +211,7 @@ final class Habits {
         if (!day.equals(p.getString("day", ""))) {
             // first look today: whatever Android still holds from earlier boots is the starting point
             carried = new HashMap<>();
-            UsageStatsManager usm = c.getSystemService(UsageStatsManager.class);
+            UsageStatsManager usm = Compat.svc(c, UsageStatsManager.class);
             for (UsageStats s : usm.queryAndAggregateUsageStats(midnight, now).values()) {
                 long before = s.getTotalTimeInForeground() - (thisBoot.containsKey(s.getPackageName()) ? thisBoot.get(s.getPackageName()) : 0);
                 if (before > 0) carried.put(s.getPackageName(), before);
@@ -168,7 +242,7 @@ final class Habits {
     private static Map<String, Long> foreground(Context c, long from, long to) {
         Map<String, Long> out = new HashMap<>();
         if (to <= from) return out;
-        UsageEvents events = c.getSystemService(UsageStatsManager.class).queryEvents(from, to);
+        UsageEvents events = Compat.svc(c, UsageStatsManager.class).queryEvents(from, to);
         UsageEvents.Event e = new UsageEvents.Event();
         String front = null;
         long since = from;
@@ -180,7 +254,7 @@ final class Habits {
                 if (front == null || !front.equals(e.getPackageName())) since = e.getTimeStamp();
                 front = e.getPackageName();
             } else if (front != null && (type == UsageEvents.Event.MOVE_TO_BACKGROUND && front.equals(e.getPackageName())
-                    || type == UsageEvents.Event.SCREEN_NON_INTERACTIVE)) {
+                    || type == SCREEN_OFF)) {
                 // standby counts as nobody watching
                 add(out, front, e.getTimeStamp() - since);
                 front = null;

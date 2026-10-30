@@ -53,7 +53,7 @@ final class Ram {
         });
         List<Use> out = new ArrayList<>();
         for (Map.Entry<String, Long> e : by.entrySet()) out.add(new Use(e.getKey(), e.getValue()));
-        out.sort((a, b) -> Long.compare(b.kb, a.kb));
+        java.util.Collections.sort(out, (a, b) -> Long.compare(b.kb, a.kb));
         return out;
     }
 }

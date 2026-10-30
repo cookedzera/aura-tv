@@ -120,7 +120,7 @@ final class Fresh {
                 }
             }
             // what's from here first, then what most people are watching
-            picks.sort((a, b) -> Integer.compare(score(b[1]), score(a[1])));
+            java.util.Collections.sort(picks, (a, b) -> Integer.compare(score(b[1]), score(a[1])));
             for (JSONObject[] p : picks) {
                 if (out.length() >= KEEP) break;
                 JSONObject ep = p[0], show = p[1], ch = show.getJSONObject("webChannel");

@@ -84,7 +84,7 @@ final class WifiSheet extends GlassFrame {
         super(a, b, 26, 0.5f);
         act = a;
         host = h;
-        wifi = a.getApplicationContext().getSystemService(WifiManager.class);
+        wifi = Compat.svc(a.getApplicationContext(), WifiManager.class);
         scan = () -> {
             if (wifi.isWifiEnabled()) wifi.startScan();
         };
@@ -198,7 +198,8 @@ final class WifiSheet extends GlassFrame {
         knownName = knownLink = null;
         setVisibility(View.VISIBLE);
         join.setVisibility(View.GONE);
-        if (act.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        // asking at runtime arrived in Android 6; before it the manifest's grant is enough
+        if (android.os.Build.VERSION.SDK_INT >= 23 && !Compat.granted(act, Manifest.permission.ACCESS_FINE_LOCATION)) {
             act.requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 7);
         }
         if (!listening) {
@@ -264,15 +265,14 @@ final class WifiSheet extends GlassFrame {
 
         WifiInfo info = wifi.getConnectionInfo();
         String current = info != null ? unquote(info.getSSID()) : null;
-        ConnectivityManager cm = act.getSystemService(ConnectivityManager.class);
+        ConnectivityManager cm = Compat.svc(act, ConnectivityManager.class);
         // without location access WifiInfo hides the network's name; the older NetworkInfo still
         // carries it on many Android TV builds, so try that before giving up on the name
         if (current == null || current.isEmpty() || "<unknown ssid>".equals(current)) current = legacyName(cm);
         if (current == null || current.isEmpty() || "<unknown ssid>".equals(current)) current = slowName(info);
         boolean named = current != null && !current.isEmpty() && !"<unknown ssid>".equals(current);
         SupplicantState state = info != null ? info.getSupplicantState() : null;
-        NetworkCapabilities nc = cm == null ? null : cm.getNetworkCapabilities(cm.getActiveNetwork());
-        boolean onWifi = nc != null && nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+        boolean onWifi = Compat.onWifi(cm, false);
         boolean connected = on && (onWifi || (info != null && info.getNetworkId() != -1 && state == SupplicantState.COMPLETED));
         if (!on) status.setText("Off");
         // the name is on the network's own row below; the header carries the band and link speed
@@ -321,7 +321,7 @@ final class WifiSheet extends GlassFrame {
             }
         }
         List<Net> sorted = new ArrayList<>(nets.values());
-        sorted.sort((x, y) -> {
+        java.util.Collections.sort(sorted, (x, y) -> {
             if (x.connected != y.connected) return x.connected ? -1 : 1;
             if ((x.configId >= 0) != (y.configId >= 0)) return x.configId >= 0 ? -1 : 1;
             return y.level != x.level ? y.level - x.level : x.ssid.compareToIgnoreCase(y.ssid);
@@ -420,7 +420,7 @@ final class WifiSheet extends GlassFrame {
             } catch (SecurityException ignored) {
             }
         }
-        if (!looking && act.checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED) {
+        if (!looking && Compat.granted(act, "android.permission.DUMP")) {
             looking = true;
             new Thread(() -> {
                 String[] found = fromReport();
@@ -587,7 +587,7 @@ final class WifiSheet extends GlassFrame {
             password.setText("");
             join.setVisibility(View.VISIBLE);
             password.requestFocus();
-            InputMethodManager imm = act.getSystemService(InputMethodManager.class);
+            InputMethodManager imm = Compat.svc(act, InputMethodManager.class);
             password.post(() -> imm.showSoftInput(password, InputMethodManager.SHOW_IMPLICIT));
         }
     }
@@ -619,7 +619,7 @@ final class WifiSheet extends GlassFrame {
     }
 
     private void hideKeyboard() {
-        act.getSystemService(InputMethodManager.class).hideSoftInputFromWindow(password.getWindowToken(), 0);
+        Compat.svc(act, InputMethodManager.class).hideSoftInputFromWindow(password.getWindowToken(), 0);
     }
 
     /** Wi-Fi strength as three arcs and a dot, in the row's current content colour. */

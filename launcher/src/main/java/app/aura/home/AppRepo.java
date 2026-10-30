@@ -41,7 +41,7 @@ final class AppRepo {
         collect(pm, apps, Intent.CATEGORY_LAUNCHER, c.getPackageName());
         List<App> list = new ArrayList<>(apps.values());
         Collator col = Collator.getInstance();
-        list.sort((a, b) -> col.compare(a.label, b.label));
+        java.util.Collections.sort(list, (a, b) -> col.compare(a.label, b.label));
         return list;
     }
 
@@ -87,6 +87,12 @@ final class AppRepo {
         if (wsum < 8) return 0xFFB8C4D6;
         float hue = (float) ((Math.toDegrees(Math.atan2(sy, sx)) + 360) % 360);
         return Color.HSVToColor(new float[]{hue, 0.7f, 1f});
+    }
+
+    /** The saved grid order as tags (apps, and folders as "folder:id"), or the default one. */
+    static List<String> order(SharedPreferences p) {
+        String saved = p.getString("dock", null);
+        return saved == null ? new ArrayList<>(DEFAULT_DOCK) : new ArrayList<>(Arrays.asList(TextUtils.split(saved, ",")));
     }
 
     static List<String> dock(SharedPreferences p, List<App> installed) {

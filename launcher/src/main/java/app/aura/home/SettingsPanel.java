@@ -55,6 +55,8 @@ final class SettingsPanel {
     private boolean confirmClear;
     /** The photo whose removal waits for a second OK. */
     private String confirmPhoto;
+    /** The profile whose removal waits for a second OK. */
+    private String confirmProfile;
     /** "Checking…" while Block ads confirms the filter works; null otherwise. */
     private String shieldNote;
     /** What the text field is for: "city" or "dns". */
@@ -65,6 +67,13 @@ final class SettingsPanel {
     private boolean probing;
     private Updater.Release release;
     private String updateState = "", updateNote = "";
+    // set up on this TV: the last connection's result, and how far setup got
+    private String adbState = "", setupNote = "";
+    private boolean setupRunning, confirmAdbOff;
+    // remote buttons: waiting for a press; the button pressed, waiting for its app; a removal waiting for a second OK
+    private boolean teachingKey;
+    private int[] newKey;
+    private String confirmKey;
     private Drop drop;
     private View dropCard;
     private TextView dropTitle, dropSub;
@@ -120,6 +129,7 @@ final class SettingsPanel {
         city.setOnEditorActionListener((v, id, e) -> {
             // the same field takes a city for the weather or a hostname for Block ads
             if ("dns".equals(inputFor)) setCustomDns(city.getText().toString().trim());
+            else if ("profile".equals(inputFor)) addProfile(city.getText().toString().trim());
             else findCity(city.getText().toString().trim());
             return true;
         });
@@ -158,8 +168,29 @@ final class SettingsPanel {
         if (rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
     }
 
+    /** Every few seconds while the Wallpaper page is open and flyovers are arriving: "3 of 5 ready". */
+    private final Runnable flyoverTick = () -> {
+        if (isOpen() && page.equals("wallpaper")) build();
+    };
+
+    /** Straight to one page, as when Android's screensaver settings hand over to Aura. */
+    void show(String p) {
+        go(p);
+    }
+
+    /** Redraws the page on show, after something outside changed what it says. */
+    void refresh() {
+        if (isOpen()) build();
+    }
+
     void close() {
         stopDrop();
+        // closed while waiting for a remote button: the next press stays an ordinary one
+        if (teachingKey || newKey != null) {
+            teachingKey = false;
+            newKey = null;
+            HomeKeys.stopTeaching();
+        }
         hideKeyboard();
         panel.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> panel.setVisibility(View.GONE)).start();
@@ -179,6 +210,24 @@ final class SettingsPanel {
             // the "Your photos" row is gone once the last one is removed: focus the first row instead
             go("drop");
             focusTag("photos");
+            return true;
+        }
+        if (page.equals("widgets")) {
+            go("home");
+            focusTag("widgets");
+            return true;
+        }
+        if (page.equals("keys")) {
+            if (newKey != null || teachingKey) {
+                newKey = null;
+                teachingKey = false;
+                HomeKeys.stopTeaching();
+                build();
+                focusTag("keys:add");
+                return true;
+            }
+            go("home");
+            focusTag("keys");
             return true;
         }
         if (!page.isEmpty()) {
@@ -213,12 +262,99 @@ final class SettingsPanel {
         if (page.equals("apps")) {
             Ui.fit(title, "Apps", Ui.dp(300), 52, 30);
             note.setText("Hidden apps leave your grid. They stay installed, and you can bring them back here.");
+            // inputs hidden from home first (hold OK on an input's tile), by their name on this TV
+            android.media.tv.TvInputManager tim = (android.media.tv.TvInputManager) act.getSystemService(android.content.Context.TV_INPUT_SERVICE);
+            for (String h : Prefs.hidden(act)) {
+                if (!h.startsWith("input:")) continue;
+                android.media.tv.TvInputInfo info = tim == null ? null : tim.getTvInputInfo(h.substring(6));
+                String name = info != null ? String.valueOf(info.loadLabel(act)) : "An input";
+                add(name, "Hidden · OK shows it", h, () -> {
+                    Prefs.hide(act, h, false);
+                    host.applied("inputs");
+                    build();
+                });
+            }
             for (AppRepo.App a : host.apps()) {
                 boolean hidden = Prefs.hidden(act).contains(a.pkg);
                 add(a.label, hidden ? "Hidden" : "Shown", "app:" + a.pkg, () -> {
                     Prefs.hide(act, a.pkg, !Prefs.hidden(act).contains(a.pkg));
                     host.applied("apps");
                     build();
+                });
+            }
+        } else if (page.equals("home")) {
+            Ui.fit(title, "Home screen", Ui.dp(300), 52, 30);
+            note.setText("How your apps look and what moves on the home screen.");
+            int si = java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act));
+            add("Tiles", Prefs.TILE_NAMES[Math.max(0, si)], "tiles", () -> {
+                // OK steps through the styles; the grid changes straight away behind the panel
+                String next = Prefs.TILE_STYLES[(Math.max(0, si) + 1) % Prefs.TILE_STYLES.length];
+                Prefs.of(act).edit().putString(Prefs.TILE_STYLE, next).apply();
+                host.applied("tiles");
+                build();
+                focusTag("tiles");
+            });
+            toggle("App names", Prefs.NAMES_ALWAYS, "Always", "On focus", "names");
+            int hiddenW = Prefs.hiddenWidgets(act).size();
+            add("Widgets", hiddenW == 0 ? "All shown" : (3 - hiddenW) + " of 3 shown", "widgets", () -> go("widgets"));
+            toggle("Top Shelf", Prefs.TOP_SHELF, "On", "Off", "shelf");
+            toggle("Parallax icons", Prefs.PARALLAX, "On", "Off", "parallax");
+            toggle("Live picture on input tiles", Prefs.INPUT_PREVIEW, "On", "Off", "inputs");
+            // switched by Aura where setup allowed it; elsewhere, Android's own Accessibility screen does it
+            // how late the TV hands over remote releases while Aura watches the keys: some firmware adds a lot
+            int lag = Prefs.device(act).getInt("keys_lag", 0);
+            add("Home button in apps", HomeKeys.on(act) ? "Twice: switcher · hold: Control Center" + (lag >= 150 ? " · remote " + lag + " ms late" : "") : "Off", "homekeys", () -> {
+                if (!HomeKeys.set(act, !HomeKeys.on(act))) {
+                    host.open(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS), panel);
+                    return;
+                }
+                build();
+                focusTag("homekeys");
+            });
+            // pictures need the service above, and Android 11
+            if (android.os.Build.VERSION.SDK_INT >= 30 && HomeKeys.on(act)) {
+                add("Pictures in the switcher", Previews.on(act) ? "Apps as you left them" : "Off", "previews", () -> {
+                    Previews.set(act, !Previews.on(act));
+                    host.hud(R.drawable.ic_check, Previews.on(act) ? "Kept only on this TV, two days at most" : "Pictures deleted");
+                    build();
+                    focusTag("previews");
+                });
+            }
+            if (HomeKeys.on(act)) {
+                int n = HomeKeys.keys(act).size();
+                add("Remote buttons", n == 0 ? "Give a button an app" : n + (n == 1 ? " button with an app" : " buttons with apps"), "keys", () -> go("keys"));
+            }
+        } else if (page.equals("profiles")) {
+            Ui.fit(title, "Profiles", Ui.dp(300), 52, 30);
+            note.setText("Everyone gets their own app order, folders, tiles, widgets and wallpaper. OK switches to a profile.");
+            String cur = Profiles.current(act);
+            for (Profiles.Profile pr : Profiles.all(act)) {
+                add(pr.name, pr.id.equals(cur) ? "In use" : "Switch", "pr:" + pr.id, () -> {
+                    if (pr.id.equals(Profiles.current(act))) return;
+                    Profiles.use(act, pr.id);
+                    host.hud(R.drawable.ic_check, "Hello, " + pr.name);
+                    host.applied("profile");
+                });
+            }
+            if (Profiles.all(act).size() < Profiles.MAX) add("Add a profile", "Type a name", "pr:add", this::askProfile);
+            for (Profiles.Profile pr : Profiles.all(act)) {
+                if (Profiles.MAIN.equals(pr.id)) continue;
+                add("Remove " + pr.name, ("pr:del:" + pr.id).equals(confirmProfile) ? "Press OK again" : "", "pr:del:" + pr.id, () -> {
+                    String tag = "pr:del:" + pr.id;
+                    if (!tag.equals(confirmProfile)) {
+                        confirmProfile = tag;
+                        build();
+                        return;
+                    }
+                    confirmProfile = null;
+                    boolean wasCurrent = pr.id.equals(Profiles.current(act));
+                    Profiles.remove(act, pr.id);
+                    host.hud(R.drawable.ic_check, pr.name + " removed");
+                    if (wasCurrent) host.applied("profile");
+                    else {
+                        build();
+                        focusTag("pr:" + Profiles.current(act));
+                    }
                 });
             }
         } else if (page.equals("widgets")) {
@@ -259,11 +395,84 @@ final class SettingsPanel {
             add("Find the fastest", probing ? "Measuring…" : "", "dns:probe", this::findFastest);
         } else if (page.equals("wallpaper")) {
             Ui.fit(title, "Wallpaper", Ui.dp(300), 52, 30);
-            note.setText("Photographs that follow the sky, or pure black: on an OLED screen almost every pixel stays off, and the screensaver becomes a drifting clock.");
+            note.setText(Flyovers.supported()
+                    ? "Photographs that follow the sky, or pure black for OLED. The screensaver can hang masterpieces from an open museum collection, show the real wind over the country right now, tonight's real sky, or Earth from the space station. Auto moves between them."
+                    : "Photographs that follow the sky, or pure black for OLED. The screensaver can hang masterpieces from an open museum collection, show the real wind over the country right now, or tonight's real sky. Auto moves between them.");
             toggle("Wallpaper", Prefs.BLACK, "Pure black", "Photographs", "photos");
             if (!Prefs.on(act, Prefs.BLACK)) {
                 toggle("Picture of the Day", Prefs.DAILY, "On", "Off", "daily");
                 toggle("Sky moments", Prefs.MOMENTS, "On", "Off", "moments");
+            }
+            // the screensaver's scene; Earth from space only where flyovers can play
+            final List<String> modes = new java.util.ArrayList<>(java.util.Arrays.asList(Prefs.SAVERS));
+            if (!Flyovers.supported()) modes.remove("space");
+            String mode = Prefs.saver(act);
+            add("Screensaver", Prefs.SAVER_NAMES[java.util.Arrays.asList(Prefs.SAVERS).indexOf(mode)]
+                    + (mode.equals("auto") ? " · by the light and weather" : ""), Prefs.SAVER, () -> {
+                String next = modes.get((modes.indexOf(Prefs.saver(act)) + 1) % modes.size());
+                Prefs.of(act).edit().putString(Prefs.SAVER, next).apply();
+                if (next.equals("space") && !Prefs.on(act, Prefs.FLYOVERS)) {
+                    Prefs.set(act, Prefs.FLYOVERS, true);
+                    Flyovers.schedule(act);
+                    host.hud(R.drawable.ic_check, "Earth from space · arriving over Wi-Fi");
+                }
+                build();
+                focusTag(Prefs.SAVER);
+            });
+            // the TV's own screensaver settings, here instead of three menus deep in Android's
+            if (Ambient.canSet(act)) {
+                boolean mine = Ambient.chosen(act);
+                add("Aura as the screensaver", mine ? "On" : "Off · another one is chosen", "saver:use", () -> {
+                    if (!Ambient.choose(act, !Ambient.chosen(act))) host.hud(R.drawable.ic_info, "The TV didn't allow that change");
+                    build();
+                    focusTag("saver:use");
+                });
+                if (mine) {
+                    add("Starts after", Ambient.span(Ambient.startMs(act)), "saver:start", () -> {
+                        Ambient.next(act, true, Ambient.startMs(act));
+                        build();
+                        focusTag("saver:start");
+                    });
+                }
+                add("TV turns off after", Ambient.span(Ambient.offMs(act)) + " without use", "saver:off", () -> {
+                    Ambient.next(act, false, Ambient.offMs(act));
+                    build();
+                    focusTag("saver:off");
+                });
+            } else {
+                add("Aura as the screensaver", Ambient.chosen(act) ? "On" : "Choose it in Android's settings", "saver:use", () -> {
+                    try {
+                        host.open(new Intent(Settings.ACTION_DREAM_SETTINGS), panel);
+                    } catch (RuntimeException e) {
+                        host.open(new Intent(Settings.ACTION_SETTINGS), panel);
+                    }
+                });
+            }
+            add("Preview the screensaver", "", "saver:preview", () -> {
+                try {
+                    act.startActivity(new Intent(Intent.ACTION_MAIN).setClassName("com.android.systemui", "com.android.systemui.Somnambulator")
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (RuntimeException e) {
+                    host.hud(R.drawable.ic_info, "This TV can't preview it; it starts after a while of rest");
+                }
+            });
+            // a hardware VP9 decoder plays them for almost nothing; without one, no row
+            if (Flyovers.supported()) {
+                add("Screensaver flyovers", Flyovers.status(act), Prefs.FLYOVERS, () -> {
+                    boolean on = !Prefs.on(act, Prefs.FLYOVERS);
+                    Prefs.set(act, Prefs.FLYOVERS, on);
+                    if (on) {
+                        Flyovers.schedule(act);
+                        host.hud(R.drawable.ic_check, "Earth from space · arriving over Wi-Fi");
+                    } else {
+                        Flyovers.clear(act);
+                    }
+                    build();
+                    focusTag(Prefs.FLYOVERS);
+                });
+                // still downloading: the count keeps up while the page is open
+                rows.removeCallbacks(flyoverTick);
+                if (Prefs.on(act, Prefs.FLYOVERS) && !Flyovers.status(act).equals("On")) rows.postDelayed(flyoverTick, 3000);
             }
         } else if (page.equals("updates")) {
             Ui.fit(title, "Updates", Ui.dp(300), 52, 30);
@@ -334,34 +543,34 @@ final class SettingsPanel {
                 host.applied("photos");
                 back();
             });
+        } else if (page.equals("tv")) {
+            buildTv();
+        } else if (page.equals("keys")) {
+            buildKeys();
         } else {
             Ui.fit(title, "Settings", Ui.dp(300), 52, 30);
             Weather.Now w = Weather.now(act);
             note.setText("Changes apply at once. Everything here can be undone the same way.");
-            int si = java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act));
-            add("Tiles", Prefs.TILE_NAMES[Math.max(0, si)], "tiles", () -> {
-                // OK steps through the styles; the grid changes straight away behind the panel
-                String next = Prefs.TILE_STYLES[(Math.max(0, si) + 1) % Prefs.TILE_STYLES.length];
-                Prefs.of(act).edit().putString(Prefs.TILE_STYLE, next).apply();
-                host.applied("tiles");
-                build();
-                focusTag("tiles");
+            // only while Home still opens another home screen; Android itself asks
+            if (!HomeRole.held(act)) add("Home button", "Opens another home · OK to change", "role", () -> {
+                if (!HomeRole.ask(act)) host.hud(R.drawable.ic_info, "Press Home on the remote and choose Aura, then Always");
             });
-            toggle("App names", Prefs.NAMES_ALWAYS, "Always", "On focus", "names");
-            int hiddenW = Prefs.hiddenWidgets(act).size();
-            add("Widgets", hiddenW == 0 ? "All shown" : (3 - hiddenW) + " of 3 shown", "widgets", () -> go("widgets"));
+            add("Home screen", Prefs.TILE_NAMES[Math.max(0, java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act)))]
+                    + " tiles", "home", () -> go("home"));
+            add("Profile", Profiles.name(act), "profiles", () -> go("profiles"));
             add("Wallpaper", Prefs.on(act, Prefs.BLACK) ? "Pure black" : "Photographs", "wallpaper", () -> go("wallpaper"));
             int mine = Mine.count(act);
             add("From your phone", mine > 0 ? mine + (mine == 1 ? " photo" : " photos") : "Photos, GIFs, apps", "drop", this::openDrop);
-            add("Block ads", Shield.on(act) ? "On · " + Shield.name(act) : "Off", "shield", () -> go("shield"));
+            // Private DNS arrived with Android 9: older TVs don't get the row at all
+            if (android.os.Build.VERSION.SDK_INT >= 28) add("Block ads", Shield.on(act) ? "On · " + Shield.name(act) : "Off", "shield", () -> go("shield"));
             add("Animations", animLabel(), "anim", this::cycleAnim);
             toggle("Tonight's pick", Prefs.PICKS, "On", "Off", "picks");
             toggle("Weather", Prefs.WEATHER, "On", "Off", "weather");
-            boolean manual = Prefs.of(act).getBoolean("geo_manual", false);
+            boolean manual = Prefs.device(act).getBoolean("geo_manual", false);
             String place = w != null && !w.city.isEmpty() ? w.city : "Not found yet";
             add("Weather city", (manual ? "" : "Auto · ") + place, "city", this::askCity);
             if (manual) add("Use my connection's city", "", "auto", () -> {
-                Prefs.of(act).edit().putBoolean("geo_manual", false).putLong("geo_at", 0).putLong("wx_at", 0).apply();
+                Prefs.device(act).edit().putBoolean("geo_manual", false).putLong("geo_at", 0).putLong("wx_at", 0).apply();
                 host.applied("weather");
                 build();
             });
@@ -381,11 +590,96 @@ final class SettingsPanel {
                 dl.leftMargin = Ui.dp(5);
                 ((FrameLayout) rows.getChildAt(rows.getChildCount() - 1)).addView(dot, dl);
             }
+            add("Set up on this TV", Adb.on(act) ? Adb.unguarded(act) ? "Connected · open to your Wi-Fi" : "Connected" : "No computer needed", "tv", () -> go("tv"));
             add("Android settings", "", "android", () -> host.open(new Intent(Settings.ACTION_SETTINGS), panel));
         }
         if (keep != null) {
             for (int i = 0; i < rows.getChildCount(); i++) if (keep.equals(rows.getChildAt(i).getTag())) rows.getChildAt(i).requestFocus();
         }
+    }
+
+    /** Remote buttons: press one, pick an app; the list of those given so far, each removable. */
+    private void buildKeys() {
+        Ui.fit(title, "Remote buttons", Ui.dp(300), 52, 30);
+        if (newKey != null) {
+            final String id = HomeKeys.id(newKey[0], newKey[1]);
+            note.setText("Which app should " + HomeKeys.keyName(id) + " open?");
+            for (AppRepo.App a : host.apps()) {
+                add(a.label, "", "ka:" + a.pkg, () -> {
+                    HomeKeys.give(act, newKey[0], newKey[1], a.pkg);
+                    host.hud(R.drawable.ic_check, HomeKeys.keyName(id) + " opens " + a.label);
+                    newKey = null;
+                    build();
+                    focusTag("key:" + id);
+                });
+            }
+            return;
+        }
+        note.setText(teachingKey ? "Press the button on the remote now."
+                : "Give any button on the remote an app: a shortcut button you never use, or a colour button. It works inside apps, and on this screen wherever Android lets the button through.");
+        for (java.util.Map.Entry<String, String> k : HomeKeys.keys(act).entrySet()) {
+            final String tag = "key:" + k.getKey(), id = k.getKey();
+            add(HomeKeys.keyName(id), tag.equals(confirmKey) ? "Press OK again to remove" : appLabel(k.getValue()), tag, () -> {
+                if (!tag.equals(confirmKey)) {
+                    confirmKey = tag;
+                    build();
+                    return;
+                }
+                confirmKey = null;
+                HomeKeys.forget(act, id);
+                build();
+                focusTag("keys:add");
+            });
+        }
+        add("Add a button", teachingKey ? "Press it now…" : "", "keys:add", this::teachKey);
+    }
+
+    private String appLabel(String pkg) {
+        for (AppRepo.App a : host.apps()) if (a.pkg.equals(pkg)) return a.label;
+        return pkg;
+    }
+
+    /** Listens for the next button (Home button in apps does the listening), for thirty seconds. */
+    private void teachKey() {
+        if (teachingKey) return;
+        boolean ok = HomeKeys.teach((code, scan) -> act.runOnUiThread(() -> {
+            if (!teachingKey) return;
+            teachingKey = false;
+            newKey = new int[]{code, scan};
+            if (page.equals("keys")) go("keys");
+        }));
+        if (!ok) {
+            host.hud(R.drawable.ic_info, "Switch on Home button in apps first");
+            return;
+        }
+        teachingKey = true;
+        build();
+        rows.postDelayed(() -> {
+            if (!teachingKey) return;
+            teachingKey = false;
+            HomeKeys.stopTeaching();
+            if (page.equals("keys")) build();
+        }, 30_000);
+    }
+
+    /** Set up on this TV: connect to the TV's own debugging port, then grant what a PC would. */
+    private void buildTv() {
+        Ui.fit(title, "Set up on this TV", Ui.dp(300), 52, 30);
+        note.setText(adbNote());
+        add("Connect", adbState.equals("asking") ? "Waiting for you…" : Adb.on(act) ? "Connected" : "Not connected", "adb:connect", this::adbConnect);
+        if (setupNote.isEmpty()) setupNote = Prefs.device(act).getString("setup_note", "");
+        if (Adb.on(act)) add("Switch everything on", setupNote.isEmpty() ? Adb.setup(act).length + " extras" : setupNote, "adb:setup", this::adbSetup);
+        // the open door shuts with a setting Aura may change once setup has granted it
+        if (Adb.on(act) && Adb.unguarded(act) && Compat.granted(act, android.Manifest.permission.WRITE_SECURE_SETTINGS)) {
+            add("Turn network debugging off", confirmAdbOff ? "Press OK again" : "Closes the open door", "adb:off", this::adbOff);
+        }
+        add("Developer options", "Network debugging is here", "adb:dev", () -> {
+            try {
+                host.open(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS), panel);
+            } catch (RuntimeException e) {
+                host.open(new Intent(Settings.ACTION_SETTINGS), panel);
+            }
+        });
     }
 
     private void toggle(String label, String key, String onText, String offText, String what) {
@@ -438,6 +732,109 @@ final class SettingsPanel {
         build();
     }
 
+    // ---- set up on this TV ----------------------------------------------------------------------
+
+    private String adbNote() {
+        String s = adbState.isEmpty() && Adb.on(act) ? Adb.unguarded(act) ? Adb.OPEN_DOOR : Adb.OK : adbState;
+        switch (s) {
+            case "asking":
+                return "If Android asks on the screen, choose Always allow from this computer, then OK.";
+            case Adb.OK:
+                return "Aura is connected to this TV. Switch everything on grants what the PC setup grants, and closing an app in the switcher now stops it fully.";
+            case Adb.OPEN_DOOR:
+                return "Careful: this TV let Aura in without asking. Anything on your Wi-Fi can control it the same way. Switch everything on, then turn network debugging off.";
+            case Adb.OFF:
+                return "Network debugging is off. In Developer options switch on Network debugging (or USB debugging), then Connect again. No Developer options? Android settings, Device Preferences, About: press OK on Build seven times.";
+            case Adb.DENIED:
+                return "Android didn't let Aura in in time. If you chose Always allow, Connect again: it goes straight in now. Otherwise Connect, and choose Always allow when it asks.";
+            case Adb.FAILED:
+                return "Couldn't reach the TV's debugging service. Try again in a moment.";
+            default:
+                return "Aura can switch on its extras from the TV itself, no computer needed, through the TV's network debugging, the way a PC would. Android asks once: choose Always allow.";
+        }
+    }
+
+    private void adbConnect() {
+        if (adbState.equals("asking") || setupRunning) return;
+        adbState = "asking";
+        build();
+        new Thread(() -> {
+            String r = Adb.connect(act);
+            act.runOnUiThread(() -> {
+                adbState = r;
+                if (r.equals(Adb.OK)) host.hud(R.drawable.ic_check, "Connected to this TV");
+                else if (r.equals(Adb.OPEN_DOOR)) host.hud(R.drawable.ic_info, "Connected, but the TV never asked");
+                if (page.equals("tv")) {
+                    build();
+                    focusTag(Adb.on(act) ? "adb:setup" : "adb:connect");
+                }
+            });
+        }, "adb-connect").start();
+    }
+
+    /** Runs the setup steps one by one, the row counting along; a step that fails is named. */
+    private void adbSetup() {
+        if (setupRunning) return;
+        setupRunning = true;
+        final String[][] steps = Adb.setup(act);
+        setupNote = "0 of " + steps.length;
+        build();
+        new Thread(() -> {
+            int done = 0;
+            List<String> failed = new java.util.ArrayList<>();
+            for (int i = 0; i < steps.length; i++) {
+                final String now = (i + 1) + " of " + steps.length + (steps[i][0].equals("Speed") ? " · compiling, about a minute" : " · " + steps[i][0]);
+                act.runOnUiThread(() -> {
+                    setupNote = now;
+                    if (page.equals("tv")) build();
+                });
+                // the last step (install permission) makes Android restart Aura: the result is kept first
+                if (i == steps.length - 1 && steps[i][0].equals("Updates")) {
+                    Prefs.device(act).edit().putString("setup_note", failed.isEmpty() ? "Done · all " + steps.length
+                            : done + 1 + " of " + steps.length + " · not " + TextUtils.join(", ", failed)).commit();
+                }
+                List<String> out = Adb.run(act, steps[i][1]);
+                String o = out == null ? null : out.get(0);
+                // pm and settings say nothing when it works; the rest print Success; "already" is fine too
+                if (o != null && (!o.contains("Exception") && !o.contains("Error") || o.contains("already"))) done++;
+                else failed.add(steps[i][0]);
+                if (out == null) break;
+            }
+            final int ok = done;
+            act.runOnUiThread(() -> {
+                setupRunning = false;
+                setupNote = ok == steps.length ? "Done · all " + ok : ok + " of " + steps.length + " · not " + TextUtils.join(", ", failed);
+                Prefs.device(act).edit().putString("setup_note", setupNote).apply();
+                host.hud(R.drawable.ic_check, ok == steps.length ? "Everything is switched on" : ok + " of " + steps.length + " switched on");
+                if (page.equals("tv")) {
+                    build();
+                    focusTag("adb:setup");
+                }
+            });
+        }, "adb-setup").start();
+    }
+
+    /** Debugging off for the whole TV: nothing on the Wi-Fi gets in, Aura's own link included. */
+    private void adbOff() {
+        if (!confirmAdbOff) {
+            confirmAdbOff = true;
+            build();
+            return;
+        }
+        confirmAdbOff = false;
+        try {
+            Settings.Global.putInt(act.getContentResolver(), Settings.Global.ADB_ENABLED, 0);
+        } catch (SecurityException e) {
+            host.hud(R.drawable.ic_info, "The TV didn't allow that change");
+            return;
+        }
+        Prefs.device(act).edit().putBoolean("adb_ok", false).putBoolean("adb_open", false).apply();
+        adbState = "";
+        host.hud(R.drawable.ic_check, "Network debugging off · the door is shut");
+        build();
+        focusTag("adb:connect");
+    }
+
     // ---- block ads ----------------------------------------------------------------------------
 
     /** "In use", else the speed measured here (and whether it blocks), else what it's for. */
@@ -468,7 +865,7 @@ final class SettingsPanel {
         city.setText("");
         city.setVisibility(View.VISIBLE);
         city.requestFocus();
-        city.post(() -> act.getSystemService(InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
+        city.post(() -> Compat.svc(act, InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
     }
 
     /** A hostname you typed: tried from the TV first, so a typo can never cut the internet. */
@@ -577,7 +974,7 @@ final class SettingsPanel {
             final Updater.Release found = r;
             final String s = state;
             // what the page just found counts too: home's dot and message stay in step
-            if (found != null) Prefs.of(act).edit().putString("update_ver", found.version).apply();
+            if (found != null) Prefs.device(act).edit().putString("update_ver", found.version).apply();
             act.runOnUiThread(() -> {
                 release = found;
                 updateState = s;
@@ -592,7 +989,7 @@ final class SettingsPanel {
         if (!Updater.allowed(act)) {
             // Android asks once whether Aura may install apps
             try {
-                act.startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                act.startActivity(new Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES",
                         android.net.Uri.parse("package:" + act.getPackageName())));
             } catch (RuntimeException e) {
                 host.hud(R.drawable.ic_info, "Allow Aura to install apps: Settings, Apps, Special app access");
@@ -852,6 +1249,35 @@ final class SettingsPanel {
 
     // ---- weather city ------------------------------------------------------------------------
 
+    /** The field again, this time for a new profile's name. */
+    private void askProfile() {
+        inputFor = "profile";
+        city.setHint("A name, then OK");
+        city.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        city.setText("");
+        city.setVisibility(View.VISIBLE);
+        city.requestFocus();
+        city.post(() -> Compat.svc(act, InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
+    }
+
+    private void addProfile(String name) {
+        hideKeyboard();
+        city.setVisibility(View.GONE);
+        if (name.isEmpty()) {
+            build();
+            return;
+        }
+        Profiles.Profile pr = Profiles.add(act, name.length() > 18 ? name.substring(0, 18) : name);
+        if (pr == null) {
+            host.hud(R.drawable.ic_info, "Five profiles at most");
+            build();
+            return;
+        }
+        Profiles.use(act, pr.id);
+        host.hud(R.drawable.ic_check, "Hello, " + pr.name + "  ·  a fresh home screen, all yours");
+        host.applied("profile");
+    }
+
     private void askCity() {
         inputFor = "city";
         city.setHint("Type a city, then OK");
@@ -859,7 +1285,7 @@ final class SettingsPanel {
         city.setText("");
         city.setVisibility(View.VISIBLE);
         city.requestFocus();
-        city.post(() -> act.getSystemService(InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
+        city.post(() -> Compat.svc(act, InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
     }
 
     /** Open-Meteo's free geocoder (no key) turns the name into coordinates. */
@@ -876,7 +1302,7 @@ final class SettingsPanel {
                 try (InputStream in = con.getInputStream(); Scanner s = new Scanner(in, "UTF-8").useDelimiter("\\A")) {
                     JSONObject r = new JSONObject(s.hasNext() ? s.next() : "{}").getJSONArray("results").getJSONObject(0);
                     found = r.optString("name");
-                    Prefs.of(act).edit().putBoolean("geo_manual", true).putFloat("geo_lat", (float) r.getDouble("latitude"))
+                    Prefs.device(act).edit().putBoolean("geo_manual", true).putFloat("geo_lat", (float) r.getDouble("latitude"))
                             .putFloat("geo_lon", (float) r.getDouble("longitude")).putString("wx_city", found)
                             .putLong("wx_at", 0).apply();
                     Weather.placeSun(act);
@@ -896,7 +1322,7 @@ final class SettingsPanel {
     }
 
     private void hideKeyboard() {
-        act.getSystemService(InputMethodManager.class).hideSoftInputFromWindow(city.getWindowToken(), 0);
+        Compat.svc(act, InputMethodManager.class).hideSoftInputFromWindow(city.getWindowToken(), 0);
     }
 
     private static LinearLayout.LayoutParams lp(int left, int top) {

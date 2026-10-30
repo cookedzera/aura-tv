@@ -21,11 +21,14 @@ public class MediaWatch extends NotificationListenerService {
         String title, by, pkg;
         boolean playing;
         MediaController controller;
+        /** The episode's or track's own picture, when the app gives one; and how far in (0 to 1, or 0). */
+        android.graphics.Bitmap art;
+        float progress;
     }
 
     /** The most relevant media session (playing first, else paused), or null. Main thread is fine: no I/O. */
     static Playing now(Context c) {
-        MediaSessionManager msm = c.getSystemService(MediaSessionManager.class);
+        MediaSessionManager msm = Compat.svc(c, MediaSessionManager.class);
         if (msm == null) return null;
         List<MediaController> list;
         try {
@@ -52,6 +55,11 @@ public class MediaWatch extends NotificationListenerService {
         p.pkg = best.getPackageName();
         p.playing = best.getPlaybackState().getState() == PlaybackState.STATE_PLAYING;
         p.controller = best;
+        p.art = md.getBitmap(MediaMetadata.METADATA_KEY_ART);
+        if (p.art == null) p.art = md.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+        if (p.art == null) p.art = md.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
+        long length = md.getLong(MediaMetadata.METADATA_KEY_DURATION), at = best.getPlaybackState().getPosition();
+        p.progress = length > 0 && at > 0 ? Math.min(1f, at / (float) length) : 0f;
         return p.title == null ? null : p;
     }
 }

@@ -50,8 +50,28 @@ final class Continue {
      * thumbnails preferred, for a cinematic card). Empty when none or no permission. Off the main thread.
      */
     static List<Item> all(Context c, int max) {
+        // pressing Home again and again shouldn't ask the streaming apps each time: a minute's cache
+        long now = android.os.SystemClock.elapsedRealtime();
+        synchronized (Continue.class) {
+            if (cached != null && cachedMax == max && now - cachedAt < 60_000) return cached;
+        }
+        List<Item> out = read(c, max);
+        synchronized (Continue.class) {
+            cached = out;
+            cachedMax = max;
+            cachedAt = now;
+        }
+        return out;
+    }
+
+    private static List<Item> cached;
+    private static int cachedMax;
+    private static long cachedAt;
+
+    private static List<Item> read(Context c, int max) {
         List<Item> out = new ArrayList<>();
-        if (c.checkSelfPermission("android.permission.READ_TV_LISTINGS") != PackageManager.PERMISSION_GRANTED) return out;
+        // the Watch Next list arrived with Android 8
+        if (android.os.Build.VERSION.SDK_INT < 26 || !Compat.granted(c, "android.permission.READ_TV_LISTINGS")) return out;
         try (Cursor cur = c.getContentResolver().query(TvContract.WatchNextPrograms.CONTENT_URI, COLUMNS, null, null,
                 TvContract.WatchNextPrograms.COLUMN_LAST_ENGAGEMENT_TIME_UTC_MILLIS + " DESC")) {
             if (cur == null) return out;
@@ -86,7 +106,38 @@ final class Continue {
         return out;
     }
 
-    private static Bitmap load(Context c, String uri) {
+    /**
+     * What {@code pkg} offers on its own Android TV home-screen rows (preview channels), newest
+     * first, for Top Shelf. Some TVs only let their own launcher read these: then this is empty.
+     */
+    static List<Item> previews(Context c, String pkg, int max) {
+        List<Item> out = new ArrayList<>();
+        if (android.os.Build.VERSION.SDK_INT < 26 || !Compat.granted(c, "android.permission.READ_TV_LISTINGS")) return out;
+        String[] cols = {TvContract.PreviewPrograms.COLUMN_TITLE, TvContract.PreviewPrograms.COLUMN_SHORT_DESCRIPTION,
+                TvContract.PreviewPrograms.COLUMN_POSTER_ART_URI, TvContract.PreviewPrograms.COLUMN_THUMBNAIL_URI,
+                TvContract.PreviewPrograms.COLUMN_INTENT_URI};
+        try (Cursor cur = c.getContentResolver().query(TvContract.PreviewPrograms.CONTENT_URI, cols,
+                TvContract.BaseTvColumns.COLUMN_PACKAGE_NAME + "=?", new String[]{pkg}, null)) {
+            if (cur == null) return out;
+            while (cur.moveToNext() && out.size() < max) {
+                String intentUri = cur.getString(4), title = cur.getString(0);
+                if (intentUri == null || title == null) continue;
+                Item it = new Item();
+                it.title = title;
+                it.pkg = pkg;
+                it.sub = cur.getString(1);
+                it.intent = Intent.parseUri(intentUri, Intent.URI_INTENT_SCHEME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                String art = cur.getString(3) != null ? cur.getString(3) : cur.getString(2);
+                it.art = art == null ? null : load(c, art);
+                if (it.art != null) out.add(it);
+            }
+        } catch (Exception ignored) {
+            // not readable here, or a misbehaving provider: Top Shelf falls back to Watch Next
+        }
+        return out;
+    }
+
+    static Bitmap load(Context c, String uri) {
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inSampleSize = 2;
         try {

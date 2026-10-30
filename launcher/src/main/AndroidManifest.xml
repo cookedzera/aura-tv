@@ -44,7 +44,6 @@
             android:stateNotNeeded="true"
             android:clearTaskOnLaunch="true"
             android:excludeFromRecents="true"
-            android:screenOrientation="landscape"
             android:windowSoftInputMode="adjustNothing"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale|layoutDirection|locale">
             <intent-filter>
@@ -53,6 +52,27 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- Aura in the TV's own app list, with an Open button after installing: without it a TV
+             that keeps Home for its own launcher gave no way to open Aura at all -->
+        <activity-alias
+            android:name=".Open"
+            android:targetActivity=".HomeActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- the screensaver's settings link (res/xml/dream.xml): Aura opens on its Wallpaper page -->
+        <activity-alias
+            android:name=".SaverSettings"
+            android:targetActivity=".HomeActivity"
+            android:exported="true"
+            android:label="@string/app_name" />
 
         <service
             android:name=".Ambient"
@@ -63,6 +83,21 @@
                 <action android:name="android.service.dreams.DreamService" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <meta-data
+                android:name="android.service.dream"
+                android:resource="@xml/dream" />
+        </service>
+
+        <!-- Home twice from inside an app: the switcher straight over it (optional, Settings) -->
+        <service
+            android:name=".HomeKeys"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/home_keys" />
         </service>
 
         <receiver

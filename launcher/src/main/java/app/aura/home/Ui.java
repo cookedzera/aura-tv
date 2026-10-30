@@ -16,7 +16,7 @@ import android.widget.TextView;
 /** Shared metrics, typography (Inter, variable weights), colour maths and motion curves. */
 final class Ui {
     static float density = 1f, scaled = 1f;
-    static Typeface light, regular, medium, semibold, bold, heavy;
+    static Typeface thin, light, regular, medium, semibold, bold, heavy;
 
     /** Under-damped spring: quick lift with a soft overshoot. */
     static final TimeInterpolator SPRING = t -> (float) (1 - Math.exp(-5.2 * t) * Math.cos(8.2 * t));
@@ -30,6 +30,8 @@ final class Ui {
         density = c.getResources().getDisplayMetrics().density;
         scaled = c.getResources().getDisplayMetrics().scaledDensity;
         if (heavy != null) return;
+        // the screensaver's clock: a hairline display cut
+        thin = inter(c, 220, 32);
         light = inter(c, 300, 28);
         regular = inter(c, 400, 16);
         medium = inter(c, 500, 16);
@@ -39,6 +41,11 @@ final class Ui {
     }
 
     private static Typeface inter(Context c, int weight, int opsz) {
+        // variable font weights need Android 8; older TVs get the system's own sans at two weights
+        if (android.os.Build.VERSION.SDK_INT < 26) {
+            return Typeface.create(weight >= 700 ? "sans-serif" : weight >= 500 ? "sans-serif-medium" : "sans-serif",
+                    weight >= 700 ? Typeface.BOLD : Typeface.NORMAL);
+        }
         try {
             Typeface t = new Typeface.Builder(c.getAssets(), "fonts/Inter.ttf")
                     .setFontVariationSettings("'wght' " + weight + ", 'opsz' " + opsz)

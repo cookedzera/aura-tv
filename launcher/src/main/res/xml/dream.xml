@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Picking Aura in Android's screensaver settings opens Aura's own screensaver page -->
+<dream xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="app.aura.home/.SaverSettings" />

@@ -7,7 +7,9 @@ import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RadialGradient;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 
@@ -83,6 +85,74 @@ final class Tiles {
      * Midnight: near-black, with a faint glow of the app's colour rising from below and its white
      * mark. Calm in a dark room, and kind to OLED screens.
      */
+    /**
+     * A switcher card for an app whose screen can't be pictured (a protected video plays full
+     * screen): what's on it instead, laid out as the paused player would show it. The episode's
+     * still, edge to edge, darkening towards the bottom, its title and line, and how far in you are.
+     */
+    static Painter screen(Bitmap art, String title, String line, float progress) {
+        return (c, w, h) -> {
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+            c.drawColor(0xFF0B0C0F);
+            float s = Math.max(w / (float) art.getWidth(), h / (float) art.getHeight());
+            Matrix m = new Matrix();
+            m.setScale(s, s);
+            m.postTranslate((w - art.getWidth() * s) / 2f, (h - art.getHeight() * s) / 2f);
+            c.drawBitmap(art, m, p);
+            p.setShader(new LinearGradient(0, h * 0.42f, 0, h, 0x00000000, 0xD9000000, Shader.TileMode.CLAMP));
+            c.drawRect(0, h * 0.42f, w, h, p);
+            p.setShader(null);
+            float x = w * 0.055f, room = w * 0.89f;
+            android.text.TextPaint t = new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
+            t.setTypeface(Ui.semibold);
+            t.setTextSize(h * 0.068f);
+            t.setColor(0xF2FFFFFF);
+            if (title != null) {
+                c.drawText(android.text.TextUtils.ellipsize(title, t, room, android.text.TextUtils.TruncateAt.END).toString(), x, h * 0.83f, t);
+            }
+            if (line != null && !line.isEmpty()) {
+                t.setTypeface(Ui.regular);
+                t.setTextSize(h * 0.044f);
+                t.setColor(0xB3FFFFFF);
+                c.drawText(android.text.TextUtils.ellipsize(line, t, room, android.text.TextUtils.TruncateAt.END).toString(), x, h * 0.895f, t);
+            }
+            if (progress > 0f) {
+                float y = h * 0.94f, bh = Math.max(2f, h * 0.011f);
+                p.setColor(0x40FFFFFF);
+                c.drawRoundRect(x, y, x + room, y + bh, bh, bh, p);
+                p.setColor(0xF2FFFFFF);
+                c.drawRoundRect(x, y, x + room * Math.min(1f, progress), y + bh, bh, bh, p);
+            }
+        };
+    }
+
+    /**
+     * A switcher card with no picture of the app: its launch screen, as tvOS shows one. Near-black,
+     * a low glow of the app's colour rising from below, and its icon large in the middle.
+     */
+    static Painter launch(AppRepo.App a) {
+        return (c, w, h) -> {
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+            p.setShader(new LinearGradient(0, 0, 0, h, 0xFF1A1C21, 0xFF0B0C0F, Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, w, h, p);
+            int glow = saturate(a.color, 1.15f, 0.75f);
+            p.setShader(new RadialGradient(w * 0.5f, h * 1.15f, w * 0.7f, Ui.withAlpha(glow, 0x5C), Ui.withAlpha(glow, 0), Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, w, h, p);
+            if (a.icon == null) return;
+            int s = Math.round(h * 0.3f);
+            float l = (w - s) / 2f, t = (h - s) / 2f;
+            c.save();
+            Path round = new Path();
+            round.addRoundRect(new RectF(l, t, l + s, t + s), s * 0.22f, s * 0.22f, Path.Direction.CW);
+            c.clipPath(round);
+            // a copy: the icon's own bounds belong to the views already showing it
+            Drawable d = a.icon.getConstantState() != null ? a.icon.getConstantState().newDrawable().mutate() : a.icon;
+            d.setBounds(Math.round(l), Math.round(t), Math.round(l) + s, Math.round(t) + s);
+            d.draw(c);
+            c.restore();
+        };
+    }
+
     static Painter midnight(AppRepo.App a) {
         return (c, w, h) -> {
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
@@ -92,6 +162,43 @@ final class Tiles {
             p.setShader(new RadialGradient(w * 0.5f, h * 1.25f, w * 0.75f, Ui.withAlpha(glow, 0x70), Ui.withAlpha(glow, 0), Shader.TileMode.CLAMP));
             c.drawRect(0, 0, w, h, p);
             mark(c, a, w, h);
+        };
+    }
+
+    /**
+     * A folder: up to four of its apps' icons in a 2x2 grid of small rounded squares, the way an
+     * Apple TV folder shows what's inside. {@code pane} paints an opaque ground (for non-glass styles).
+     */
+    static Painter folder(java.util.List<AppRepo.App> apps, boolean pane) {
+        return (c, w, h) -> {
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+            if (pane) {
+                p.setShader(new LinearGradient(0, 0, w * 0.6f, h, 0xFF2A2E36, 0xFF121419, Shader.TileMode.CLAMP));
+                c.drawRect(0, 0, w, h, p);
+                p.setShader(null);
+            }
+            int s = Math.round(h * 0.32f), gap = Math.round(h * 0.06f);
+            float x0 = (w - 2 * s - gap) / 2f, y0 = (h - 2 * s - gap) / 2f;
+            for (int i = 0; i < 4; i++) {
+                float x = x0 + (i % 2) * (s + gap), y = y0 + (i / 2) * (s + gap);
+                if (i >= apps.size() || apps.get(i).icon == null) {
+                    p.setColor(0x1FFFFFFF);
+                    c.drawRoundRect(x, y, x + s, y + s, s * 0.24f, s * 0.24f, p);
+                    continue;
+                }
+                android.graphics.drawable.Drawable d = apps.get(i).icon;
+                d = d.getConstantState() != null ? d.getConstantState().newDrawable().mutate() : d;
+                Bitmap ib = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
+                d.setBounds(0, 0, s, s);
+                d.draw(new Canvas(ib));
+                BitmapShader sh = new BitmapShader(ib, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                Matrix m = new Matrix();
+                m.setTranslate(x, y);
+                sh.setLocalMatrix(m);
+                p.setShader(sh);
+                c.drawRoundRect(x, y, x + s, y + s, s * 0.24f, s * 0.24f, p);
+                p.setShader(null);
+            }
         };
     }
 

@@ -13,6 +13,14 @@ public class DailyJob extends JobService {
     @Override
     public boolean onStartJob(JobParameters params) {
         worker = new Thread(() -> {
+            if (params.getJobId() == Flyovers.JOB) {
+                try {
+                    // a rate limit or a dropped connection tries again later, with the system's backoff
+                    jobFinished(params, !Flyovers.sync(getApplicationContext()));
+                } catch (InterruptedException ignored) {
+                }
+                return;
+            }
             // one small request, first: the photo import below spaces its requests and takes minutes
             Updater.notice(getApplicationContext());
             boolean complete = Daily.run(getApplicationContext());
@@ -24,6 +32,8 @@ public class DailyJob extends JobService {
             } catch (InterruptedException e) {
                 return;
             }
+            // the flyovers' own job does the fetching; this only notices when one is due for a swap
+            if (Prefs.on(getApplicationContext(), Prefs.FLYOVERS)) Flyovers.schedule(getApplicationContext());
             // a one-off catch-up that hit a network failure asks to be retried later
             jobFinished(params, !complete && params.getJobId() == Daily.JOB_NOW);
         }, "daily-photos");

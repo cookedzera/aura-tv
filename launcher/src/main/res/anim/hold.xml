@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Aura's launch screen stays fully in place while the app fades in over it, never a flash of black. -->
+<alpha xmlns:android="http://schemas.android.com/apk/res/android"
+    android:duration="320"
+    android:fromAlpha="1"
+    android:toAlpha="1" />

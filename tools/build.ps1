@@ -1,7 +1,10 @@
 # Build Aura.apk with the Android SDK tools directly (aapt2 -> javac -> d8 -> zipalign -> apksigner).
 # Targets API 28 on purpose: from 29 Android only lets system apps join, leave or toggle Wi-Fi,
-# which Control Center's Wi-Fi sheet needs. It still runs on (and is tested with) Android 11.
-param([int]$VersionCode = 1, [string]$VersionName = "1.0")
+# which Control Center's Wi-Fi sheet needs. It runs from Android 5.1 (API 22, minSdk) and is tested on Android 11.
+# Compat.java and version checks keep newer calls off older TVs; features with no 5.1 counterpart switch off.
+# -TestPackage builds a copy under another package name (app.aura.home.test), installed beside the
+# real Aura: a first install to test from scratch without wiping anyone's settings
+param([int]$VersionCode = 1, [string]$VersionName = "1.0", [switch]$TestPackage)
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -26,17 +29,19 @@ if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force "$out\gen", "$out\classes", "$out\dex" | Out-Null
 
 Step "aapt2 compile" { & "$bt\aapt2.exe" compile --dir "$src\res" -o "$out\res.zip" }
+$rename = if ($TestPackage) { @("--rename-manifest-package", "app.aura.home.test") } else { @() }
+$apkOut = if ($TestPackage) { Join-Path $proj "AuraTest.apk" } else { Join-Path $proj "Aura.apk" }
 Step "aapt2 link" {
     & "$bt\aapt2.exe" link -o "$out\base.apk" -I $jar --manifest "$src\AndroidManifest.xml" `
-        --java "$out\gen" --min-sdk-version 26 --target-sdk-version 28 `
-        --version-code $VersionCode --version-name $VersionName "$out\res.zip"
+        --java "$out\gen" --min-sdk-version 22 --target-sdk-version 28 `
+        --version-code $VersionCode --version-name $VersionName @rename "$out\res.zip"
 }
 $java = @(Get-ChildItem "$src\java", "$out\gen" -Recurse -Filter *.java | ForEach-Object { $_.FullName })
 $boot = "$jar;$bt\core-lambda-stubs.jar"
 Step "javac" { & javac -nowarn -Xlint:-options -encoding UTF-8 -source 8 -target 8 -bootclasspath $boot -classpath $jar -d "$out\classes" @java }
 # one jar instead of every .class path: d8.bat would overflow cmd.exe's 8 KB command line
 Step "jar" { & jar --create --file "$out\classes.jar" -C "$out\classes" . }
-Step "d8" { & "$bt\d8.bat" --release --min-api 26 --lib $jar --output "$out\dex" "$out\classes.jar" }
+Step "d8" { & "$bt\d8.bat" --release --min-api 22 --lib $jar --output "$out\dex" "$out\classes.jar" }
 
 Copy-Item "$out\base.apk" "$out\unsigned.apk"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -55,5 +60,5 @@ $ks = Join-Path $proj "aura.keystore"
 if (-not (Test-Path $ks)) {
     Step "keytool" { & keytool -genkeypair -keystore $ks -alias aura -keyalg RSA -keysize 2048 -validity 10000 -storepass auraaura -keypass auraaura -dname "CN=Aura Home" }
 }
-Step "apksigner" { & "$bt\apksigner.bat" sign --ks $ks --ks-pass pass:auraaura --key-pass pass:auraaura --out "$proj\Aura.apk" "$out\aligned.apk" }
-Write-Host ("Built {0} ({1:N0} KB)" -f "$proj\Aura.apk", ((Get-Item "$proj\Aura.apk").Length / 1KB))
+Step "apksigner" { & "$bt\apksigner.bat" sign --ks $ks --ks-pass pass:auraaura --key-pass pass:auraaura --out $apkOut "$out\aligned.apk" }
+Write-Host ("Built {0} ({1:N0} KB)" -f $apkOut, ((Get-Item $apkOut).Length / 1KB))

@@ -100,7 +100,7 @@ final class ControlCenter {
     ControlCenter(Activity a, Host h) {
         act = a;
         host = h;
-        audio = a.getSystemService(AudioManager.class);
+        audio = Compat.svc(a, AudioManager.class);
         panel = HomeActivity.flat(a);
         panel.setClipChildren(false);
         veil = new GlassFrame(a, h.backdrop(), 0, 0.5f);
@@ -485,11 +485,7 @@ final class ControlCenter {
     void refresh() {
         buildSegments();
         volume.sync();
-        ConnectivityManager cm = act.getSystemService(ConnectivityManager.class);
-        Network n = cm == null ? null : cm.getActiveNetwork();
-        NetworkCapabilities nc = n == null ? null : cm.getNetworkCapabilities(n);
-        boolean online = nc != null && (nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-                || nc.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET));
+        boolean online = Compat.onWifi(Compat.svc(act, ConnectivityManager.class), true);
         wifi.setOn(online);
         wifiCap.setText(online ? "Wi-Fi" : "Offline");
         BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
@@ -517,7 +513,7 @@ final class ControlCenter {
 
     private void refreshMemory() {
         ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
-        act.getSystemService(ActivityManager.class).getMemoryInfo(mi);
+        Compat.svc(act, ActivityManager.class).getMemoryInfo(mi);
         ring.set(mi.totalMem > 0 ? mi.availMem / (float) mi.totalMem : 0f);
         boostValue.setText(mi.availMem / (1024 * 1024) + " MB free");
     }
@@ -571,7 +567,7 @@ final class ControlCenter {
         if (all.isEmpty()) return;
         android.content.SharedPreferences prefs = act.getSharedPreferences("aura", Context.MODE_PRIVATE);
         int at = prefs.getInt("pick_at", 0);
-        Picks.Pick p = all.get(Math.floorMod(at, all.size()));
+        Picks.Pick p = all.get(Compat.mod(at, all.size()));
         nextPoster = Picks.poster(p);
         nextPick = p;
         prefs.edit().putInt("pick_at", at + 1).apply();
@@ -615,9 +611,10 @@ final class ControlCenter {
         if (tim == null) return;
         List<TvInputInfo> list = new ArrayList<>();
         for (TvInputInfo info : tim.getTvInputList()) {
-            if (info.isPassthroughInput() && !info.isHidden(act)) list.add(info);
+            // hiding an input in the TV's settings arrived in Android 7
+            if (info.isPassthroughInput() && (android.os.Build.VERSION.SDK_INT < 24 || !info.isHidden(act))) list.add(info);
         }
-        list.sort((x, y) -> {
+        java.util.Collections.sort(list, (x, y) -> {
             int tx = x.getType() == TvInputInfo.TYPE_HDMI ? 0 : 1, ty = y.getType() == TvInputInfo.TYPE_HDMI ? 0 : 1;
             return tx != ty ? tx - ty : label(x).compareTo(label(y));
         });
@@ -639,7 +636,7 @@ final class ControlCenter {
     }
 
     private String label(TvInputInfo info) {
-        CharSequence custom = info.loadCustomLabel(act);
+        CharSequence custom = android.os.Build.VERSION.SDK_INT >= 24 ? info.loadCustomLabel(act) : null;
         if (custom != null && custom.length() > 0) return String.valueOf(custom);
         // a name you gave the input wins; otherwise the device's own name over HDMI-CEC
         return Cec.name(act, String.valueOf(info.loadLabel(act)).replaceAll("(?i)^hdmi\\s*(\\d)", "HDMI $1"));
@@ -707,7 +704,7 @@ final class ControlCenter {
     }
 
     private void boost() {
-        final ActivityManager am = act.getSystemService(ActivityManager.class);
+        final ActivityManager am = Compat.svc(act, ActivityManager.class);
         final long before = freeBytes();
         boostValue.setText("Freeing…");
         new Thread(() -> {
@@ -777,7 +774,7 @@ final class ControlCenter {
 
     private long freeBytes() {
         ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
-        act.getSystemService(ActivityManager.class).getMemoryInfo(mi);
+        Compat.svc(act, ActivityManager.class).getMemoryInfo(mi);
         return mi.availMem;
     }
 
@@ -886,7 +883,8 @@ final class ControlCenter {
         void sync() {
             int max = Math.max(1, audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
             value = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
-            muted = audio.isStreamMute(AudioManager.STREAM_MUSIC);
+            // Android 5 can't say whether it's muted, only how loud: silent counts as muted there
+            muted = android.os.Build.VERSION.SDK_INT >= 23 ? audio.isStreamMute(AudioManager.STREAM_MUSIC) : value == 0;
             float level = muted ? 0f : value / (float) max;
             if (shown < 0f) {
                 shown = level;
@@ -966,7 +964,12 @@ final class ControlCenter {
         public boolean onKeyUp(int code, KeyEvent e) {
             if (Pad.isConfirm(code)) {
                 if (!e.isCanceled()) {
-                    audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, 0);
+                    if (android.os.Build.VERSION.SDK_INT >= 23) {
+                        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, 0);
+                    } else {
+                        //noinspection deprecation
+                        audio.setStreamMute(AudioManager.STREAM_MUSIC, !muted);
+                    }
                     sync();
                 }
                 return true;

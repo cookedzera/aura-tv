@@ -27,7 +27,7 @@ final class Power {
     }
 
     static boolean screenOff(Context c) {
-        DevicePolicyManager dpm = c.getSystemService(DevicePolicyManager.class);
+        DevicePolicyManager dpm = Compat.svc(c, DevicePolicyManager.class);
         ComponentName admin = new ComponentName(c, SleepAdmin.class);
         if (dpm == null || !dpm.isAdminActive(admin)) return false;
         dpm.lockNow();
@@ -36,15 +36,18 @@ final class Power {
 
     static PendingIntent intent(Context c, String action, int step) {
         Intent i = new Intent(c, SleepReceiver.class).setAction(action).putExtra("step", step);
-        return PendingIntent.getBroadcast(c, 7, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        return PendingIntent.getBroadcast(c, 7, i, (android.os.Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0) | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
     static void schedule(Context c, String action, int step, long at) {
-        c.getSystemService(AlarmManager.class).setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, intent(c, action, step));
+        AlarmManager am = Compat.svc(c, AlarmManager.class);
+        // Doze, and the alarm that pierces it, arrived in Android 6
+        if (android.os.Build.VERSION.SDK_INT >= 23) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, intent(c, action, step));
+        else am.setExact(AlarmManager.RTC_WAKEUP, at, intent(c, action, step));
     }
 
     static void setSleep(Context c, int minutes) {
-        AlarmManager am = c.getSystemService(AlarmManager.class);
+        AlarmManager am = Compat.svc(c, AlarmManager.class);
         am.cancel(intent(c, FADE, 0));
         am.cancel(intent(c, SLEEP, 0));
         restoreVolume(c);
@@ -59,7 +62,7 @@ final class Power {
 
     /** One step of the fade; the first step remembers the volume to come back to. */
     static void fadeStep(Context c, int step) {
-        AudioManager am = c.getSystemService(AudioManager.class);
+        AudioManager am = Compat.svc(c, AudioManager.class);
         SharedPreferences p = prefs(c);
         if (step == 0) p.edit().putInt("sleepVol", am.getStreamVolume(AudioManager.STREAM_MUSIC)).apply();
         int start = p.getInt("sleepVol", am.getStreamVolume(AudioManager.STREAM_MUSIC));
@@ -81,7 +84,7 @@ final class Power {
     static void restoreVolume(Context c) {
         SharedPreferences p = prefs(c);
         if (!p.contains("sleepVol")) return;
-        c.getSystemService(AudioManager.class).setStreamVolume(AudioManager.STREAM_MUSIC, p.getInt("sleepVol", 0), 0);
+        Compat.svc(c, AudioManager.class).setStreamVolume(AudioManager.STREAM_MUSIC, p.getInt("sleepVol", 0), 0);
         p.edit().remove("sleepVol").apply();
     }
 

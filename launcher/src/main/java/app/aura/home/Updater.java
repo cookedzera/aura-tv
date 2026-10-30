@@ -88,7 +88,7 @@ final class Updater {
     static void notice(Context c) {
         try {
             Release r = latest();
-            if (r != null) Prefs.of(c).edit().putString("update_ver", r.version).apply();
+            if (r != null) Prefs.device(c).edit().putString("update_ver", r.version).apply();
         } catch (Exception ignored) {
             // offline or rate-limited: the next run tries again
         }
@@ -96,26 +96,26 @@ final class Updater {
 
     /** The newer version waiting on GitHub, or null when Aura is up to date. */
     static String pending(Context c) {
-        String v = Prefs.of(c).getString("update_ver", null);
+        String v = Prefs.device(c).getString("update_ver", null);
         return v != null && newer(v, installed(c)) ? v : null;
     }
 
     /** The red dot shows until you've opened Updates for this version. */
     static boolean unseen(Context c) {
         String v = pending(c);
-        return v != null && !v.equals(Prefs.of(c).getString("update_seen", ""));
+        return v != null && !v.equals(Prefs.device(c).getString("update_seen", ""));
     }
 
     static void seen(Context c) {
         String v = pending(c);
-        if (v != null) Prefs.of(c).edit().putString("update_seen", v).apply();
+        if (v != null) Prefs.device(c).edit().putString("update_seen", v).apply();
     }
 
     /** The one-time message: true the first time for each new version, then never again. */
     static boolean tellOnce(Context c) {
         String v = pending(c);
-        if (v == null || v.equals(Prefs.of(c).getString("update_told", ""))) return false;
-        Prefs.of(c).edit().putString("update_told", v).apply();
+        if (v == null || v.equals(Prefs.device(c).getString("update_told", ""))) return false;
+        Prefs.device(c).edit().putString("update_told", v).apply();
         return true;
     }
 
@@ -129,14 +129,16 @@ final class Updater {
 
     /** Whether Android lets Aura hand it an APK (Install unknown apps, granted at setup). */
     static boolean allowed(Context c) {
-        return c.getPackageManager().canRequestPackageInstalls();
+        // before Android 8 installing came under one TV-wide switch, and Android's installer asks either way
+        return android.os.Build.VERSION.SDK_INT < 26 || c.getPackageManager().canRequestPackageInstalls();
     }
 
     /** Downloads the release into an install session and commits it; Android then asks to confirm. */
     static void install(Context c, Release r, Progress p) throws IOException {
         HttpURLConnection con = open(r.apk);
         try (InputStream in = con.getInputStream()) {
-            long total = con.getContentLengthLong() > 0 ? con.getContentLengthLong() : r.size;
+            long len = android.os.Build.VERSION.SDK_INT >= 24 ? con.getContentLengthLong() : con.getContentLength();
+            long total = len > 0 ? len : r.size;
             stream(c, in, total, c.getPackageName(), p);
         } finally {
             con.disconnect();

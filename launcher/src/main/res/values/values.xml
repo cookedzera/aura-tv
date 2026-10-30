@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Aura</string>
+    <string name="home_keys_about">Lets Home twice open the Aura app switcher straight over the app in front. It sees only the Home key and which app is open, never what is on screen.</string>
 
     <style name="Aura" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:colorBackground">@android:color/black</item>
         <item name="android:windowShowWallpaper">false</item>
+        <!-- spelled out: Aura covers the whole screen, so apps behind it stop drawing -->
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowSwipeToDismiss">false</item>
         <item name="android:windowContentOverlay">@null</item>
         <item name="android:defaultFocusHighlightEnabled">false</item>
         <item name="android:colorAccent">#FFFFFFFF</item>

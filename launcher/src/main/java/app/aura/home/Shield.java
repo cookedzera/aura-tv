@@ -53,12 +53,13 @@ final class Shield {
     private Shield() { }
 
     static boolean allowed(Context c) {
-        return c.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED;
+        // Private DNS arrived with Android 9
+        return android.os.Build.VERSION.SDK_INT >= 28 && Compat.granted(c, Manifest.permission.WRITE_SECURE_SETTINGS);
     }
 
     /** The resolver chosen in Aura: one of {@link #FILTERS}, or one you typed. */
     static String host(Context c) {
-        String chosen = Prefs.of(c).getString("shield_host", null);
+        String chosen = Prefs.device(c).getString("shield_host", null);
         if (chosen != null) return chosen;
         // from before there was a choice: keep whichever filter the TV already uses
         String current = Settings.Global.getString(c.getContentResolver(), SPECIFIER);
@@ -83,13 +84,13 @@ final class Shield {
         if (on) {
             // remember the TV's own setting the first time only, not one of ours
             if (!ours(Settings.Global.getString(r, SPECIFIER), c) || !"hostname".equals(Settings.Global.getString(r, MODE))) {
-                Prefs.of(c).edit().putString("shield_prev_mode", String.valueOf(Settings.Global.getString(r, MODE)))
+                Prefs.device(c).edit().putString("shield_prev_mode", String.valueOf(Settings.Global.getString(r, MODE)))
                         .putString("shield_prev_host", String.valueOf(Settings.Global.getString(r, SPECIFIER))).apply();
             }
             Settings.Global.putString(r, SPECIFIER, host(c));
             Settings.Global.putString(r, MODE, "hostname");
         } else {
-            String mode = Prefs.of(c).getString("shield_prev_mode", "null"), host = Prefs.of(c).getString("shield_prev_host", "null");
+            String mode = Prefs.device(c).getString("shield_prev_mode", "null"), host = Prefs.device(c).getString("shield_prev_host", "null");
             boolean mine = "null".equals(host) || ours(host, c);
             Settings.Global.putString(r, MODE, "null".equals(mode) || "hostname".equals(mode) && mine ? "opportunistic" : mode);
             Settings.Global.putString(r, SPECIFIER, mine ? null : host);
@@ -99,13 +100,13 @@ final class Shield {
     /** Picks the resolver; if blocking is on, the TV switches to it straight away. */
     static void choose(Context c, String host) {
         boolean was = on(c);
-        Prefs.of(c).edit().putString("shield_host", host.trim().toLowerCase(java.util.Locale.ROOT)).apply();
+        Prefs.device(c).edit().putString("shield_host", host.trim().toLowerCase(java.util.Locale.ROOT)).apply();
         if (was) set(c, true);
     }
 
     private static boolean ours(String host, Context c) {
         if (host == null) return false;
-        if (host.equals(Prefs.of(c).getString("shield_host", ""))) return true;
+        if (host.equals(Prefs.device(c).getString("shield_host", ""))) return true;
         for (String[] f : FILTERS) if (f[0].equals(host)) return true;
         return false;
     }
@@ -115,7 +116,8 @@ final class Shield {
      * resolver; false if it can't be reached, so the caller switches straight back.
      */
     static boolean verify(Context c) {
-        ConnectivityManager cm = c.getSystemService(ConnectivityManager.class);
+        if (android.os.Build.VERSION.SDK_INT < 28) return false;
+        ConnectivityManager cm = Compat.svc(c, ConnectivityManager.class);
         String want = host(c);
         long until = SystemClock.uptimeMillis() + 15_000;
         while (SystemClock.uptimeMillis() < until) {

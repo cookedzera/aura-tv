@@ -35,6 +35,14 @@ final class Card extends View {
     boolean lift = true;
     /** While focused, drift gently in 3D, like an Apple TV icon catching the light. */
     boolean sway;
+    /** The bright ring on focus; the switcher's big cards go without, as on tvOS. */
+    boolean bezel = true;
+    /**
+     * The picture's resolution against the card's size. The switcher's near-full-screen cards paint
+     * at 0.6 and the GPU scales them up: their pictures are 640x360 anyway, and the texture to
+     * upload and sample drops from ~2 MB to ~0.7 MB.
+     */
+    float res = 1f;
     /**
      * Set before the card is attached: it becomes a pane of frosted glass over the photograph,
      * tinted with the app's colour, and its art (a lifted logo) is laid on top.
@@ -55,7 +63,10 @@ final class Card extends View {
     private final Paint shade = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mark = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint glint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Matrix glintMatrix = new Matrix();
+    private final Matrix glintMatrix = new Matrix(), artMatrix = new Matrix(), spotMatrix = new Matrix();
+    private final Paint spot = new Paint(Paint.ANTI_ALIAS_FLAG);
+    /** Parallax on focus (Settings): the art moves a layer beneath the glass as the tile tilts. */
+    static boolean parallax = true;
     private LinearGradient glintShader;
     private Bitmap bitmap, reflection;
     private float focus, dim, glintPos = -1f;
@@ -77,8 +88,11 @@ final class Card extends View {
                 o.setAlpha(glass != null ? 0f : 1f);
             }
         });
-        setOutlineSpotShadowColor(color);
-        setOutlineAmbientShadowColor(Ui.mix(color, 0xFF000000, 0.4f));
+        // coloured shadows arrived in Android 9; earlier ones are simply grey
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            setOutlineSpotShadowColor(color);
+            setOutlineAmbientShadowColor(Ui.mix(color, 0xFF000000, 0.4f));
+        }
         rim.setStyle(Paint.Style.STROKE);
         rim.setStrokeWidth(Ui.hair());
         rim.setColor(0xFFFFFFFF);
@@ -95,14 +109,25 @@ final class Card extends View {
         rect.set(0, 0, w, h);
         reflection = null;
         if (w > 0 && h > 0) {
-            bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-            painter.paint(new Canvas(bitmap), w, h);
-            art.setShader(new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+            int bw = Math.max(1, Math.round(w * res)), bh = Math.max(1, Math.round(h * res));
+            bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
+            Canvas cv = new Canvas(bitmap);
+            cv.scale(bw / (float) w, bh / (float) h);
+            painter.paint(cv, w, h);
+            BitmapShader bs = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            if (bw != w || bh != h) {
+                Matrix up = new Matrix();
+                up.setScale(w / (float) bw, h / (float) bh);
+                bs.setLocalMatrix(up);
+            }
+            art.setShader(bs);
         }
         sheen.setShader(new LinearGradient(0, 0, w * 0.55f, h, 0x4DFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
         glintShader = new LinearGradient(0, 0, w * 0.42f, h, new int[]{0x00FFFFFF, 0x66FFFFFF, 0x00FFFFFF},
                 new float[]{0.4f, 0.5f, 0.6f}, Shader.TileMode.CLAMP);
         glint.setShader(glintShader);
+        // the parallax light: made once, moved by a matrix (a new gradient every frame costs this GPU ~10 ms)
+        spot.setShader(new android.graphics.RadialGradient(0, 0, 1, 0xFFFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
     }
 
     /** A band of light sweeps once across the card, like a reflection catching glass. */
@@ -153,6 +178,11 @@ final class Card extends View {
         super.onDetachedFromWindow();
     }
 
+    /** The card's painted picture (for the switcher's zoom to grow from); null before its first layout. */
+    Bitmap art() {
+        return bitmap;
+    }
+
     void setDim(float d) {
         if (Math.abs(d - dim) < 0.004f) return;
         dim = d;
@@ -181,10 +211,32 @@ final class Card extends View {
                 c.drawRoundRect(rect, radius, radius, pane);
             }
         }
+        float ry = getRotationY(), rx = getRotationX();
+        boolean depth = parallax && sway && focus > 0f && (ry != 0f || rx != 0f);
+        if (depth && art.getShader() != null) {
+            // the art sits a layer deeper than the glass: it slides against the tilt, a touch
+            // enlarged so no edge shows, as an Apple TV icon's layers do
+            float k = Ui.dpf(1.6f) * focus;
+            artMatrix.setScale(1.04f, 1.04f, w / 2f, h / 2f);
+            artMatrix.postTranslate(-ry * k, rx * k);
+            art.getShader().setLocalMatrix(artMatrix);
+        } else if (art.getShader() != null && !artMatrix.isIdentity()) {
+            artMatrix.reset();
+            art.getShader().setLocalMatrix(artMatrix);
+        }
         c.drawRoundRect(rect, radius, radius, art);
         if (focus > 0f) {
             sheen.setAlpha(Math.round(255 * focus));
             c.drawRoundRect(rect, radius, radius, sheen);
+        }
+        if (depth) {
+            // a soft spot of light that travels the other way, like a lamp catching the glass
+            float cx = w * (0.5f + ry / 6f), cy = h * (0.25f - rx / 5f);
+            spotMatrix.setScale(w * 0.55f, w * 0.55f);
+            spotMatrix.postTranslate(cx, cy);
+            spot.getShader().setLocalMatrix(spotMatrix);
+            spot.setAlpha(Math.round(70 * focus));
+            c.drawRoundRect(rect, radius, radius, spot);
         }
         if (glintPos >= 0f) {
             glintMatrix.setTranslate(-w * 1.1f + glintPos * w * 2.2f, 0);
@@ -198,7 +250,7 @@ final class Card extends View {
         rim.setAlpha(Math.round((glass != null ? 72 : 46) * (1f - focus)));
         float i = rim.getStrokeWidth() / 2f;
         c.drawRoundRect(i, i, w - i, h - i, radius, radius, rim);
-        if (focus > 0f) {
+        if (focus > 0f && bezel) {
             // the ring sits just outside the art, like a lit bezel
             float o = ring.getStrokeWidth() / 2f + Ui.dpf(1f);
             ring.setAlpha(Math.round(245 * focus));
@@ -237,8 +289,11 @@ final class Card extends View {
                     float f = a.getAnimatedFraction();
                     double p = f * Math.PI * 2;
                     float amp = (float) Math.sin(Math.PI * f);
-                    setRotationY(amp * 2.4f * (float) Math.sin(p));
-                    setRotationX(amp * 1.6f * (float) Math.sin(2 * p + 0.8));
+                    // a little more tilt with parallax on, so the layers can be seen moving
+                    float more = parallax ? 1.5f : 1f;
+                    setRotationY(amp * 2.4f * more * (float) Math.sin(p));
+                    setRotationX(amp * 1.6f * more * (float) Math.sin(2 * p + 0.8));
+                    if (parallax) invalidate();
                 });
                 swayAnim.start();
             }

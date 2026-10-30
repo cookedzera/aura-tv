@@ -36,6 +36,15 @@ final class Sun {
         LON = lon;
     }
 
+    /** Where the TV is (degrees), for the screensaver's sky. */
+    static double lat() {
+        return LAT;
+    }
+
+    static double lon() {
+        return LON;
+    }
+
     /** Sun's height above the horizon in degrees at time {@code t} (epoch ms). */
     static double elevation(long t) {
         double n = t / 86_400_000.0 + 2440587.5 - 2451545.0;

@@ -6,6 +6,7 @@ import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.format.DateFormat;
+import android.text.style.ForegroundColorSpan;
 import android.text.style.RelativeSizeSpan;
 import android.view.Gravity;
 import android.view.View;
@@ -20,108 +21,72 @@ import java.util.Locale;
 import java.util.Random;
 
 /**
- * The photograph's story, shared by photo mode and the screensaver: what it shows set large at the
- * bottom left with its photographer and licence, the time at the top right, and a hairline that
- * fills until the next photograph. Both blocks drift a little with each photograph so nothing burns in.
+ * What sits over photo mode and the screensaver, and as little of it as possible. Bottom left, a
+ * large hairline clock with the date and weather in plain sentence case beneath. Bottom right, a
+ * small caption (what you're looking at, where, and a faint credit) that rises in when the scene
+ * changes, stays a while, and goes, leaving the picture alone. No capitals, no bold, no bars:
+ * one soft shade along the bottom keeps the type legible over bright skies.
  */
 final class Story extends FrameLayout implements Backdrop.Tick {
     private static final int WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
+    /** How long a caption stays before it leaves the picture to itself. */
+    private static final long CAPTION_MS = 14_000;
 
-    private final Backdrop backdrop;
-    private final LinearLayout card, clock;
-    private final TextView kicker, title, line, credit, time, date;
-    private final View fill;
+    private final LinearLayout clock, caption;
+    private final TextView time, date, title, about, credit;
     private final Random rnd = new Random();
     private Backdrop.Wallpaper shown;
+    private String weatherLine = "";
+    private final Runnable quiet = this::quiet;
 
     Story(Context c, Backdrop b) {
         super(c);
-        backdrop = b;
         b.addTick(this);
-
-        // Legibility comes from two soft shades the GPU paints for almost nothing, not from text
-        // shadows: this TV blurs shadowed glyphs on the CPU every frame (~15 ms for this card).
-        addView(shade(GradientDrawable.Orientation.BOTTOM_TOP, 0x99000000),
-                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(300), Gravity.BOTTOM));
-        // behind the clock: a soft round glow from the corner, so no edge of it ever shows
-        View corner = new View(c);
-        GradientDrawable glow = new GradientDrawable();
-        glow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
-        glow.setColors(new int[]{0x80000000, 0x40000000, 0x00000000});
-        glow.setGradientCenter(1f, 0f);
-        glow.setGradientRadius(Ui.dpf(360));
-        corner.setBackground(glow);
-        addView(corner, new FrameLayout.LayoutParams(Ui.dp(420), Ui.dp(300), Gravity.TOP | Gravity.END));
+        // one shade along the bottom, the GPU's to paint, instead of shadows on every glyph
+        View shade = new View(c);
+        shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, new int[]{0x8C000000, 0x33000000, 0x00000000}));
+        addView(shade, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(260), Gravity.BOTTOM));
 
         clock = new LinearLayout(c);
         clock.setOrientation(LinearLayout.VERTICAL);
-        clock.setGravity(Gravity.END);
-        time = Ui.text(c, 46, Ui.heavy, 0xFFFFFFFF);
+        time = Ui.text(c, 78, Ui.thin, 0xF7FFFFFF);
+        time.setLetterSpacing(-0.035f);
         time.setIncludeFontPadding(true);
-        time.setLetterSpacing(-0.04f);
-        clock.addView(time, lp(0));
-        date = flat(Ui.caps(c, 7.5f, 0xD9FFFFFF, 0.3f));
-        clock.addView(date, lp(2));
-        addView(clock, frame(Gravity.TOP | Gravity.END, 0, Ui.dp(34), Ui.dp(56), 0));
+        clock.addView(time, lp(0, Gravity.START));
+        date = Ui.text(c, 15, Ui.regular, 0xD9FFFFFF);
+        date.setLetterSpacing(0.005f);
+        clock.addView(date, lp(-2, Gravity.START));
+        addView(clock, frame(Gravity.BOTTOM | Gravity.START, Ui.dp(64), 0, 0, Ui.dp(52)));
 
-        card = new LinearLayout(c);
-        card.setOrientation(LinearLayout.VERTICAL);
-        kicker = flat(Ui.caps(c, 8, 0xE6FFFFFF, 0.3f));
-        card.addView(kicker, lp(0));
-        title = Ui.text(c, 54, Ui.heavy, 0xFFFFFFFF);
-        title.setIncludeFontPadding(true);
-        title.setLetterSpacing(-0.04f);
+        caption = new LinearLayout(c);
+        caption.setOrientation(LinearLayout.VERTICAL);
+        caption.setGravity(Gravity.END);
+        title = Ui.text(c, 17, Ui.medium, 0xF2FFFFFF);
+        title.setGravity(Gravity.END);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        title.setMaxWidth(Ui.dp(820));
-        card.addView(title, lp(4));
-        line = Ui.text(c, 15, Ui.regular, 0xE6FFFFFF);
-        line.setSingleLine(false);
-        line.setMaxLines(2);
-        line.setEllipsize(TextUtils.TruncateAt.END);
-        line.setMaxWidth(Ui.dp(600));
-        line.setLineSpacing(Ui.dpf(3), 1f);
-        card.addView(line, lp(4));
-
-        LinearLayout meta = new LinearLayout(c);
-        meta.setGravity(Gravity.CENTER_VERTICAL);
-        FrameLayout bar = new FrameLayout(c);
-        bar.setBackground(pill(0x40FFFFFF));
-        fill = new View(c);
-        fill.setBackground(pill(0xF2FFFFFF));
-        fill.setPivotX(0f);
-        fill.setScaleX(0f);
-        bar.addView(fill, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        meta.addView(bar, new LinearLayout.LayoutParams(Ui.dp(96), Ui.dp(2)));
-        credit = flat(Ui.caps(c, 6.5f, 0xB3FFFFFF, 0.24f));
-        LinearLayout.LayoutParams cl = lp(0);
-        cl.leftMargin = Ui.dp(14);
-        meta.addView(credit, cl);
-        card.addView(meta, lp(18));
-        addView(card, frame(Gravity.BOTTOM | Gravity.START, Ui.dp(64), 0, 0, Ui.dp(50)));
+        title.setMaxWidth(Ui.dp(420));
+        caption.addView(title, lp(0, Gravity.END));
+        about = Ui.text(c, 13.5f, Ui.regular, 0xADFFFFFF);
+        about.setSingleLine(false);
+        about.setMaxLines(2);
+        about.setEllipsize(TextUtils.TruncateAt.END);
+        about.setGravity(Gravity.END);
+        about.setMaxWidth(Ui.dp(400));
+        about.setLineSpacing(Ui.dpf(2), 1f);
+        caption.addView(about, lp(5, Gravity.END));
+        credit = Ui.text(c, 11, Ui.regular, 0x6BFFFFFF);
+        credit.setGravity(Gravity.END);
+        credit.setEllipsize(TextUtils.TruncateAt.END);
+        credit.setMaxWidth(Ui.dp(400));
+        caption.addView(credit, lp(9, Gravity.END));
+        caption.setAlpha(0f);
+        addView(caption, frame(Gravity.BOTTOM | Gravity.END, 0, 0, Ui.dp(64), Ui.dp(58)));
     }
 
-    private View shade(GradientDrawable.Orientation o, int color) {
-        View v = new View(getContext());
-        v.setBackground(new GradientDrawable(o, new int[]{color, Ui.withAlpha(color, 0)}));
-        return v;
-    }
-
-    /** Caps without the default text shadow (see the shades above). */
-    private static TextView flat(TextView t) {
-        t.setShadowLayer(0, 0, 0, 0);
-        return t;
-    }
-
-    private static GradientDrawable pill(int color) {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(color);
-        g.setCornerRadius(Ui.dpf(1));
-        return g;
-    }
-
-    private static LinearLayout.LayoutParams lp(int top) {
+    private static LinearLayout.LayoutParams lp(int top, int gravity) {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(WRAP, WRAP);
         p.topMargin = Ui.dp(top);
+        p.gravity = gravity;
         return p;
     }
 
@@ -131,94 +96,127 @@ final class Story extends FrameLayout implements Backdrop.Tick {
         return p;
     }
 
-    /** Fading with the story applies straight to the text: no offscreen layer over the photograph. */
+    /** Fading with the story applies straight to the text: no offscreen layer over the picture. */
     @Override
     public boolean hasOverlappingRendering() {
         return false;
     }
 
-    /** The clock; the AM/PM rides small beside the hour. */
+    /** A scene that draws its own clock (the gradient clock) hides this one. */
+    void setClockShown(boolean on) {
+        clock.setVisibility(on ? VISIBLE : GONE);
+    }
+
+    /** The clock, thin and large; AM/PM small and quiet beside it. */
     void tick(Calendar now) {
         boolean h24 = DateFormat.is24HourFormat(getContext());
         String t = new SimpleDateFormat(h24 ? "H:mm" : "h:mm", Locale.getDefault()).format(now.getTime());
         if (h24) {
             time.setText(t);
         } else {
-            SpannableString s = new SpannableString(t + " " + (now.get(Calendar.AM_PM) == Calendar.AM ? "AM" : "PM"));
-            s.setSpan(new RelativeSizeSpan(0.42f), t.length(), s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            String ampm = now.get(Calendar.AM_PM) == Calendar.AM ? "am" : "pm";
+            SpannableString s = new SpannableString(t + " " + ampm);
+            s.setSpan(new RelativeSizeSpan(0.3f), t.length(), s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            s.setSpan(new ForegroundColorSpan(0x99FFFFFF), t.length(), s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             time.setText(s);
         }
-        date.setText(new SimpleDateFormat("EEEE  ·  d MMMM", Locale.getDefault()).format(now.getTime()).toUpperCase(Locale.getDefault())
-                + weatherLine);
+        String d = new SimpleDateFormat("EEEE d MMMM", Locale.getDefault()).format(now.getTime());
+        if (weatherLine.isEmpty()) {
+            date.setText(d);
+        } else {
+            SpannableString s = new SpannableString(d + weatherLine);
+            s.setSpan(new ForegroundColorSpan(0x99FFFFFF), d.length(), s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            date.setText(s);
+        }
     }
 
-    private String weatherLine = "";
-
-    /** "31° · CLEAR · JODHPUR" under the date. */
+    /** "  ·  24°  Partly cloudy" after the date. */
     void weather(Weather.Now w) {
-        weatherLine = w == null ? "" : ("  ·  " + w.temp + "°  ·  " + w.condition()).toUpperCase(Locale.getDefault());
+        weatherLine = w == null ? "" : "   ·   " + w.temp + "°  " + w.condition();
     }
 
-    /** A new photograph: with {@code animate}, the old story lifts away as the new one rises in. */
+    /** A new photograph: its caption rises in, and later leaves. */
     void set(Backdrop.Wallpaper w, boolean animate) {
         if (w == shown) return;
         shown = w;
-        if (!animate) {
-            fillText(w);
-            return;
-        }
-        for (View v : new View[]{kicker, title, line, credit}) {
-            v.animate().alpha(0f).translationY(-Ui.dp(10)).setDuration(420).setStartDelay(0).setInterpolator(Ui.SOFT).start();
-        }
-        postDelayed(() -> {
-            fillText(w);
-            drift();
-            long d = 0;
-            for (View v : new View[]{kicker, title, line, credit}) {
-                v.setTranslationY(Ui.dp(18));
-                v.animate().alpha(1f).translationY(0f).setDuration(1200).setStartDelay(d).setInterpolator(Ui.EMPHASIZED).start();
-                d += 140;
-            }
-        }, 480);
+        String about = !w.line.isEmpty() ? w.line : w.region.replace(" · ", ", ");
+        String by = w.author.isEmpty() ? w.license : "Photo by " + w.author + (w.license.isEmpty() ? "" : "  ·  " + w.license);
+        change(w.place, about, by, animate);
     }
 
-    private void fillText(Backdrop.Wallpaper w) {
-        kicker.setText(w.region.toUpperCase(Locale.getDefault()).replace(" · ", "  ·  "));
-        // fitted a little inside the title's max width, so rounding in the tracking never forces an ellipsis
-        Ui.fit(title, w.place, Ui.dp(780), 54, 30);
-        line.setText(w.line);
-        line.setVisibility(w.line.isEmpty() ? View.GONE : View.VISIBLE);
-        String by = w.author.isEmpty() ? "" : "PHOTO  ·  " + w.author + "  ·  ";
-        credit.setText((by + w.license).toUpperCase(Locale.ROOT));
+    /** Any other scene's caption: {@code context} (where, or what kind of scene) joins the credit line. */
+    void set(String context, String place, String text, String by, long ms, boolean animate) {
+        shown = null;
+        String small = context.isEmpty() ? by : by.isEmpty() ? context : context + "   ·   " + by;
+        change(place, text, small, animate);
+    }
+
+    private void change(String t, String a, String c, boolean animate) {
+        removeCallbacks(quiet);
+        caption.animate().cancel();
+        if (!animate || caption.getAlpha() < 0.05f) {
+            fill(t, a, c);
+            rise();
+            return;
+        }
+        caption.animate().alpha(0f).translationY(-Ui.dp(6)).setDuration(500).setStartDelay(0).setInterpolator(Ui.SOFT)
+                .withEndAction(() -> {
+                    fill(t, a, c);
+                    rise();
+                }).start();
+    }
+
+    private void fill(String t, String a, String c) {
+        title.setText(t);
+        about.setText(a);
+        about.setVisibility(a.isEmpty() ? GONE : VISIBLE);
+        credit.setText(c);
+        credit.setVisibility(c.isEmpty() ? GONE : VISIBLE);
+    }
+
+    /** The caption rises a few dp as it appears; a little later, it goes. */
+    private void rise() {
+        drift();
+        caption.setTranslationY(Ui.dp(10));
+        caption.animate().alpha(1f).translationY(0f).setDuration(1400).setStartDelay(200).setInterpolator(Ui.EMPHASIZED)
+                .withEndAction(null).start();
+        postDelayed(quiet, CAPTION_MS);
+    }
+
+    private void quiet() {
+        caption.animate().alpha(0f).translationY(0f).setDuration(2200).setStartDelay(0).setInterpolator(Ui.SOFT).start();
     }
 
     /** Moves both blocks a few dp so no edge of the type sits on the same pixels for long. */
     void drift() {
-        card.setTranslationX(rnd.nextInt(Ui.dp(28)));
-        card.setTranslationY(-rnd.nextInt(Ui.dp(22)));
-        clock.setTranslationX(-rnd.nextInt(Ui.dp(28)));
-        clock.setTranslationY(rnd.nextInt(Ui.dp(16)));
+        clock.setTranslationX(rnd.nextInt(Ui.dp(24)));
+        clock.setTranslationY(-rnd.nextInt(Ui.dp(18)));
+        caption.setTranslationX(-rnd.nextInt(Ui.dp(24)));
     }
 
-    /** Rises in: the clock first, then the story from the bottom. */
+    /** Rises in: the clock first, then the caption. */
     void reveal(long delay) {
         animate().cancel();
         setAlpha(1f);
         clock.setAlpha(0f);
-        clock.animate().alpha(1f).setStartDelay(delay).setDuration(1400).setInterpolator(Ui.SOFT).start();
-        card.setAlpha(0f);
-        card.setTranslationY(card.getTranslationY() + Ui.dp(24));
-        card.animate().alpha(1f).translationY(card.getTranslationY() - Ui.dp(24)).setStartDelay(delay + 300)
-                .setDuration(1600).setInterpolator(Ui.EMPHASIZED).start();
+        clock.setTranslationY(clock.getTranslationY() + Ui.dp(12));
+        clock.animate().alpha(1f).translationY(clock.getTranslationY() - Ui.dp(12)).setStartDelay(delay).setDuration(1800)
+                .setInterpolator(Ui.EMPHASIZED).start();
     }
 
     void hide(long ms) {
+        removeCallbacks(quiet);
         animate().alpha(0f).setStartDelay(0).setDuration(ms).setInterpolator(Ui.SOFT).start();
     }
 
-    /** The hairline follows the photograph's time on screen, at the backdrop's own frame rate. */
+    @Override
+    protected void onDetachedFromWindow() {
+        removeCallbacks(quiet);
+        super.onDetachedFromWindow();
+    }
+
+    /** No progress bar any more: the picture's time on screen needs no ruler. */
     @Override
     public void onTick(long now) {
-        if (getAlpha() > 0f && isShown()) fill.setScaleX(backdrop.shown());
     }
 }

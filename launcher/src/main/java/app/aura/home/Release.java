@@ -14,7 +14,7 @@ public class Release extends BroadcastReceiver {
     @Override
     public void onReceive(Context c, Intent i) {
         Power.setSleep(c, 0);
-        DevicePolicyManager dpm = c.getSystemService(DevicePolicyManager.class);
+        DevicePolicyManager dpm = Compat.svc(c, DevicePolicyManager.class);
         ComponentName admin = new ComponentName(c, SleepAdmin.class);
         if (dpm != null && dpm.isAdminActive(admin)) dpm.removeActiveAdmin(admin);
     }
