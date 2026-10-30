@@ -37,6 +37,8 @@
 
 Everything happens on the TV with the remote. No computer, no account.
 
+> **Requires:** Android TV 5.1 or newer. A few extras need newer Android: Top Shelf and Continue Watching need 8.0, Block ads 9.0, and the real screens in recent apps 11. On older TVs those extras simply don't appear.
+
 <table>
 <tr><td width="44"><h3>1</h3></td><td>
 
