@@ -1867,7 +1867,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     public boolean dispatchKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
         boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
-        if (splash != null && !isVolumeKey(code)) return true;
+        if (splash != null && !isVolumeKey(code)) {
+            // never more than a moment: a press after 9 s takes it away
+            if (SystemClock.uptimeMillis() - splashAt > 9000) dropSplash.run();
+            return true;
+        }
         // teaching a remote button (Settings, Remote buttons): it may reach this window and not the service
         if (HomeKeys.teaching() && HomeKeys.teachable(code)) {
             if (down && e.getRepeatCount() == 0) HomeKeys.taught(code, e.getScanCode());
@@ -2978,16 +2982,32 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (splash == null || splashFinishing) return;
         splashFinishing = true;
         final Splash s = splash;
-        s.finish("WELCOME HOME", this::startIntro, () -> {
-            root.removeView(s);
-            splash = null;
-            if (Welcome.due(this)) openWelcome();
-            else {
-                wake();
-                // started from Android's screensaver settings while Aura wasn't running
-                if (fromSaverSettings(getIntent())) openSaverSettings();
-            }
-        });
+        s.finish("WELCOME HOME", this::startIntro, () -> splashGone(s));
+        // its landing animation needs frames; should none come (Aura started under an app, a busy
+        // TV), the loading screen still goes, so it can never hold the remote
+        handler.postDelayed(dropSplash, 4000);
+    }
+
+    private final Runnable dropSplash = () -> {
+        if (splash != null) splashGone(splash);
+    };
+
+    private void splashGone(Splash s) {
+        handler.removeCallbacks(dropSplash);
+        if (splash != s) return;
+        root.removeView(s);
+        splash = null;
+        // the landing never played (no frames came): the home screen its intro would fade in, shown now
+        if (sidebar.getAlpha() == 0f) {
+            for (View v : new View[]{sidebar, status, greeting, skyW, fyW, tdW, gridLabel}) v.setAlpha(1f);
+            bloom.setStrength(glow(), 0);
+        }
+        if (Welcome.due(this)) openWelcome();
+        else {
+            wake();
+            // started from Android's screensaver settings while Aura wasn't running
+            if (fromSaverSettings(getIntent())) openSaverSettings();
+        }
     }
 
     // ---- first run ---------------------------------------------------------------------------

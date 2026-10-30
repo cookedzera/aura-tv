@@ -20,6 +20,10 @@
 </p>
 
 <p align="center">
+  <img src="docs/features.jpg" alt="Recent apps, Top Shelf, Block ads, the museum, tonight's sky and Earth from space" width="92%">
+</p>
+
+<p align="center">
   <a href="#-install-in-two-minutes"><b>Install</b></a> &nbsp;·&nbsp;
   <a href="#-whats-inside"><b>What's inside</b></a> &nbsp;·&nbsp;
   <a href="#-the-remote"><b>The remote</b></a> &nbsp;·&nbsp;
@@ -82,7 +86,13 @@ Your apps as frosted tiles in one of four looks (*Glass*, *Vivid*, *Midnight* or
 - **Smart Stack:** what you're partway through, new episodes and tonight's pick;
 - **Today:** time in apps, data used and free memory, turning into **Now Playing** while something plays.
 
-Hold <kbd>OK</kbd> on an app to move it, hide it, put it in a folder or uninstall it. Rest on an app and **Top Shelf** lines up its shows above the row.
+Hold <kbd>OK</kbd> on an app to move it, hide it, put it in a folder or uninstall it.
+
+### Top Shelf
+
+<p align="center"><img src="docs/top-shelf.jpg" alt="Top Shelf: JioHotstar's shows above the apps" width="92%"></p>
+
+Rest on an app in the top row and its shows line up above it, with how much is left: <kbd>↑</kbd> walks into them, <kbd>OK</kbd> plays.
 
 ### Recent apps, like tvOS
 
@@ -99,14 +109,30 @@ Press <kbd>Home</kbd> twice. The app you're in stands large in the middle showin
 | **Museum** | Masterpieces from the Art Institute of Chicago's open collection, each hung in a room lit for it, with a wall label. |
 | **Live wind** | The real wind around you right now, as thousands of drifting trails of light. |
 | **Tonight's sky** | The real sky over your city: 4,000 stars, the constellations, the Moon's real phase and the planets where they are. |
-| **Earth from space** | Time-lapses filmed from the International Space Station, downloaded over Wi-Fi, on TVs that can play them smoothly. |
+| **Earth from space** | <img src="docs/saver-space.jpg" width="100%"><br>Time-lapses filmed from the International Space Station, downloaded over Wi-Fi, on TVs that can play them smoothly. |
 | **Photo mosaic** | Photographs three at a time, yours included, turning over gently. |
 
-**Auto** moves between them by the time of day and the weather. Choose one, preview it and set when it starts in *Settings → Wallpaper*.
+<table><tr>
+<td width="55%"><img src="docs/screensaver-settings.jpg" alt="Screensaver settings"></td>
+<td>
+
+**Auto** moves between them by the time of day and the weather, every quarter of an hour.
+
+In *Settings → Wallpaper*: pick one, preview it, make Aura the TV's screensaver, and choose when it starts and when the TV turns itself off. Choosing Aura in Android's own screensaver settings opens this page too.
+
+</td></tr></table>
 
 ### Control Center
 
 <p align="center"><img src="docs/control-center.jpg" alt="Control Center" width="92%"></p>
+
+<table><tr>
+<td width="50%"><img src="docs/speed-test.jpg" alt="Wi-Fi sheet with a speed test"></td>
+<td width="50%"><img src="docs/block-ads.jpg" alt="Block ads with each filter measured"></td>
+</tr><tr>
+<td align="center"><sub>Wi-Fi, with a speed test that stores nothing</sub></td>
+<td align="center"><sub>Block ads, every filter measured from your TV</sub></td>
+</tr></table>
 
 Press <kbd>Menu</kbd>: Wi-Fi (with a speed test), Bluetooth, a sleep timer that fades the volume out, your HDMI inputs by their real names, picture and sound settings, a memory boost and standby.
 

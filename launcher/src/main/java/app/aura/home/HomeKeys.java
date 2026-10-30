@@ -81,6 +81,12 @@ public class HomeKeys extends AccessibilityService {
         if (!open("aura_cc", front)) performGlobalAction(GLOBAL_ACTION_HOME);
     };
     private final Runnable refilter = this::refilter;
+    private final Runnable settleShot = () -> {
+        if (front != null && !front.equals(getPackageName())) shoot(front);
+    };
+    private final Runnable settleShotLate = () -> {
+        if (front != null && !front.equals(getPackageName())) shoot(front);
+    };
 
     /** Aura, with what to show; false when it couldn't be started. */
     private boolean open(String extra, String over) {
@@ -135,8 +141,17 @@ public class HomeKeys extends AccessibilityService {
             openable.put(pkg, ok);
         }
         if (ok) {
+            if (!pkg.equals(front)) Log.i(TAG, "in front: " + pkg);
             front = pkg;
             refilter();
+            // a picture once the app has drawn its first screen, and again once it has loaded (a
+            // splash screen is mostly black and isn't kept): every app has one, pressed or not
+            handler.removeCallbacks(settleShot);
+            handler.removeCallbacks(settleShotLate);
+            if (!pkg.equals(getPackageName()) && Previews.on(this)) {
+                handler.postDelayed(settleShot, 4000);
+                handler.postDelayed(settleShotLate, 12000);
+            }
         }
     }
 
@@ -309,6 +324,7 @@ public class HomeKeys extends AccessibilityService {
         if (now - shotAt < 1100) return;
         shotAt = now;
         shotOf.put(pkg, now);
+        Log.i(TAG, "picture of " + pkg);
         try {
             takeScreenshot(android.view.Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
                 @Override
@@ -319,10 +335,12 @@ public class HomeKeys extends AccessibilityService {
                 @Override
                 public void onFailure(int error) {
                     // no picture this time: the card keeps the last one, or what you were watching
+                    Log.w(TAG, "picture of " + pkg + " failed: " + error);
                 }
             });
         } catch (RuntimeException e) {
             // not allowed on this TV: cards stay as they are
+            Log.w(TAG, "picture of " + pkg + " not allowed: " + e);
         }
     }
 

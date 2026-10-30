@@ -85,10 +85,24 @@ final class Previews {
                 small = Bitmap.createBitmap(p, W, H, Bitmap.Config.ARGB_8888);
                 full.recycle();
             } catch (RuntimeException | OutOfMemoryError e) {
+                android.util.Log.w("AuraKeys", "picture of " + pkg + " unreadable: " + e);
                 return;
             }
             // protected: whatever was kept before (or the fallback) stays
-            if (small == null || blank(small)) return;
+            if (small == null || blank(small)) {
+                android.util.Log.i("AuraKeys", "picture of " + pkg + " was black (protected): not kept");
+                return;
+            }
+            // the app hadn't drawn yet (some, like YouTube, leave the last app on screen while they
+            // start): a picture that's the previous app's screen again isn't this app's
+            Bitmap prev = last;
+            if (prev != null && !pkg.equals(lastPkg) && same(small, prev)) {
+                android.util.Log.i("AuraKeys", "picture of " + pkg + " still showed " + lastPkg + ": not kept");
+                return;
+            }
+            last = small;
+            lastPkg = pkg;
+            android.util.Log.i("AuraKeys", "picture of " + pkg + " kept");
             fresh = small;
             freshPkg = pkg;
             File f = file(c, pkg), part = new File(f.getPath() + ".part");
@@ -120,6 +134,26 @@ final class Previews {
             }
         }
         return dark >= n * 0.6f && lit < n * 0.12f;
+    }
+
+    /** The last picture kept, and whose: a new app's first capture is checked against it. */
+    private static volatile Bitmap last;
+    private static volatile String lastPkg;
+
+    /** Two captures of the same screen: on a 32x18 grid, colours differ by under 4% on average. */
+    static boolean same(Bitmap a, Bitmap b) {
+        long diff = 0;
+        int n = 0;
+        for (int y = 0; y < 18; y++) {
+            for (int x = 0; x < 32; x++) {
+                int pa = a.getPixel((int) ((x + 0.5f) * a.getWidth() / 32f), (int) ((y + 0.5f) * a.getHeight() / 18f));
+                int pb = b.getPixel((int) ((x + 0.5f) * b.getWidth() / 32f), (int) ((y + 0.5f) * b.getHeight() / 18f));
+                diff += Math.abs(((pa >> 16) & 0xFF) - ((pb >> 16) & 0xFF)) + Math.abs(((pa >> 8) & 0xFF) - ((pb >> 8) & 0xFF))
+                        + Math.abs((pa & 0xFF) - (pb & 0xFF));
+                n += 3;
+            }
+        }
+        return diff < n * 255L * 4 / 100;
     }
 
     /** The capture just taken over {@code pkg}, if it's still the newest; for the switcher's fold. */
