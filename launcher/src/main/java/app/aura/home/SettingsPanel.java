@@ -40,6 +40,8 @@ final class SettingsPanel {
 
         void open(Intent intent, View from);
 
+        boolean type(String text);
+
         void hud(int icon, String text);
     }
 
@@ -57,9 +59,11 @@ final class SettingsPanel {
     private String confirmPhoto;
     /** The profile whose removal waits for a second OK. */
     private String confirmProfile;
+    /** Remove Aura waits for a second OK. */
+    private boolean confirmRemove;
     /** "Checking…" while Block ads confirms the filter works; null otherwise. */
     private String shieldNote;
-    /** What the text field is for: "city" or "dns". */
+    /** What the text field is for: "city", "dns", "profile" or "tmdb". */
     private String inputFor = "city";
     /** Speeds measured by Find the fastest, by hostname; -1 when unreachable. */
     private final java.util.Map<String, Long> probed = new java.util.HashMap<>();
@@ -130,6 +134,8 @@ final class SettingsPanel {
             // the same field takes a city for the weather or a hostname for Block ads
             if ("dns".equals(inputFor)) setCustomDns(city.getText().toString().trim());
             else if ("profile".equals(inputFor)) addProfile(city.getText().toString().trim());
+            else if ("tmdb".equals(inputFor)) setTmdbKey(city.getText().toString().trim());
+            else if ("pin".equals(inputFor)) setPin(city.getText().toString().trim());
             else findCity(city.getText().toString().trim());
             return true;
         });
@@ -153,6 +159,15 @@ final class SettingsPanel {
         rl.rightMargin = Ui.dp(78);
         panel.addView(right, rl);
         panel.setVisibility(View.GONE);
+    }
+
+    /** Fills and submits the panel's text field if it's currently open. */
+    boolean typeIntoField(String text) {
+        if (!isOpen() || city.getVisibility() != View.VISIBLE || text == null || text.isEmpty()) return false;
+        city.setText(text);
+        city.setSelection(city.length());
+        city.onEditorAction(EditorInfo.IME_ACTION_SEARCH);
+        return true;
     }
 
     boolean isOpen() {
@@ -217,6 +232,25 @@ final class SettingsPanel {
             focusTag("widgets");
             return true;
         }
+        if (page.equals("art")) {
+            // opened from an app's tile: back to the home screen, not Settings
+            stopDrop();
+            return false;
+        }
+        if (page.equals("pair")) {
+            stopDrop();
+            go("tv");
+            focusTag("adb:pair");
+            return true;
+        }
+        if (page.equals("genres") || page.equals("tmdbphone") || page.equals("tmdbauth")) {
+            String was = page;
+            if (was.equals("tmdbphone")) stopDrop();
+            authToken = null;
+            go("picks");
+            focusTag(was.equals("genres") ? "pk:genres" : was.equals("tmdbphone") ? "pk:phone" : "pk:auth");
+            return true;
+        }
         if (page.equals("keys")) {
             if (newKey != null || teachingKey) {
                 newKey = null;
@@ -232,7 +266,7 @@ final class SettingsPanel {
         }
         if (!page.isEmpty()) {
             String was = page;
-            if (was.equals("drop")) stopDrop();
+            if (was.equals("drop") || was.equals("backup")) stopDrop();
             page = "";
             build();
             // back on the main list, on the row that led to the page
@@ -299,6 +333,15 @@ final class SettingsPanel {
             add("Widgets", hiddenW == 0 ? "All shown" : (3 - hiddenW) + " of 3 shown", "widgets", () -> go("widgets"));
             toggle("Top Shelf", Prefs.TOP_SHELF, "On", "Off", "shelf");
             toggle("Parallax icons", Prefs.PARALLAX, "On", "Off", "parallax");
+            // stillness for slow TVs; Auto decides from the TV's memory and chip
+            String lm = Perf.mode(act);
+            add("Light mode", lm.equals("auto") ? "Auto · " + (Perf.lowEnd(act) ? "on for this TV" : "off for this TV") : lm.equals("on") ? "On" : "Off", "light", () -> {
+                String next = Perf.MODES[(java.util.Arrays.asList(Perf.MODES).indexOf(Perf.mode(act)) + 1) % Perf.MODES.length];
+                Prefs.device(act).edit().putString(Perf.KEY, next).apply();
+                host.applied("light");
+                build();
+                focusTag("light");
+            });
             toggle("Live picture on input tiles", Prefs.INPUT_PREVIEW, "On", "Off", "inputs");
             // switched by Aura where setup allowed it; elsewhere, Android's own Accessibility screen does it
             // how late the TV hands over remote releases while Aura watches the keys: some firmware adds a lot
@@ -311,6 +354,14 @@ final class SettingsPanel {
                 build();
                 focusTag("homekeys");
             });
+            // where Android sends Home to another launcher, the service can send it to Aura instead
+            if (HomeKeys.on(act) && !HomeRole.held(act)) {
+                add("Home goes to", HomeKeys.takeover(act) ? "Aura" : HomeRole.other(act), "takeover", () -> {
+                    HomeKeys.setTakeover(act, !HomeKeys.takeover(act));
+                    build();
+                    focusTag("takeover");
+                });
+            }
             // pictures need the service above, and Android 11
             if (android.os.Build.VERSION.SDK_INT >= 30 && HomeKeys.on(act)) {
                 add("Pictures in the switcher", Previews.on(act) ? "Apps as you left them" : "Off", "previews", () -> {
@@ -337,6 +388,24 @@ final class SettingsPanel {
                 });
             }
             if (Profiles.all(act).size() < Profiles.MAX) add("Add a profile", "Type a name", "pr:add", this::askProfile);
+            // a profile for kids: grown-up things (Settings, hiding, uninstalling) ask for the parents' PIN
+            for (Profiles.Profile pr : Profiles.all(act)) {
+                if (Profiles.MAIN.equals(pr.id)) continue;
+                add(pr.name + " is for kids", pr.kids ? "On · PIN for grown-up things" : "Off", "pr:kids:" + pr.id, () -> {
+                    if (!pr.kids && !Profiles.hasPin(act)) {
+                        pinFor = pr.id;
+                        askPin();
+                        return;
+                    }
+                    Profiles.setKids(act, pr.id, !pr.kids);
+                    build();
+                    focusTag("pr:kids:" + pr.id);
+                });
+            }
+            if (Profiles.hasPin(act)) add("Parents' PIN", "Change", "pr:pin", () -> {
+                pinFor = null;
+                askPin();
+            });
             for (Profiles.Profile pr : Profiles.all(act)) {
                 if (Profiles.MAIN.equals(pr.id)) continue;
                 add("Remove " + pr.name, ("pr:del:" + pr.id).equals(confirmProfile) ? "Press OK again" : "", "pr:del:" + pr.id, () -> {
@@ -434,7 +503,8 @@ final class SettingsPanel {
                         focusTag("saver:start");
                     });
                 }
-                add("TV turns off after", Ambient.span(Ambient.offMs(act)) + " without use", "saver:off", () -> {
+                int off = Ambient.offMs(act);
+                add("TV turns off after", Ambient.span(off) + (mine && off >= 0 && off < Ambient.startMs(act) ? " · before the screensaver" : " without use"), "saver:off", () -> {
                     Ambient.next(act, false, Ambient.offMs(act));
                     build();
                     focusTag("saver:off");
@@ -499,7 +569,7 @@ final class SettingsPanel {
             if (!updateState.equals("checking") && !updateState.equals("downloading")) add("Check again", "", "u:check", this::checkUpdate);
         } else if (page.equals("drop")) {
             Ui.fit(title, "From your phone", Ui.dp(300), 52, 30);
-            note.setText("Point your phone's camera at the code, then choose photos, GIFs or apps. Photos land on your wall; an app asks here before it installs.");
+            note.setText("Point your phone's camera at the code to type on the TV, or send photos, GIFs and apps. Photos land on your wall; an app asks here before it installs.");
             LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200));
             cl.bottomMargin = Ui.dp(8);
             rows.addView(dropCard, cl);
@@ -543,6 +613,51 @@ final class SettingsPanel {
                 host.applied("photos");
                 back();
             });
+        } else if (page.equals("picks")) {
+            buildPicks();
+        } else if (page.equals("genres")) {
+            Ui.fit(title, "Genres", Ui.dp(300), 52, 30);
+            note.setText("Picks come from any of the genres switched on here. With none on, any genre will do.");
+            java.util.Set<String> g = Picks.genres(act);
+            add("Any genre", g.isEmpty() ? "On" : "", "g:any", () -> {
+                Picks.setGenres(act, new java.util.HashSet<>());
+                tasteChanged();
+            });
+            for (Picks.Genre x : Picks.GENRES) {
+                add(x.name, g.contains(x.id) ? "On" : "Off", "g:" + x.id, () -> {
+                    java.util.Set<String> now = Picks.genres(act);
+                    if (!now.remove(x.id)) now.add(x.id);
+                    Picks.setGenres(act, now);
+                    tasteChanged();
+                });
+            }
+        } else if (page.equals("pair")) {
+            Ui.fit(title, "Wireless debugging", Ui.dp(300), 52, 30);
+            note.setText("In Developer options, switch on Wireless debugging and choose Pair device with pairing code. Leave it open, scan this with your phone, and type the six digits it shows.");
+            if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
+            add("Developer options", "", "pair:dev", () -> host.open(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS), panel));
+        } else if (page.equals("backup")) {
+            Ui.fit(title, "Your setup", Ui.dp(300), 52, 30);
+            note.setText("Save your profiles, app order, folders, tiles and choices to your phone, and bring them back after a reinstall or on another TV. Photos stay on your phone.");
+            if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
+        } else if (page.equals("art")) {
+            Ui.fit(title, artLabel, Ui.dp(300), 52, 30);
+            note.setText("Your own picture for its tile: a photo, a poster, a banner. Scan the code and choose one on your phone; it's cropped to fit.");
+            if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
+            if (Art.has(act, artPkg)) add("Use the app's own", "", "art:reset", () -> {
+                Art.remove(act, artPkg);
+                host.hud(R.drawable.ic_check, artLabel + " has its own art again");
+                host.applied("art");
+                build();
+            });
+        } else if (page.equals("tmdbphone")) {
+            Ui.fit(title, "TMDB key", Ui.dp(300), 52, 30);
+            note.setText("Scan the code, then paste your key from themoviedb.org (Settings, API) into the page that opens. It's free with a TMDB account.");
+            if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
+        } else if (page.equals("tmdbauth")) {
+            Ui.fit(title, "TMDB account", Ui.dp(300), 52, 30);
+            note.setText("Scan the code, sign in to TMDB if it asks, and choose Approve. Your watchlist then becomes Tonight's pick. Aura keeps only the sign-in, on this TV.");
+            if (authCard != null) rows.addView(authCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
         } else if (page.equals("tv")) {
             buildTv();
         } else if (page.equals("keys")) {
@@ -551,10 +666,22 @@ final class SettingsPanel {
             Ui.fit(title, "Settings", Ui.dp(300), 52, 30);
             Weather.Now w = Weather.now(act);
             note.setText("Changes apply at once. Everything here can be undone the same way.");
-            // only while Home still opens another home screen; Android itself asks
-            if (!HomeRole.held(act)) add("Home button", "Opens another home · OK to change", "role", () -> {
-                if (!HomeRole.ask(act)) host.hud(R.drawable.ic_info, "Press Home on the remote and choose Aura, then Always");
-            });
+            // only while Android still sends Home to another launcher: Android asks, or (Google TV,
+            // Fire TV, which keep Home whatever is chosen) the Home button service takes it over
+            if (!HomeRole.held(act)) {
+                boolean taken = HomeKeys.on(act) && HomeKeys.takeover(act);
+                add("Home button", taken ? "Opens Aura" : "Opens " + HomeRole.other(act) + " · OK to change", "role", () -> {
+                    // where only setup can take Home over, straight to the page that does it
+                    if (HomeRole.needsSetup(act) && !HomeKeys.set(act, true) && !HomeRole.byHand(act)) {
+                        go("tv");
+                        return;
+                    }
+                    String m = HomeRole.make(act);
+                    if (m != null) host.hud(m.startsWith("Home") ? R.drawable.ic_check : R.drawable.ic_info, m);
+                    build();
+                    focusTag("role");
+                });
+            }
             add("Home screen", Prefs.TILE_NAMES[Math.max(0, java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act)))]
                     + " tiles", "home", () -> go("home"));
             add("Profile", Profiles.name(act), "profiles", () -> go("profiles"));
@@ -564,7 +691,8 @@ final class SettingsPanel {
             // Private DNS arrived with Android 9: older TVs don't get the row at all
             if (android.os.Build.VERSION.SDK_INT >= 28) add("Block ads", Shield.on(act) ? "On · " + Shield.name(act) : "Off", "shield", () -> go("shield"));
             add("Animations", animLabel(), "anim", this::cycleAnim);
-            toggle("Tonight's pick", Prefs.PICKS, "On", "Off", "picks");
+            add("Tonight's pick", !Prefs.on(act, Prefs.PICKS) ? "Off" : Picks.tmdb(act) ? picksSummary() : "Shows · " + Picks.genreSummary(act),
+                    "picks", () -> go("picks"));
             toggle("Weather", Prefs.WEATHER, "On", "Off", "weather");
             boolean manual = Prefs.device(act).getBoolean("geo_manual", false);
             String place = w != null && !w.city.isEmpty() ? w.city : "Not found yet";
@@ -575,6 +703,7 @@ final class SettingsPanel {
                 build();
             });
             add("Hidden apps", String.valueOf(Prefs.hidden(act).size()), "hidden", () -> go("apps"));
+            add("Your setup", "Save to your phone, or bring it back", "backup", this::openBackup);
             String waiting = Updater.pending(act);
             add("Updates", waiting != null ? "Aura " + waiting + " is ready" : "Version " + Updater.installed(act), "updates", () -> {
                 // opening it counts as seen: the red dots go
@@ -592,10 +721,406 @@ final class SettingsPanel {
             }
             add("Set up on this TV", Adb.on(act) ? Adb.unguarded(act) ? "Connected · open to your Wi-Fi" : "Connected" : "No computer needed", "tv", () -> go("tv"));
             add("Android settings", "", "android", () -> host.open(new Intent(Settings.ACTION_SETTINGS), panel));
+            add("Remove Aura", confirmRemove ? "Press OK again" : "Puts the TV back first", "remove", this::removeAura);
         }
         if (keep != null) {
-            for (int i = 0; i < rows.getChildCount(); i++) if (keep.equals(rows.getChildAt(i).getTag())) rows.getChildAt(i).requestFocus();
+            boolean kept = false;
+            for (int i = 0; i < rows.getChildCount(); i++) if (keep.equals(rows.getChildAt(i).getTag())) kept = rows.getChildAt(i).requestFocus();
+            if (!kept && isOpen() && rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
         }
+    }
+
+    // ---- tonight's pick -------------------------------------------------------------------------
+
+    private boolean picksBusy, picksAgain, confirmSignOut;
+    private View keyCard, authCard;
+    private String authToken;
+    private final Runnable picksLater = this::refreshPicks;
+
+    /** "Trending this week · films and shows", "Your TMDB watchlist", "Top rated · shows". */
+    private String picksSummary() {
+        String src = Picks.source(act);
+        if (src.equals("watchlist")) return "Your TMDB watchlist";
+        String what = Picks.KIND_NAMES[java.util.Arrays.asList(Picks.KINDS).indexOf(Picks.kind(act))].toLowerCase(java.util.Locale.ROOT);
+        return Picks.SOURCE_NAMES[java.util.Arrays.asList(Picks.SOURCES).indexOf(src)] + " · " + what;
+    }
+
+    /** Where picks come from, what kind, which genres, how good, how new: OK on each changes it. */
+    private void buildPicks() {
+        Ui.fit(title, "Tonight's pick", Ui.dp(300), 52, 30);
+        boolean tmdb = Picks.tmdb(act), on = Prefs.on(act, Prefs.PICKS);
+        note.setText(tmdb ? "Films and shows from TMDB with your own key, to your taste. This product uses the TMDB API but is not endorsed or certified by TMDB."
+                : "Top-rated shows from TVmaze, to your taste. Add your own free TMDB key for films, what's trending, only what's on your apps, and your TMDB watchlist.");
+        add("Tonight's pick", on ? "On" : "Off", Prefs.PICKS, () -> {
+            Prefs.set(act, Prefs.PICKS, !Prefs.on(act, Prefs.PICKS));
+            host.applied("picks");
+            build();
+        });
+        if (on) {
+            String src = Picks.source(act);
+            if (tmdb) {
+                add("From", Picks.SOURCE_NAMES[java.util.Arrays.asList(Picks.SOURCES).indexOf(src)], "pk:src", () -> {
+                    List<String> can = new java.util.ArrayList<>(java.util.Arrays.asList("top", "trending"));
+                    if (Picks.signedIn(act)) can.add("watchlist");
+                    Prefs.device(act).edit().putString(Picks.SOURCE, can.get((can.indexOf(Picks.source(act)) + 1) % can.size())).apply();
+                    tasteChanged();
+                });
+                int k = java.util.Arrays.asList(Picks.KINDS).indexOf(Picks.kind(act));
+                add("Films or shows", Picks.KIND_NAMES[k], "pk:kind", () -> {
+                    Prefs.device(act).edit().putString(Picks.KIND, Picks.KINDS[(k + 1) % Picks.KINDS.length]).apply();
+                    tasteChanged();
+                });
+            }
+            // your watchlist is yours as it is: no filters on it
+            if (!src.equals("watchlist")) {
+                add("Genres", Picks.genreSummary(act), "pk:genres", () -> go("genres"));
+                // trending is what's popular this week, whatever it's rated
+                if (src.equals("top")) {
+                    float r = Picks.rating(act);
+                    add("Rated at least", String.format(java.util.Locale.getDefault(), "★ %.1f", r), "pk:rating", () -> {
+                        int at = 0;
+                        for (int i = 0; i < Picks.RATINGS.length; i++) if (Math.abs(Picks.RATINGS[i] - r) < 0.01f) at = i;
+                        Prefs.device(act).edit().putFloat(Picks.RATING, Picks.RATINGS[(at + 1) % Picks.RATINGS.length]).apply();
+                        tasteChanged();
+                    });
+                }
+                int e = java.util.Arrays.asList(Picks.ERAS).indexOf(Picks.era(act));
+                add("Years", Picks.ERA_NAMES[e], "pk:era", () -> {
+                    Prefs.device(act).edit().putString(Picks.ERA, Picks.ERAS[(e + 1) % Picks.ERAS.length]).apply();
+                    tasteChanged();
+                });
+                if (tmdb && src.equals("top")) {
+                    add("Only what's on my apps", Picks.myApps(act) ? "On" : "Off", "pk:apps", () -> {
+                        Prefs.device(act).edit().putBoolean(Picks.MY_APPS, !Picks.myApps(act)).apply();
+                        tasteChanged();
+                    });
+                }
+            }
+            int n = Picks.count(act);
+            add("Find new picks", picksBusy ? "Finding…" : n == 0 ? "None match · try fewer limits" : n > 0 ? n + " ready" : "",
+                    "pk:now", this::refreshPicks);
+        }
+        add("TMDB key", tmdb ? "Set · OK to change" : "Optional · free at themoviedb.org", "pk:key", this::askTmdb);
+        add("Paste the key from your phone", "", "pk:phone", this::openKeyDrop);
+        if (tmdb) {
+            add("TMDB account", !Picks.signedIn(act) ? "Sign in for your watchlist"
+                    : confirmSignOut ? "Press OK again to sign out" : "Signed in as " + Picks.user(act), "pk:auth", () -> {
+                if (!Picks.signedIn(act)) {
+                    signIn();
+                    return;
+                }
+                if (!confirmSignOut) {
+                    confirmSignOut = true;
+                    build();
+                    return;
+                }
+                confirmSignOut = false;
+                Picks.signOut(act);
+                host.hud(R.drawable.ic_check, "Signed out of TMDB");
+                tasteChanged();
+            });
+        }
+    }
+
+    /** A change of taste: the pool is made again a moment after the last change, not after each press. */
+    private void tasteChanged() {
+        rows.removeCallbacks(picksLater);
+        rows.postDelayed(picksLater, 1200);
+        build();
+    }
+
+    /** The pool made again now, off the main thread; then the home screen and Control Center follow. */
+    private void refreshPicks() {
+        rows.removeCallbacks(picksLater);
+        if (picksBusy) {
+            picksAgain = true;
+            return;
+        }
+        picksBusy = true;
+        if (isOpen()) build();
+        final android.content.Context app = act.getApplicationContext();
+        new Thread(() -> {
+            boolean ok;
+            try {
+                ok = Picks.refresh(app, true);
+            } catch (Exception e) {
+                ok = false;
+            }
+            final boolean done = ok;
+            act.runOnUiThread(() -> {
+                picksBusy = false;
+                if (picksAgain) {
+                    picksAgain = false;
+                    refreshPicks();
+                    return;
+                }
+                host.applied("picks");
+                int n = Picks.count(act);
+                host.hud(done && n > 0 ? R.drawable.ic_check : R.drawable.ic_info, !done
+                        ? "Couldn't reach " + (Picks.tmdb(act) ? "TMDB" : "TVmaze") + " · try again in a moment"
+                        : n == 0 ? "Nothing matches all that · try fewer genres or a lower rating" : n + " picks, to your taste");
+                if (isOpen() && (page.equals("picks") || page.equals("genres"))) build();
+            });
+        }, "picks").start();
+    }
+
+    private void askTmdb() {
+        inputFor = "tmdb";
+        city.setHint("Your TMDB API key, then OK · empty removes it");
+        city.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        city.setText(Picks.key(act));
+        city.selectAll();
+        city.setVisibility(View.VISIBLE);
+        city.requestFocus();
+        city.post(() -> Compat.svc(act, InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
+    }
+
+    /** A key typed here or pasted on the phone: checked with TMDB before it's kept. */
+    private void setTmdbKey(String key) {
+        hideKeyboard();
+        city.setVisibility(View.GONE);
+        String k = key.replaceAll("\\s+", "");
+        if (k.isEmpty() || k.equals(Picks.key(act))) {
+            if (k.isEmpty() && Picks.tmdb(act)) {
+                Picks.setKey(act, "");
+                host.hud(R.drawable.ic_check, "TMDB key removed · shows from TVmaze again");
+                tasteChanged();
+            }
+            build();
+            return;
+        }
+        host.hud(R.drawable.ic_info, "Checking the key with TMDB…");
+        new Thread(() -> {
+            boolean ok = Picks.check(k);
+            act.runOnUiThread(() -> {
+                if (!ok) {
+                    host.hud(R.drawable.ic_info, "TMDB didn't accept that key · copy it again from Settings, API");
+                    build();
+                    return;
+                }
+                Picks.setKey(act, k);
+                host.hud(R.drawable.ic_check, "TMDB key works · films, trending and more are on");
+                if (page.equals("tmdbphone")) {
+                    stopDrop();
+                    go("picks");
+                }
+                tasteChanged();
+                focusTag("pk:key");
+            });
+        }, "tmdb-check").start();
+    }
+
+    /** The phone's page for the key, behind a QR code, open while this page is. */
+    private void openKeyDrop() {
+        keepDrop = false;
+        stopDrop();
+        drop = new Drop(act, new Drop.Quiet() {
+            @Override
+            public void onKey(String text) {
+                if (!text.isEmpty()) setTmdbKey(text);
+            }
+        });
+        String url = drop.start();
+        keyCard = qrCard(url == null ? null : url + "/key", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
+                url != null ? "Paste your TMDB key" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
+        go("tmdbphone");
+    }
+
+    /** Wireless debugging's code, typed on the phone while the TV's pairing dialog stays open. */
+    private void openPair() {
+        keepDrop = false;
+        stopDrop();
+        drop = new Drop(act, new Drop.Quiet() {
+            @Override
+            public void onPairCode(String code) {
+                host.hud(R.drawable.ic_info, "Pairing with the TV…");
+                new Thread(() -> {
+                    String r = Adb.pair(act, code);
+                    act.runOnUiThread(() -> {
+                        adbState = r;
+                        host.hud(r.equals(Adb.OK) || r.equals(Adb.OPEN_DOOR) ? R.drawable.ic_check : R.drawable.ic_info,
+                                r.equals(Adb.OK) || r.equals(Adb.OPEN_DOOR) ? "Paired and connected" : r.equals(Adb.DENIED)
+                                        ? "That code didn't match · send the new one" : "No pairing dialog found · open it and keep it open");
+                        if (Adb.on(act) && page.equals("pair")) {
+                            stopDrop();
+                            go("tv");
+                            focusTag("adb:setup");
+                        }
+                    });
+                }, "pair").start();
+            }
+        });
+        String url = drop.start();
+        keyCard = qrCard(url == null ? null : url + "/pair", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
+                url != null ? "Type the pairing code" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
+        go("pair");
+    }
+
+    /** Save or bring back your setup, from the phone, behind a QR code. */
+    private void openBackup() {
+        keepDrop = false;
+        stopDrop();
+        drop = new Drop(act, new Drop.Quiet() {
+            @Override
+            public void onRestored(int count) {
+                host.hud(R.drawable.ic_check, "Your setup is back · " + count + " settings");
+                stopDrop();
+                // every profile, order and choice read afresh
+                host.applied("profile");
+                if (isOpen()) go("");
+            }
+        });
+        String url = drop.start();
+        keyCard = qrCard(url == null ? null : url + "/backup", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
+                url != null ? "Save or bring back" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
+        go("backup");
+    }
+
+    private String artPkg, artLabel = "";
+
+    /** An app's own picture, from the phone: opened from its tile's menu. */
+    void art(String pkg, String label) {
+        keepDrop = false;
+        stopDrop();
+        artPkg = pkg;
+        artLabel = label;
+        drop = new Drop(act, new Drop.Quiet() {
+            @Override
+            public void onArt(String p) {
+                host.hud(R.drawable.ic_check, "New picture for " + artLabel);
+                host.applied("art");
+                if (page.equals("art")) build();
+            }
+        });
+        drop.artFor = pkg;
+        String url = drop.start();
+        keyCard = qrCard(url == null ? null : url + "/art", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
+                url != null ? "Choose a picture" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
+        go("art");
+    }
+
+    /** Signing in to TMDB: a token, approved on the phone from a QR code, then a session kept on the TV. */
+    private void signIn() {
+        authToken = null;
+        authCard = qrCard(null, "ONE MOMENT", "Asking TMDB…", "");
+        go("tmdbauth");
+        final android.content.Context app = act.getApplicationContext();
+        new Thread(() -> {
+            String t;
+            try {
+                t = Picks.requestToken(app);
+            } catch (Exception e) {
+                t = null;
+            }
+            final String token = t;
+            act.runOnUiThread(() -> {
+                if (!page.equals("tmdbauth")) return;
+                if (token == null) {
+                    host.hud(R.drawable.ic_info, "Couldn't reach TMDB · check the key and the connection");
+                    back();
+                    return;
+                }
+                authToken = token;
+                authCard = qrCard(Picks.approveUrl(token), "SCAN WITH YOUR PHONE", "Approve Aura on TMDB", "Waiting for you to approve…");
+                build();
+                waitForApproval(token, 0);
+            });
+        }, "tmdb-token").start();
+    }
+
+    /** Asks every three seconds whether the token was approved, for five minutes at most. */
+    private void waitForApproval(String token, int tries) {
+        final android.content.Context app = act.getApplicationContext();
+        rows.postDelayed(() -> {
+            if (!token.equals(authToken) || !isOpen()) return;
+            new Thread(() -> {
+                boolean ok;
+                try {
+                    ok = Picks.finishSignIn(app, token);
+                } catch (org.json.JSONException e) {
+                    ok = false;
+                }
+                final boolean done = ok;
+                act.runOnUiThread(() -> {
+                    if (!token.equals(authToken)) return;
+                    if (done) {
+                        authToken = null;
+                        host.hud(R.drawable.ic_check, "Signed in as " + Picks.user(act) + " · picks from your watchlist");
+                        go("picks");
+                        tasteChanged();
+                        focusTag("pk:auth");
+                    } else if (tries < 100) {
+                        waitForApproval(token, tries + 1);
+                    }
+                });
+            }, "tmdb-session").start();
+        }, 3000);
+    }
+
+    /** A QR code with what it's for beside it. */
+    private View qrCard(String url, String kicker, String head, String sub) {
+        LinearLayout card = new LinearLayout(act);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(Ui.dp(2), 0, 0, 0);
+        View code = url != null ? new Code(act, Qr.encode(url)) : new View(act);
+        card.addView(code, new LinearLayout.LayoutParams(Ui.dp(184), Ui.dp(184)));
+        LinearLayout col = new LinearLayout(act);
+        col.setOrientation(LinearLayout.VERTICAL);
+        TextView k = Ui.caps(act, 7.5f, 0x99FFFFFF, 0.28f);
+        k.setText(kicker);
+        col.addView(k);
+        TextView t = Ui.text(act, 15, Ui.semibold, 0xFFFFFFFF);
+        t.setSingleLine(false);
+        t.setMaxLines(2);
+        t.setText(head);
+        col.addView(t, lp(0, 14));
+        TextView s = Ui.text(act, 12, Ui.regular, 0xA6FFFFFF);
+        s.setSingleLine(false);
+        s.setMaxLines(3);
+        s.setText(sub);
+        col.addView(s, lp(0, 6));
+        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        cl.leftMargin = Ui.dp(20);
+        card.addView(col, cl);
+        return card;
+    }
+
+
+    /**
+     * Everything Aura changed is handed back (Home, the screensaver, Block ads, its Home button and
+     * standby admin), then Android's own uninstall asks. Without this, an app holding a device
+     * admin can't be uninstalled at all: Android's settings refuse.
+     */
+    private void removeAura() {
+        if (!confirmRemove) {
+            confirmRemove = true;
+            build();
+            return;
+        }
+        confirmRemove = false;
+        final android.content.Context app = act.getApplicationContext();
+        Power.setSleep(app, 0);
+        if (Shield.allowed(app) && Shield.on(app)) Shield.set(app, false);
+        if (Ambient.canSet(app) && Ambient.chosen(app)) Ambient.choose(app, false);
+        HomeKeys.set(app, false);
+        android.app.admin.DevicePolicyManager dpm = Compat.svc(app, android.app.admin.DevicePolicyManager.class);
+        android.content.ComponentName admin = new android.content.ComponentName(app, SleepAdmin.class);
+        if (dpm != null && dpm.isAdminActive(admin)) dpm.removeActiveAdmin(admin);
+        host.hud(R.drawable.ic_info, "Handing the TV back…");
+        final String home = Safety.original(app);
+        new Thread(() -> {
+            if (home != null && Adb.on(app)) Adb.run(app, "cmd package set-home-activity " + home);
+            // a moment for Android to let go of the admin before it's asked to uninstall
+            android.os.SystemClock.sleep(800);
+            act.runOnUiThread(() -> {
+                try {
+                    act.startActivity(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + act.getPackageName()))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (RuntimeException e) {
+                    host.hud(R.drawable.ic_info, "Uninstall Aura in Android's settings, Apps");
+                }
+            });
+        }, "remove").start();
     }
 
     /** Remote buttons: press one, pick an app; the list of those given so far, each removable. */
@@ -669,13 +1194,17 @@ final class SettingsPanel {
         add("Connect", adbState.equals("asking") ? "Waiting for you…" : Adb.on(act) ? "Connected" : "Not connected", "adb:connect", this::adbConnect);
         if (setupNote.isEmpty()) setupNote = Prefs.device(act).getString("setup_note", "");
         if (Adb.on(act)) add("Switch everything on", setupNote.isEmpty() ? Adb.setup(act).length + " extras" : setupNote, "adb:setup", this::adbSetup);
+        // newer TVs without plain network debugging: wireless debugging, paired with a code typed on the phone
+        if (!Adb.on(act) && Adb.wireless()) add("Use wireless debugging", "Pair with a code", "adb:pair", this::openPair);
         // the open door shuts with a setting Aura may change once setup has granted it
         if (Adb.on(act) && Adb.unguarded(act) && Compat.granted(act, android.Manifest.permission.WRITE_SECURE_SETTINGS)) {
             add("Turn network debugging off", confirmAdbOff ? "Press OK again" : "Closes the open door", "adb:off", this::adbOff);
         }
-        add("Developer options", "Network debugging is here", "adb:dev", () -> {
+        boolean dev = Settings.Global.getInt(act.getContentResolver(), Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 0;
+        add("Developer options", dev ? "USB debugging is here" : "Off · About, press Build 7 times", "adb:dev", () -> {
             try {
-                host.open(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS), panel);
+                // not switched on yet: the About page, where pressing Build seven times does it
+                host.open(new Intent(dev ? Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS : Settings.ACTION_DEVICE_INFO_SETTINGS), panel);
             } catch (RuntimeException e) {
                 host.open(new Intent(Settings.ACTION_SETTINGS), panel);
             }
@@ -744,13 +1273,14 @@ final class SettingsPanel {
             case Adb.OPEN_DOOR:
                 return "Careful: this TV let Aura in without asking. Anything on your Wi-Fi can control it the same way. Switch everything on, then turn network debugging off.";
             case Adb.OFF:
-                return "Network debugging is off. In Developer options switch on Network debugging (or USB debugging), then Connect again. No Developer options? Android settings, Device Preferences, About: press OK on Build seven times.";
+                return "Debugging is off. In Developer options switch on USB debugging (Network debugging on some TVs), then Connect again. No Developer options? Android settings, System, About: press OK on the build seven times.";
             case Adb.DENIED:
                 return "Android didn't let Aura in in time. If you chose Always allow, Connect again: it goes straight in now. Otherwise Connect, and choose Always allow when it asks.";
             case Adb.FAILED:
                 return "Couldn't reach the TV's debugging service. Try again in a moment.";
             default:
-                return "Aura can switch on its extras from the TV itself, no computer needed, through the TV's network debugging, the way a PC would. Android asks once: choose Always allow.";
+                return (HomeRole.stubborn(act) && !HomeRole.held(act) ? HomeRole.other(act) + " keeps the Home button for itself: setup hands it to Aura. " : "")
+                        + "Aura switches on its extras from the TV itself, no computer needed, through USB debugging, the way a PC would. Android asks once: choose Always allow.";
         }
     }
 
@@ -776,42 +1306,38 @@ final class SettingsPanel {
     private void adbSetup() {
         if (setupRunning) return;
         setupRunning = true;
-        final String[][] steps = Adb.setup(act);
-        setupNote = "0 of " + steps.length;
+        setupNote = "0 of " + Adb.setup(act).length;
         build();
-        new Thread(() -> {
-            int done = 0;
-            List<String> failed = new java.util.ArrayList<>();
-            for (int i = 0; i < steps.length; i++) {
-                final String now = (i + 1) + " of " + steps.length + (steps[i][0].equals("Speed") ? " · compiling, about a minute" : " · " + steps[i][0]);
+        Adb.runSetup(act, new Adb.Progress() {
+            @Override
+            public void step(int i, int n, String name) {
+                final String now = (i + 1) + " of " + n + (name.equals("Speed") ? " · compiling, about a minute" : " · " + name);
                 act.runOnUiThread(() -> {
                     setupNote = now;
                     if (page.equals("tv")) build();
                 });
-                // the last step (install permission) makes Android restart Aura: the result is kept first
-                if (i == steps.length - 1 && steps[i][0].equals("Updates")) {
-                    Prefs.device(act).edit().putString("setup_note", failed.isEmpty() ? "Done · all " + steps.length
-                            : done + 1 + " of " + steps.length + " · not " + TextUtils.join(", ", failed)).commit();
-                }
-                List<String> out = Adb.run(act, steps[i][1]);
-                String o = out == null ? null : out.get(0);
-                // pm and settings say nothing when it works; the rest print Success; "already" is fine too
-                if (o != null && (!o.contains("Exception") && !o.contains("Error") || o.contains("already"))) done++;
-                else failed.add(steps[i][0]);
-                if (out == null) break;
             }
-            final int ok = done;
-            act.runOnUiThread(() -> {
-                setupRunning = false;
-                setupNote = ok == steps.length ? "Done · all " + ok : ok + " of " + steps.length + " · not " + TextUtils.join(", ", failed);
-                Prefs.device(act).edit().putString("setup_note", setupNote).apply();
-                host.hud(R.drawable.ic_check, ok == steps.length ? "Everything is switched on" : ok + " of " + steps.length + " switched on");
-                if (page.equals("tv")) {
-                    build();
-                    focusTag("adb:setup");
-                }
-            });
-        }, "adb-setup").start();
+
+            @Override
+            public void restarting(int ok, int n, List<String> failed) {
+                Prefs.device(act).edit().putString("setup_note", failed.isEmpty() ? "Done · all " + n
+                        : ok + " of " + n + " · not " + TextUtils.join(", ", failed)).commit();
+            }
+
+            @Override
+            public void done(int ok, int n, List<String> failed) {
+                act.runOnUiThread(() -> {
+                    setupRunning = false;
+                    setupNote = ok == n ? "Done · all " + ok : ok + " of " + n + " · not " + TextUtils.join(", ", failed);
+                    Prefs.device(act).edit().putString("setup_note", setupNote).apply();
+                    host.hud(R.drawable.ic_check, ok == n ? "Everything is switched on" : ok + " of " + n + " switched on");
+                    if (page.equals("tv")) {
+                        build();
+                        focusTag("adb:setup");
+                    }
+                });
+            }
+        });
     }
 
     /** Debugging off for the whole TV: nothing on the Wi-Fi gets in, Aura's own link included. */
@@ -1025,9 +1551,21 @@ final class SettingsPanel {
         }, "update").start();
     }
 
+    private boolean keepDrop;
+    private final Runnable stopDropIdle = this::stopDropNow;
+
     private void openDrop() {
         page = "drop";
         confirmClear = false;
+        rows.removeCallbacks(stopDropIdle);
+        if (keepDrop && drop != null && dropCard != null) {
+            if (dropCard.getParent() instanceof ViewGroup) ((ViewGroup) dropCard.getParent()).removeView(dropCard);
+            build();
+            focusTag(Prefs.MINE_ONLY);
+            return;
+        }
+        stopDropNow();
+        keepDrop = true;
         drop = new Drop(act, new Drop.Listener() {
             @Override
             public void onProgress(String name, long done, long total, int index, int count) {
@@ -1070,6 +1608,19 @@ final class SettingsPanel {
             }
 
             @Override
+            public boolean onType(String text) {
+                if (keepDrop) {
+                    rows.removeCallbacks(stopDropIdle);
+                    rows.postDelayed(stopDropIdle, 10 * 60_000L);
+                }
+                if (dropTitle != null && isOpen() && page.equals("drop")) {
+                    dropTitle.setText("Typed from your phone");
+                    dropSub.setText("“" + shorten(text) + "”");
+                }
+                return host.type(text);
+            }
+
+            @Override
             public void onApk(String name) {
                 dropTitle.setText("Install " + shorten(name.replaceFirst("(?i)\\.apk$", "")) + "?");
                 dropSub.setText("Confirm on the TV to install it");
@@ -1082,6 +1633,18 @@ final class SettingsPanel {
     }
 
     private void stopDrop() {
+        if (keepDrop && drop != null) {
+            rows.removeCallbacks(stopDropIdle);
+            rows.postDelayed(stopDropIdle, 10 * 60_000L);
+            return;
+        }
+        stopDropNow();
+    }
+
+    private void stopDropNow() {
+        keepDrop = false;
+        rows.removeCallbacks(stopDropIdle);
+        dropCard = null;
         if (drop != null) drop.stop();
         drop = null;
     }
@@ -1159,7 +1722,7 @@ final class SettingsPanel {
     }
 
     /** A QR code drawn dark on a white card with its quiet zone, crisp at any size. */
-    private static final class Code extends View {
+    static final class Code extends View {
         private final Qr qr;
         private final android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
         private final android.graphics.Path path = new android.graphics.Path();
@@ -1249,6 +1812,36 @@ final class SettingsPanel {
 
     // ---- weather city ------------------------------------------------------------------------
 
+    /** A kids' profile waiting for the PIN to be set before it's switched on. */
+    private String pinFor;
+
+    private void askPin() {
+        inputFor = "pin";
+        city.setHint("A PIN of 4 to 8 digits, then OK");
+        city.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        city.setText("");
+        city.setVisibility(View.VISIBLE);
+        city.requestFocus();
+        city.post(() -> Compat.svc(act, InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
+    }
+
+    private void setPin(String pin) {
+        hideKeyboard();
+        city.setVisibility(View.GONE);
+        if (!pin.matches("[0-9]{4,8}")) {
+            host.hud(R.drawable.ic_info, "4 to 8 digits");
+            build();
+            return;
+        }
+        Profiles.setPin(act, pin);
+        if (pinFor != null) Profiles.setKids(act, pinFor, true);
+        host.hud(R.drawable.ic_check, pinFor != null ? "Kids' profile on · remember the PIN" : "PIN changed");
+        String tag = pinFor != null ? "pr:kids:" + pinFor : "pr:pin";
+        pinFor = null;
+        build();
+        focusTag(tag);
+    }
+
     /** The field again, this time for a new profile's name. */
     private void askProfile() {
         inputFor = "profile";
@@ -1276,6 +1869,10 @@ final class SettingsPanel {
         Profiles.use(act, pr.id);
         host.hud(R.drawable.ic_check, "Hello, " + pr.name + "  ·  a fresh home screen, all yours");
         host.applied("profile");
+        if (isOpen()) {
+            build();
+            focusTag("pr:" + pr.id);
+        }
     }
 
     private void askCity() {

@@ -42,6 +42,13 @@ final class Previews {
     private static volatile Bitmap fresh;
     private static volatile String freshPkg;
 
+    /** Told of each new capture, on the capturing thread: a switcher already open shows it at once. */
+    interface Listener {
+        void taken(String pkg, Bitmap shot);
+    }
+
+    static volatile Listener listener;
+
     private Previews() { }
 
     /** Android 11 is where accessibility services may take screenshots. Shared by every profile. */
@@ -101,6 +108,8 @@ final class Previews {
             lastPkg = pkg;
             fresh = small;
             freshPkg = pkg;
+            Listener l = listener;
+            if (l != null) l.taken(pkg, small);
             File f = file(c, pkg), part = new File(f.getPath() + ".part");
             try (FileOutputStream out = new FileOutputStream(part)) {
                 small.compress(Bitmap.CompressFormat.JPEG, 82, out);
@@ -161,6 +170,13 @@ final class Previews {
     static void dropFresh() {
         fresh = null;
         freshPkg = null;
+    }
+
+    /** Short on memory: drop the in-memory captures. */
+    static void trim() {
+        dropFresh();
+        last = null;
+        lastPkg = null;
     }
 
     /** When {@code pkg}'s picture was taken, or 0: cards painted from an older one are made again. */

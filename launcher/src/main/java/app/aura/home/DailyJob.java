@@ -25,7 +25,7 @@ public class DailyJob extends JobService {
             Updater.notice(getApplicationContext());
             boolean complete = Daily.run(getApplicationContext());
             try {
-                Picks.refresh(getApplicationContext());
+                Picks.refresh(getApplicationContext(), false);
                 Fresh.refresh(getApplicationContext());
             } catch (java.io.IOException e) {
                 complete = false;

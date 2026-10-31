@@ -422,7 +422,8 @@ final class Wind extends Scene {
     private void story() {
         if (listener == null) return;
         storyAt = SystemClock.uptimeMillis();
-        String city = Weather.now(getContext()).city;
+        Weather.Now wx = Weather.now(getContext());
+        String city = wx != null ? wx.city : null;
         String where = TimeZone.getDefault().getID().matches("Asia/(Kolkata|Calcutta)") ? "India" : city == null || city.isEmpty() ? "you" : city;
         String when = fetchedAt == 0 ? "" : "Updated " + android.text.format.DateFormat.getTimeFormat(getContext()).format(new java.util.Date(fetchedAt));
         if (u == null) {

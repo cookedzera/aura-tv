@@ -36,6 +36,11 @@ import java.util.Map;
  * (up to half a second), and some firmware then delays releases or drops a held key's repeats. So
  * keys pass through here only while another app is in front, never on Aura's own screens, and not
  * at all while a game controller is connected.
+ *
+ * Google TV and Fire TV keep Home for their own launcher even after Aura is chosen. There this
+ * service is what makes Aura home: Home opens Aura instead (on Aura's own screens too, so those
+ * keys pass through here as well), and should the TV's launcher come up anyway (after a restart,
+ * or with a controller's Home) Aura is brought straight back over it.
  */
 public class HomeKeys extends AccessibilityService {
     private static final long TWICE_MS = 200, HOLD_MS = 550, TEACH_MS = 30_000;
@@ -43,9 +48,14 @@ public class HomeKeys extends AccessibilityService {
     private static final long REFRESH_MS = 30_000;
     /** Remote buttons given an app: "k<keycode>" (or "s<scancode>" for keys with no code) to a package. */
     static final String KEYS = "remote_keys";
+    /** Home goes to Aura even where Android hands it to another launcher (on unless switched off). */
+    private static final String TAKEOVER = "home_takeover";
 
     /** Running in this process right now. */
     static volatile boolean live;
+    /** The app last in front (Aura's own screens aside) and when, by the wall clock: newest in recent apps. */
+    static volatile String lastApp;
+    static volatile long lastAppAt;
     private static HomeKeys running;
     private static boolean healTried;
 
@@ -54,9 +64,10 @@ public class HomeKeys extends AccessibilityService {
     private long firstUpAt;
     /**
      * waiting: a first press is held back; released: it has let go; taken: this press's down was
-     * kept from Android; holding: this press became a hold, and its release only needs swallowing.
+     * kept from Android; holding: this press became a hold, and its release only needs swallowing;
+     * own: a press on Aura's own screen, answered on its release.
      */
-    private boolean waiting, released, taken, holding;
+    private boolean waiting, released, taken, holding, own;
     /** Whether keys come here at all (the XML asks for it; changed as apps come and go). */
     private boolean filtering = true, pad;
     /** How late D-pad releases arrive, smoothed: the firmware's own delay, for Settings to show. */
@@ -64,10 +75,20 @@ public class HomeKeys extends AccessibilityService {
     private InputManager.InputDeviceListener devices;
     /** Whether a package is an app you open (it has a launcher entry), cached: overlays and dialogs aren't. */
     private final HashMap<String, Boolean> openable = new HashMap<>();
+    /** Whether a window's "package/class" is an activity, cached: an app's pop-ups and panels aren't. */
+    private final HashMap<String, Boolean> activities = new HashMap<>();
+    /** The TV's other home screens, as "package/class". */
+    private java.util.Set<String> others = java.util.Collections.emptySet();
+    /** Whether Home resolves to Aura, read at most every few seconds (it's a call into Android). */
+    private boolean aurasHome;
+    private long homeReadAt = -1;
+    /** Bringing Aura back over the TV's own launcher, kept from ever becoming a tug of war. */
+    private long bouncedAt, restUntil;
+    private int bounces;
     private final Runnable goHome = () -> {
         handler.removeCallbacks(this.held);
         waiting = false;
-        performGlobalAction(GLOBAL_ACTION_HOME);
+        home();
         refilterSoon();
     };
     /** Still down after a moment: Control Center, over the app. */
@@ -76,7 +97,7 @@ public class HomeKeys extends AccessibilityService {
         handler.removeCallbacks(goHome);
         waiting = false;
         holding = true;
-        if (!open("aura_cc", front)) performGlobalAction(GLOBAL_ACTION_HOME);
+        if (!open("aura_cc", front)) home();
     };
     private final Runnable refilter = this::refilter;
     private final Runnable settleShot = () -> {
@@ -98,11 +119,93 @@ public class HomeKeys extends AccessibilityService {
         }
     }
 
+    /** Home, wherever it should lead: Aura when another launcher keeps Home, else Android's own. */
+    private void home() {
+        if (!takeover() || !openHome()) performGlobalAction(GLOBAL_ACTION_HOME);
+    }
+
+    /** Aura as Android opens it for Home, so the home screen answers exactly as to its own Home press. */
+    private boolean openHome() {
+        try {
+            startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setClass(this, HomeActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));
+            return true;
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    /** Home is Aura's to answer: Android gives it to another launcher, and that wasn't switched off. */
+    private boolean takeover() {
+        long now = SystemClock.uptimeMillis();
+        if (homeReadAt < 0 || now - homeReadAt > 5000) {
+            homeReadAt = now;
+            aurasHome = HomeRole.held(this);
+        }
+        return !aurasHome && takeover(this);
+    }
+
+    static boolean takeover(Context c) {
+        return Prefs.device(c).getBoolean(TAKEOVER, true);
+    }
+
+    static void setTakeover(Context c, boolean on) {
+        Prefs.device(c).edit().putBoolean(TAKEOVER, on).apply();
+        HomeKeys s = running;
+        if (s != null) {
+            s.homeReadAt = -1;
+            s.refilterSoon();
+        }
+    }
+
+    /**
+     * The TV's own launcher came up anyway: Aura over it at once. Three times in ten seconds is a
+     * tug of war (something keeps opening it on purpose), so then it's left alone for a minute.
+     */
+    private void bounce() {
+        if (!takeover()) return;
+        long now = SystemClock.uptimeMillis();
+        if (now < restUntil) return;
+        if (now - bouncedAt > 10_000) bounces = 0;
+        bouncedAt = now;
+        if (++bounces > 3) {
+            bounces = 0;
+            restUntil = now + 60_000;
+            return;
+        }
+        openHome();
+    }
+
+    /** An activity's window, not a dialog, panel or pop-up drawn over one. */
+    private boolean activity(String pkg, String cls) {
+        String key = pkg + "/" + cls;
+        Boolean is = activities.get(key);
+        if (is == null) {
+            try {
+                getPackageManager().getActivityInfo(new ComponentName(pkg, cls), 0);
+                is = true;
+            } catch (android.content.pm.PackageManager.NameNotFoundException | RuntimeException e) {
+                is = false;
+            }
+            activities.put(key, is);
+        }
+        return is;
+    }
+
+    /** Whether the service is meant to be on: switched on by Aura or by hand, and not switched off since. */
+    static boolean wanted(Context c) {
+        return Prefs.device(c).getBoolean("keys_wanted", false);
+    }
+
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
         live = true;
         running = this;
+        Prefs.device(this).edit().putBoolean("keys_wanted", true).apply();
+        others = HomeRole.others(this);
+        // the TV has just started and opened its own launcher before this service was up
+        if (SystemClock.elapsedRealtime() < 180_000) handler.postDelayed(this::afterBoot, 1500);
         InputManager im = (InputManager) getSystemService(Context.INPUT_SERVICE);
         if (im != null) {
             devices = new InputManager.InputDeviceListener() {
@@ -127,10 +230,64 @@ public class HomeKeys extends AccessibilityService {
         refilter();
     }
 
+    /**
+     * Just after a restart: the launcher Android opened is the TV's own, and Aura takes its place.
+     * Only when that's certain (the usage history says so), or on a box with no inputs of its own
+     * (a TV may have started on its tuner or an HDMI input, and stays there).
+     */
+    private void afterBoot() {
+        if (front != null || !takeover()) return;
+        String last = lastForeground();
+        if (last != null ? isOther(last) : !hasInputs()) openHome();
+    }
+
+    private String lastForeground() {
+        if (!Habits.granted(this)) return null;
+        try {
+            android.app.usage.UsageStatsManager usm = Compat.svc(this, android.app.usage.UsageStatsManager.class);
+            long now = System.currentTimeMillis();
+            android.app.usage.UsageEvents ev = usm.queryEvents(now - 180_000, now);
+            android.app.usage.UsageEvents.Event e = new android.app.usage.UsageEvents.Event();
+            String last = null;
+            while (ev.hasNextEvent()) {
+                ev.getNextEvent(e);
+                if (e.getEventType() == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND) last = e.getPackageName();
+            }
+            return last;
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private boolean isOther(String pkg) {
+        for (String o : others) if (o.startsWith(pkg + "/")) return true;
+        return false;
+    }
+
+    private boolean hasInputs() {
+        android.media.tv.TvInputManager tim = (android.media.tv.TvInputManager) getSystemService(Context.TV_INPUT_SERVICE);
+        try {
+            return tim != null && !tim.getTvInputList().isEmpty();
+        } catch (RuntimeException e) {
+            return true;
+        }
+    }
+
     @Override
     public void onAccessibilityEvent(AccessibilityEvent e) {
         if (e.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || e.getPackageName() == null) return;
         String pkg = e.getPackageName().toString();
+        String cls = e.getClassName() != null ? e.getClassName().toString() : null;
+        // the TV's own launcher came up (Google TV's, say, which keeps Home): Aura goes back over it
+        if (cls != null && others.contains(pkg + "/" + cls)) {
+            // no app is in front now: no picture is taken of the launcher under an app's name
+            front = null;
+            handler.removeCallbacks(settleShot);
+            handler.removeCallbacks(settleShotLate);
+            refilter();
+            bounce();
+            return;
+        }
         // voice search, the keyboard, volume and system dialogs come and go over an app without replacing it
         Boolean ok = openable.get(pkg);
         if (ok == null) {
@@ -138,7 +295,15 @@ public class HomeKeys extends AccessibilityService {
                     || getPackageManager().getLaunchIntentForPackage(pkg) != null;
             openable.put(pkg, ok);
         }
+        // nor do an app's own pop-ups: another app's dialog over the one you're in doesn't make it the app in front
+        if (ok && cls != null && !pkg.equals(getPackageName()) && !activity(pkg, cls)) ok = false;
         if (ok) {
+            if (!pkg.equals(front) && !pkg.equals(getPackageName())) {
+                // recent apps learn it here, however it was opened (a remote's own button, another app)
+                lastApp = pkg;
+                lastAppAt = System.currentTimeMillis();
+                Habits.opened(this, pkg);
+            }
             front = pkg;
             refilter();
             // a picture once the app has drawn its first screen, and again once it has loaded (a
@@ -154,12 +319,16 @@ public class HomeKeys extends AccessibilityService {
 
     // ---- when keys come here at all -------------------------------------------------------------
 
-    /** On while another app is in front (or a button is being taught), off on Aura's own screens and with a controller in. */
+    /**
+     * On while another app is in front (or a button is being taught), off on Aura's own screens and
+     * with a controller in. On Aura's own screens too where another launcher keeps Home, or once a
+     * button has an app: some buttons (Apps, Recents) never reach Aura's window.
+     */
     private void refilter() {
         // never between a press and its release: Android would see only half of it
         if (taken || waiting || holding) return;
-        // on Aura's own screen too once a button has an app: some (Apps, Recents) never reach its window
-        boolean want = teaching != null || !pad && front != null && (!front.equals(getPackageName()) || !keys(this).isEmpty());
+        boolean want = teaching != null || !pad && (front == null ? takeover()
+                : !front.equals(getPackageName()) || !keys(this).isEmpty() || takeover());
         if (want == filtering) return;
         AccessibilityServiceInfo info = getServiceInfo();
         if (info == null) return;
@@ -256,6 +425,12 @@ public class HomeKeys extends AccessibilityService {
             if (!taken) return false;
             taken = false;
             handler.removeCallbacks(held);
+            if (own) {
+                own = false;
+                if (!e.isCanceled()) openHome();
+                refilterSoon();
+                return true;
+            }
             if (holding) {
                 holding = false;
                 refilterSoon();
@@ -271,10 +446,12 @@ public class HomeKeys extends AccessibilityService {
             return true;
         }
         if (e.getRepeatCount() > 0) return taken;
-        // on Aura's own screen, Aura handles Home itself
+        // on Aura's own screen, Aura handles Home itself: Android hands it the press, unless Android
+        // would open another launcher, in which case the press goes to Aura from here
         if (front == null || front.equals(getPackageName())) {
-            taken = false;
-            return false;
+            own = takeover();
+            taken = own;
+            return own;
         }
         taken = true;
         if (waiting && released && SystemClock.uptimeMillis() - firstUpAt < TWICE_MS + 60) {
@@ -283,7 +460,7 @@ public class HomeKeys extends AccessibilityService {
             handler.removeCallbacks(held);
             waiting = false;
             // whatever went wrong, Home still goes home
-            if (!open("aura_switcher", front)) performGlobalAction(GLOBAL_ACTION_HOME);
+            if (!open("aura_switcher", front)) home();
             return true;
         }
         waiting = true;
@@ -350,9 +527,17 @@ public class HomeKeys extends AccessibilityService {
         if (waiting) goHome.run();
         live = false;
         if (running == this) running = null;
+        // switched off in Android's settings (not a crash or a restart): it stays off after a restart too
+        if (!on(this)) Prefs.device(this).edit().putBoolean("keys_wanted", false).apply();
         InputManager im = (InputManager) getSystemService(Context.INPUT_SERVICE);
         if (im != null && devices != null) im.unregisterInputDeviceListener(devices);
         return super.onUnbind(intent);
+    }
+
+    /** Standby, as the remote's power button gives it: the sleep timer's way where Aura has no device admin. */
+    static boolean sleep() {
+        HomeKeys s = running;
+        return s != null && android.os.Build.VERSION.SDK_INT >= 28 && s.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
     }
 
     // ---- remote buttons given an app ------------------------------------------------------------
@@ -459,6 +644,11 @@ public class HomeKeys extends AccessibilityService {
         return code != KeyEvent.KEYCODE_UNKNOWN ? "k" + code : "s" + scan;
     }
 
+    /** Read afresh next time (a backup was just restored). */
+    static synchronized void forgetKeys() {
+        keys = null;
+    }
+
     /** Every button given an app, in the order they were given. */
     static synchronized Map<String, String> keys(Context c) {
         if (keys == null) {
@@ -537,6 +727,16 @@ public class HomeKeys extends AccessibilityService {
         return false;
     }
 
+    /** The shell command that switches this service on, leaving any others as they were: for setup over ADB. */
+    static String enableCommand(Context c) {
+        String list = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        java.util.List<String> keep = new java.util.ArrayList<>();
+        if (list != null) for (String s : TextUtils.split(list, ":")) if (!s.isEmpty() && !s.equalsIgnoreCase(me(c))) keep.add(s);
+        keep.add(me(c));
+        return "settings put secure enabled_accessibility_services '" + TextUtils.join(":", keep).replace("'", "")
+                + "' && settings put secure accessibility_enabled 1";
+    }
+
     /** Adds or removes Aura from the TV's accessibility services, leaving any others as they were. */
     static boolean set(Context c, boolean on) {
         if (!Compat.granted(c, android.Manifest.permission.WRITE_SECURE_SETTINGS)) return false;
@@ -548,6 +748,8 @@ public class HomeKeys extends AccessibilityService {
             Settings.Secure.putString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
                     keep.isEmpty() ? null : TextUtils.join(":", keep));
             Settings.Secure.putInt(c.getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED, keep.isEmpty() ? 0 : 1);
+            // heal() switches it off and on: only a real switch-off counts as not wanted
+            if (on || !Prefs.device(c).getBoolean("keys_healing", false)) Prefs.device(c).edit().putBoolean("keys_wanted", on).apply();
             return true;
         } catch (SecurityException e) {
             return false;

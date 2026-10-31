@@ -469,8 +469,8 @@ final class Sky extends Scene {
         }
         if (p.stories.isEmpty()) p.stories.add(new String[]{"The stars above you", visible + " stars over the horizon right now."});
 
-        String city = Weather.now(c).city;
         Weather.Now wx = Weather.now(c);
+        String city = wx != null ? wx.city : null;
         boolean clouds = wx != null && wx.code >= 2;
         String when = sunAlt < -6 ? (clouds ? "Above tonight's clouds" : "Tonight's sky")
                 : sunAlt < 0 ? (sunAz < 180 ? "The sky at dawn" : "The sky at dusk") : "The stars behind the daylight";

@@ -172,9 +172,12 @@ final class NowPlaying extends FrameLayout {
         handler.removeCallbacks(tick);
         if (controller != null) controller.unregisterCallback(watch);
         controller = null;
+        lastArt = null;
         animate().alpha(0f).setDuration(200).setStartDelay(0).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> setVisibility(GONE)).start();
     }
+
+    private Bitmap lastArt;
 
     private interface Action {
         void run(MediaController.TransportControls t);
@@ -199,9 +202,13 @@ final class NowPlaying extends FrameLayout {
             if (b == null) b = md.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
             if (b == null) b = md.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
             if (b != null) {
-                art.setImageBitmap(b);
-                glow.setImageBitmap(Backdrop.blur(b));
+                if (b != lastArt && (lastArt == null || !b.sameAs(lastArt))) {
+                    lastArt = b;
+                    art.setImageBitmap(b);
+                    glow.setImageBitmap(Backdrop.blur(b));
+                }
             } else {
+                lastArt = null;
                 // no artwork: the app's own icon, large
                 try {
                     art.setImageDrawable(act.getPackageManager().getApplicationIcon(controller.getPackageName()));

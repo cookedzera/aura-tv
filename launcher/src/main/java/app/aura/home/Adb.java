@@ -47,7 +47,7 @@ final class Adb {
     static final int PORT = 5555;
     // the protocol: 24-byte little-endian headers, then the payload
     private static final int CNXN = 0x4e584e43, AUTH = 0x48545541, OPEN = 0x4e45504f, OKAY = 0x59414b4f,
-            CLSE = 0x45534c43, WRTE = 0x45545257;
+            CLSE = 0x45534c43, WRTE = 0x45545257, STLS = 0x534c5453, STLS_VERSION = 0x01000000;
     private static final int VERSION = 0x01000001, MAX_DATA = 256 * 1024;
     private static final int TOKEN = 1, SIGNATURE = 2, PUBLIC_KEY = 3;
     /** ASN.1 DigestInfo for SHA-1: Android checks the token as if it were a SHA-1 digest. */
@@ -72,9 +72,9 @@ final class Adb {
     // ---- one connection ---------------------------------------------------------------------
 
     static final class Link implements Closeable {
-        private final Socket socket;
-        private final DataInputStream in;
-        private final OutputStream out;
+        private Socket socket;
+        private DataInputStream in;
+        private OutputStream out;
         private int nextId = 1;
         /** The TV let us in without asking for any key. */
         boolean unguarded;
@@ -91,7 +91,8 @@ final class Adb {
          */
         static Link open(String host, int port, KeyPair key, String name, boolean mayAsk) throws IOException {
             Socket s = new Socket();
-            s.connect(new InetSocketAddress(host, port), 3000);
+            InetSocketAddress at = new InetSocketAddress(host, port);
+            s.connect(at, 3000);
             Link l = new Link(s);
             try {
                 s.setSoTimeout(REPLY_MS);
@@ -102,6 +103,17 @@ final class Adb {
                     if (m.cmd == CNXN) {
                         l.unguarded = !asked;
                         return l;
+                    }
+                    // wireless debugging: the rest goes over TLS, with the key the TV knows from pairing
+                    if (m.cmd == STLS && android.os.Build.VERSION.SDK_INT >= 30) {
+                        l.send(STLS, STLS_VERSION, 0, null);
+                        javax.net.ssl.SSLSocket t = AdbTls.wrap(l.socket, at, key);
+                        l.socket = t;
+                        l.in = new DataInputStream(t.getInputStream());
+                        l.out = t.getOutputStream();
+                        // paired by code, never an open door
+                        asked = true;
+                        continue;
                     }
                     if (m.cmd != AUTH || m.arg0 != TOKEN) continue;
                     asked = true;
@@ -279,8 +291,62 @@ final class Adb {
         return new File(c.getFilesDir(), "adb");
     }
 
+    private static String name() {
+        return "Aura@" + Build.MODEL.replace(' ', '_');
+    }
+
+    /**
+     * Network debugging on port 5555 where the TV offers it; else wireless debugging (Android 11+),
+     * once paired, at whatever port it has now: the last one tried first, then found over mDNS.
+     */
     private static Link link(Context c, boolean mayAsk) throws IOException {
-        return Link.open("127.0.0.1", PORT, key(dir(c)), "Aura@" + Build.MODEL.replace(' ', '_'), mayAsk);
+        try {
+            return Link.open("127.0.0.1", PORT, key(dir(c)), name(), mayAsk);
+        } catch (ConnectException e) {
+            if (Build.VERSION.SDK_INT < 30 || !Prefs.device(c).getBoolean("adb_paired", false)) throw e;
+        }
+        int last = Prefs.device(c).getInt("adb_tls_port", 0);
+        if (last > 0) {
+            try {
+                return Link.open("127.0.0.1", last, key(dir(c)), name(), false);
+            } catch (IOException ignored) {
+            }
+        }
+        InetSocketAddress at = AdbTls.find(c, AdbTls.CONNECT, 4000);
+        if (at == null) throw new ConnectException("wireless debugging is off");
+        Prefs.device(c).edit().putInt("adb_tls_port", at.getPort()).apply();
+        return Link.open(at.getAddress().getHostAddress(), at.getPort(), key(dir(c)), name(), false);
+    }
+
+    /**
+     * Pairs with the TV's wireless debugging while its "Pair device with pairing code" dialog is
+     * open, with the code it shows (typed on the phone: the dialog closes if you leave it). Off the
+     * main thread. Then connects, as {@link #connect} does.
+     */
+    static String pair(Context c, String code) {
+        if (Build.VERSION.SDK_INT < 30 || !code.matches("[0-9]{6}")) return FAILED;
+        InetSocketAddress at = AdbTls.find(c, AdbTls.PAIRING, 6000);
+        if (at == null) return OFF;
+        try {
+            AdbTls.pair(at, code, key(dir(c)), name());
+        } catch (Denied e) {
+            return DENIED;
+        } catch (IOException | RuntimeException e) {
+            return FAILED;
+        }
+        Prefs.device(c).edit().putBoolean("adb_paired", true).apply();
+        // the dialog closes on its own; the connection service may take a moment to appear
+        for (int i = 0; i < 5; i++) {
+            String s = connect(c);
+            if (!s.equals(OFF)) return s;
+            android.os.SystemClock.sleep(1500);
+        }
+        return OFF;
+    }
+
+    /** Whether this TV has wireless debugging (Android 11+) to pair with, should network debugging be missing. */
+    static boolean wireless() {
+        return Build.VERSION.SDK_INT >= 30;
     }
 
     /** Whether Android let Aura in last time. */
@@ -336,6 +402,11 @@ final class Adb {
         String p = c.getPackageName();
         List<String[]> s = new ArrayList<>();
         if (Build.VERSION.SDK_INT >= 24) s.add(new String[]{"Home", "cmd package set-home-activity " + p + "/" + HomeActivity.class.getName()});
+        // Google TV and Fire TV keep Home for their own launcher regardless: the Home button service takes it
+        if (HomeRole.stubborn(c) && !HomeKeys.on(c)) s.add(new String[]{"Home button", HomeKeys.enableCommand(c)});
+        // Android 13+ greys out the Accessibility switch of an app installed from a file ("restricted
+        // setting"); this lifts it, so the Home button can be switched by hand later too
+        if (Build.VERSION.SDK_INT >= 33) s.add(new String[]{"Accessibility", "appops set " + p + " ACCESS_RESTRICTED_SETTINGS allow"});
         s.add(new String[]{"Block ads, animations", "pm grant " + p + " android.permission.WRITE_SECURE_SETTINGS"});
         s.add(new String[]{"Wi-Fi name", "pm grant " + p + " android.permission.DUMP"});
         s.add(new String[]{"Memory", "pm grant " + p + " android.permission.PACKAGE_USAGE_STATS"});
@@ -346,6 +417,7 @@ final class Adb {
         s.add(new String[]{"Standby", "dpm set-active-admin --user 0 " + p + "/" + SleepAdmin.class.getName()});
         s.add(new String[]{"Screensaver", "settings put secure screensaver_components " + p + "/" + Ambient.class.getName()});
         // the slowest: Aura compiled ahead of time opens and scrolls quicker
+        if (Build.VERSION.SDK_INT >= 31) s.add(new String[]{"Bluetooth", "pm grant " + p + " android.permission.BLUETOOTH_CONNECT"});
         if (Build.VERSION.SDK_INT >= 24) s.add(new String[]{"Speed", "cmd package compile -m speed -f " + p});
         // very last, and only when needed: Android restarts an app whose permission to install changes
         if (Build.VERSION.SDK_INT >= 26 && !c.getPackageManager().canRequestPackageInstalls()) {
@@ -354,7 +426,55 @@ final class Adb {
         return s.toArray(new String[0][]);
     }
 
+    /** Told how setup goes, on its own thread. */
+    interface Progress {
+        /** Step {@code i} of {@code n} (from 0) is about to run. */
+        void step(int i, int n, String name);
+
+        /** The last step makes Android restart Aura: whatever must outlive that is kept now. */
+        default void restarting(int ok, int n, List<String> failed) {
+        }
+
+        /** Finished: how many steps worked, and the names of those that didn't. */
+        void done(int ok, int n, List<String> failed);
+    }
+
+    /** Runs {@link #setup}'s steps one by one, off the main thread; a step that fails is named. */
+    static void runSetup(Context c, Progress p) {
+        final Context app = c.getApplicationContext();
+        final String[][] steps = setup(app);
+        new Thread(() -> {
+            int ok = 0;
+            List<String> failed = new ArrayList<>();
+            for (int i = 0; i < steps.length; i++) {
+                p.step(i, steps.length, steps[i][0]);
+                if (i == steps.length - 1 && steps[i][0].equals("Updates")) p.restarting(ok + 1, steps.length, failed);
+                List<String> out = run(app, steps[i][1]);
+                String o = out == null ? null : out.get(0);
+                // pm and settings say nothing when it works; the rest print Success; "already" is fine too
+                if (o != null && (!o.contains("Exception") && !o.contains("Error") || o.contains("already"))) ok++;
+                else failed.add(steps[i][0]);
+                if (out == null) break;
+            }
+            p.done(ok, steps.length, failed);
+        }, "adb-setup").start();
+    }
+
     /** Stops an app outright, as Android's own Force stop does. False when Aura can't. */
+    /** Types {@code text} into whatever field is focused on the TV via Android's input shell. */
+    static boolean type(Context c, String text) {
+        if (text == null || text.isEmpty() || !on(c)) return false;
+        StringBuilder sb = new StringBuilder("input text \"");
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == ' ') sb.append("%s");
+            else if (ch == '"' || ch == '\\' || ch == '$' || ch == '`' || ch == '!' || ch == ';') sb.append('\\').append(ch);
+            else if (ch >= 0x21 && ch <= 0x7e) sb.append(ch);
+        }
+        sb.append('"');
+        return run(c, sb.toString()) != null;
+    }
+
     static boolean forceStop(Context c, String pkg) {
         // a package name, and nothing a shell would read as more
         if (!pkg.matches("[A-Za-z0-9_.]+")) return false;

@@ -65,6 +65,13 @@ It always points to the newest version.
 
 **Open Aura.** It's in your apps now. A short welcome asks for a tile look and which extras you'd like, then offers **Make Aura your home**: say yes to Android's question and the Home button opens Aura from then on.
 
+On **Google TV** (an onn 4K box, a Chromecast) and Fire TV, the TV keeps Home for its own launcher whatever you choose. There the welcome adds **One more step**, three ways to hand Home to Aura:
+- **On this TV** (recommended): a checklist that ticks itself off. Turn on Developer options, then USB debugging, then *Connect* and *Always allow*. Aura switches everything on by itself. TVs with only *Wireless debugging* pair instead, with the code typed on your phone.
+- **From a computer**: the TV's address and two `adb` lines, and Aura finishes on its own.
+- **By hand**: Android's Accessibility page, where you switch Aura on.
+
+From then on Home opens Aura, from any app and after a restart.
+
 </td></tr>
 <tr><td><h3>5</h3></td><td>
 
@@ -73,7 +80,7 @@ It always points to the newest version.
 </td></tr>
 </table>
 
-New versions arrive in *Settings → Updates*. To go back, uninstall Aura from Android's settings and Home returns to the TV's own launcher.
+New versions arrive in *Settings → Updates*. To go back, choose *Settings → Remove Aura*: it hands Home, the screensaver and Block ads back to the TV, then Android asks to uninstall. (Once set up, Aura holds a standby permission that Android's own uninstall refuses to remove, so use this.)
 
 <br>
 
@@ -85,10 +92,14 @@ New versions arrive in *Settings → Updates*. To go back, uninstall Aura from A
 
 Your apps as frosted tiles in one of four looks (*Glass*, *Vivid*, *Midnight* or the apps' *Original* banners), over a photograph that follows the real sun outside: night skies after dark, golden hour at dusk, and Wikimedia's *Picture of the Day* every morning. Above them, three quiet widgets:
 - **Sky:** the sun's arc and the next sunrise or sunset;
-- **Smart Stack:** what you're partway through, new episodes and tonight's pick;
+- **Smart Stack:** what you're partway through, new episodes and tonight's pick, to your taste;
 - **Today:** time in apps, data used and free memory, turning into **Now Playing** while something plays.
 
-Hold <kbd>OK</kbd> on an app to move it, hide it, put it in a folder or uninstall it.
+Hold <kbd>OK</kbd> on an app to move it, hide it, put it in a folder or uninstall it. Folders take any name you type, or one of the suggestions.
+
+### Tonight's pick, your way
+
+*Settings → Tonight's pick* chooses the genres, how highly rated, and which years. Out of the box it picks top-rated shows from TVmaze, no account needed. Add your own free [TMDB](https://www.themoviedb.org/settings/api) key (type it, or paste it from your phone through a QR code) and it picks films too, what's trending this week, only what's on the streaming apps you have, or straight from your own TMDB watchlist. <kbd>OK</kbd> on a pick plays its trailer.
 
 ### Top Shelf
 
@@ -136,7 +147,7 @@ In *Settings → Wallpaper*: pick one, preview it, make Aura the TV's screensave
 <td align="center"><sub>Block ads, every filter measured from your TV</sub></td>
 </tr></table>
 
-Press <kbd>Menu</kbd>: Wi-Fi (with a speed test), Bluetooth, a sleep timer that fades the volume out, your HDMI inputs by their real names, picture and sound settings, a memory boost and standby.
+Press <kbd>Menu</kbd>: Wi-Fi (with a speed test), Bluetooth, a sleep timer that fades the volume out, your HDMI inputs by their real names, picture and sound settings, how much memory is free (<kbd>OK</kbd> opens recent apps to close what holds it) and standby. The sleep timer's first step is *when this ends*: the TV fades out after the film or episode you're watching.
 
 ### And a lot of small things
 
@@ -147,7 +158,12 @@ Press <kbd>Menu</kbd>: Wi-Fi (with a speed test), Bluetooth, a sleep timer that 
 | **From your phone** | Scan a QR code and send photos, GIFs or apps to the TV. No app, no cloud. |
 | **The Home button in apps** | Home twice opens recent apps right over the app you're in; hold Home for Control Center. |
 | **Remote buttons** | Give any spare button on the remote an app of your choice. |
-| **Profiles** | Everyone keeps their own app order, folders, tiles and widgets. |
+| **Profiles** | Everyone keeps their own app order, folders, tiles and widgets. A profile can be *for kids*: Settings, hiding and uninstalling then ask for the parents' PIN. |
+| **Find an app** | *Find an app* in the sidebar, or just type on a keyboard remote: matching apps appear as you type, hidden ones too. |
+| **New apps** | Apps installed since Aura came wear a small dot until you open them. |
+| **Your own tile art** | Hold <kbd>OK</kbd> on an app → *Change its picture*, and send any photo or poster from your phone. |
+| **Your setup, saved** | *Settings → Your setup* saves profiles, order, folders and choices to your phone, and brings them back after a reinstall or on another TV. |
+| **Light mode** | On slow TVs (about 1 GB of memory) Aura stops moving for nothing: no tilt, no glow following focus, the photo's drift barely redrawn. Auto, or forced in *Settings → Home screen*. |
 | **Always comes back** | If Aura ever keeps crashing, it restarts with its extras off rather than leaving you stuck. |
 
 <p align="center"><img src="docs/welcome.jpg" alt="The welcome: choose a look, choose your extras" width="92%"></p>
@@ -185,7 +201,13 @@ From 7.4, Aura appears in your apps like any other app and Downloader's *Open* b
 <summary><b>Home still opens the old launcher</b></summary>
 <br>
 
-Open Aura and choose *Settings → Home button*, or press <kbd>Home</kbd> and pick **Aura → Always**. Google TV keeps Home for its own launcher: there, *Settings → Set up on this TV → Switch everything on* makes Aura home, and *Home button in apps* lets Home bring you back to Aura from any app.
+Open Aura and choose *Settings → Home button*, or press <kbd>Home</kbd> and pick **Aura → Always**.
+
+Google TV (onn 4K, Chromecast, most new TVs) and Fire TV keep Home for their own launcher even after you choose another. On those, *Settings → Home button* opens Android's Accessibility page: choose **Aura** and switch it on. Aura then answers Home itself, from every app, and comes back up after a restart. Or let Aura do it: *Settings → Set up on this TV → Switch everything on*.
+
+If the switch is greyed out as a *restricted setting* (Android 13 and newer, for apps installed from a file), *Set up on this TV → Switch everything on* lifts it.
+
+One side effect of any accessibility service, Aura's included: a few apps (Prime Video on some TVs) keep their player controls on screen longer, as they would for a screen reader.
 </details>
 
 <details>
@@ -213,7 +235,7 @@ Some TVs keep certain buttons (Profile, a dedicated app button) for their own so
 <summary><b>What does Aura do with my data?</b></summary>
 <br>
 
-Nothing leaves the TV except what each feature fetches: your approximate city from your connection (GeoJS, unless you type one in) and the weather (Open-Meteo), photographs and screensaver clips (Wikimedia Commons), artworks (Art Institute of Chicago), tonight's pick (TVmaze), the speed test (Cloudflare) and updates (GitHub). The switcher's pictures of your apps stay in Aura's private storage and are deleted after two days or when you close the app. No analytics, no account.
+Nothing leaves the TV except what each feature fetches: your approximate city from your connection (GeoJS, unless you type one in) and the weather (Open-Meteo), photographs and screensaver clips (Wikimedia Commons), artworks (Art Institute of Chicago), tonight's pick (TVmaze, or TMDB with your own key: your key and TMDB sign-in stay on the TV), the speed test (Cloudflare) and updates (GitHub). The switcher's pictures of your apps stay in Aura's private storage and are deleted after two days or when you close the app. No analytics, no account.
 </details>
 
 <br>
@@ -273,7 +295,9 @@ Wikimedia Commons. Night sky: star positions from the XHIP Hipparcos compilation
 Francis 2012) and constellation figures after the IAU, both via
 [d3-celestial](https://github.com/ofrohn/d3-celestial) by Olaf Frohn (BSD-3-Clause); planets from
 NASA JPL's approximate Keplerian elements. Museum: artworks from the Art Institute of Chicago's
-open-access collection (public domain, CC0), via its public API. Live wind: weather data by
+open-access collection (public domain, CC0), via its public API. Tonight's pick: show data from
+[TVmaze](https://www.tvmaze.com) (CC BY-SA); with your own key, film and show data from
+[TMDB](https://www.themoviedb.org). This product uses the TMDB API but is not endorsed or certified by TMDB. Live wind: weather data by
 [Open-Meteo](https://open-meteo.com) (CC BY 4.0); coastlines and borders from Natural Earth (public
 domain). Type: [Inter](https://rsms.me/inter/) by Rasmus Andersson, SIL Open Font License.
 

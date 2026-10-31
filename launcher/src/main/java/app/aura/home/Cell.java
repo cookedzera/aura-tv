@@ -11,6 +11,8 @@ final class Cell extends LinearLayout {
     final Card card;
     final TextView label;
     final String tag;
+    /** What the tile was painted from: one painted from the same can be kept as the grid changes. */
+    String sig;
 
     Cell(Context c, Tiles.Painter painter, int color, String name, String tag, int wDp, int hDp) {
         super(c);

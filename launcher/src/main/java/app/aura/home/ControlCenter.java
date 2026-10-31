@@ -58,6 +58,12 @@ final class ControlCenter {
         void photoMode();
 
         void open(Intent intent, View from);
+
+        /** {@code then}, after the parents' PIN in a kids' profile. */
+        void guarded(Runnable then);
+
+        /** Recent apps, where apps holding memory are closed. */
+        void recents();
     }
 
     private static final int U = 84, G = 14;
@@ -66,10 +72,6 @@ final class ControlCenter {
     private static final int BLUE = 0xFF2F7BFF, ORANGE = 0xFFFF9F0A, GREEN = 0xFF30D158, VIOLET = 0xFF8E6CFF;
     private static final int MODULE = 0x1FFFFFFF;
     private static final int[] SLEEP_STEPS = {0, 15, 30, 60, 90, 120};
-    private static final Set<String> KEEP_ALIVE = new HashSet<>(Arrays.asList(
-            "android", "com.android.systemui", "com.android.bluetooth", "com.android.tv", "com.android.providers.tv",
-            "com.android.tv.settings", "com.google.android.gms", "com.google.android.gsf", "com.google.android.katniss",
-            "com.google.android.inputmethod.latin", "com.google.android.tv.globalkeyhandler"));
 
     final FrameLayout panel;
     private final Activity act;
@@ -78,6 +80,7 @@ final class ControlCenter {
     private final LinearLayout header;
     private final FrameLayout board;
     private final WifiSheet wifiSheet;
+    private final BtSheet btSheet;
     private final List<View> modules = new ArrayList<>(), focusables = new ArrayList<>();
     private final TextView time, date, info, phase, eventName, eventTime, other, todayValue, boostValue;
     private final TextView wifiCap, btCap, sleepCap, photoCap;
@@ -91,7 +94,7 @@ final class ControlCenter {
     private String segmentsSig;
     private final Pad pick;
     private final ImageView pickPoster;
-    private final TextView pickName, pickLine, pickAbout;
+    private final TextView pickName, pickLine, pickAbout, pickKicker;
     /** The pick prepared in the background for the next time the board opens. */
     private volatile Picks.Pick nextPick;
     private volatile android.graphics.Bitmap nextPoster;
@@ -133,7 +136,7 @@ final class ControlCenter {
         header.setClipChildren(false);
         header.setClipToPadding(false);
 
-        // Tonight's pick: a top-rated show from TVmaze; OK finds its trailer
+        // Tonight's pick: from TVmaze, or TMDB with your own key, to your taste; OK plays its trailer
         pick = new Pad(a, null, 18, 0f);
         pick.plainColor = MODULE;
         pick.focusScale = 1.04f;
@@ -155,6 +158,7 @@ final class ControlCenter {
         TextView pk = pick.tint(Ui.caps(a, 6.5f, 0xFFFFFFFF, 0.24f), 0.6f);
         pk.setShadowLayer(0, 0, 0, 0);
         pk.setText("TONIGHT'S PICK  ·  TVMAZE");
+        pickKicker = pk;
         pc.addView(pk, lp(0, 0));
         pickName = pick.tint(Ui.text(a, 15, Ui.heavy, 0xFFFFFFFF), 1f);
         pickName.setIncludeFontPadding(true);
@@ -204,6 +208,20 @@ final class ControlCenter {
         FrameLayout.LayoutParams wl = new FrameLayout.LayoutParams(Ui.dp(side), Ui.dp(side), Gravity.END | Gravity.CENTER_VERTICAL);
         wl.rightMargin = Ui.dp(96);
         panel.addView(wifiSheet, wl);
+        btSheet = new BtSheet(a, h.backdrop(), new BtSheet.Host() {
+            @Override
+            public void hud(int icon, String text) {
+                host.hud(icon, text);
+            }
+
+            @Override
+            public void openSettings(Intent intent) {
+                launch(intent, bt);
+            }
+        });
+        FrameLayout.LayoutParams btl = new FrameLayout.LayoutParams(Ui.dp(side), Ui.dp(side), Gravity.END | Gravity.CENTER_VERTICAL);
+        btl.rightMargin = Ui.dp(96);
+        panel.addView(btSheet, btl);
 
         // 2x2: the round toggles
         FrameLayout connect = place(module(a), 0, 0, 2, 2);
@@ -223,6 +241,8 @@ final class ControlCenter {
             connect.addView(rounds[k], rl);
             caps[k] = Ui.text(a, 10, Ui.medium, 0xD9FFFFFF);
             caps[k].setGravity(Gravity.CENTER);
+            caps[k].setEllipsize(android.text.TextUtils.TruncateAt.END);
+            caps[k].setPadding(Ui.dp(4), 0, Ui.dp(4), 0);
             FrameLayout.LayoutParams cl = new FrameLayout.LayoutParams(Ui.dp(half), ViewGroup.LayoutParams.WRAP_CONTENT);
             cl.leftMargin = Ui.dp(x);
             cl.topMargin = Ui.dp(y + 75);
@@ -276,7 +296,8 @@ final class ControlCenter {
         picture = place(button(a, R.drawable.ic_picture, "Picture"), 2, 2, 1, 1);
         sound = place(button(a, R.drawable.ic_volume, "Sound"), 3, 2, 1, 1);
 
-        // 1x1: memory, with a ring
+        // 1x1: memory, with a ring; OK shows recent apps, where they're closed (a "boost" that kills
+        // apps from a launcher is refused by Android 11 and later anyway)
         boost = place(new Pad(a, null, 26, 0f), 0, 3, 1, 1);
         boost.plainColor = MODULE;
         boost.focusScale = 1.06f;
@@ -307,7 +328,7 @@ final class ControlCenter {
         focusables.addAll(Arrays.asList(picture, sound, boost, settings, standby, pick));
 
         wifi.onClick = this::showWifi;
-        bt.onClick = () -> launch(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS), bt);
+        bt.onClick = this::showBt;
         sleep.onClick = this::cycleSleep;
         photo.onClick = () -> {
             host.closeCc(true);
@@ -315,9 +336,10 @@ final class ControlCenter {
         };
         picture.onClick = () -> launch(new Intent("android.settings.DISPLAY_SETTINGS"), picture);
         sound.onClick = () -> launch(new Intent("android.settings.SOUND_SETUP"), sound);
-        settings.onClick = () -> launch(new Intent(Settings.ACTION_SETTINGS), settings);
+        settings.onClick = () -> host.guarded(() -> launch(new Intent(Settings.ACTION_SETTINGS), settings));
         standby.onClick = this::standby;
-        boost.onClick = this::boost;
+        // what's holding memory is best seen, and closed, in recent apps
+        boost.onClick = host::recents;
         panel.setVisibility(View.GONE);
     }
 
@@ -416,6 +438,7 @@ final class ControlCenter {
 
     void close(boolean animate, Runnable done) {
         if (wifiSheet.isOpen()) hideWifi(false);
+        if (btSheet.isOpen()) hideBt(false);
         panel.animate().alpha(0f).setStartDelay(0).setDuration(animate ? 240 : 0).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     panel.setVisibility(View.GONE);
@@ -441,7 +464,26 @@ final class ControlCenter {
     }
 
     /** Back steps out of the Wi-Fi sheet before it closes Control Center. Returns true if it was used. */
+    private void showBt() {
+        board.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
+                .withEndAction(() -> board.setVisibility(View.INVISIBLE)).start();
+        btSheet.open();
+    }
+
+    private void hideBt(boolean focusToggle) {
+        btSheet.close();
+        board.animate().cancel();
+        board.setVisibility(View.VISIBLE);
+        board.setAlpha(1f);
+        refresh();
+        if (focusToggle) bt.requestFocus();
+    }
+
     boolean back() {
+        if (btSheet.isOpen()) {
+            hideBt(true);
+            return true;
+        }
         if (!wifiSheet.isOpen()) return false;
         if (!wifiSheet.back()) hideWifi(true);
         return true;
@@ -450,7 +492,7 @@ final class ControlCenter {
     /** Arrow keys move between modules by geometry; the volume slider keeps up/down for itself. */
     boolean handleKey(int code, View focused) {
         // inside the Wi-Fi sheet the list scrolls and focuses itself
-        if (wifiSheet.isOpen()) return false;
+        if (wifiSheet.isOpen() || btSheet.isOpen()) return false;
         int dir;
         switch (code) {
             case KeyEvent.KEYCODE_DPAD_LEFT:
@@ -491,7 +533,7 @@ final class ControlCenter {
         BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
         boolean btOn = ba != null && ba.isEnabled();
         bt.setOn(btOn);
-        btCap.setText(btOn ? "Bluetooth" : "Bluetooth off");
+        btCap.setText(btOn ? btSheet.connectedName() : "Bluetooth off");
         refreshSleep();
         refreshMemory();
         refreshDay();
@@ -508,7 +550,7 @@ final class ControlCenter {
     private void refreshSleep() {
         long left = Power.sleepLeftMs(act);
         sleep.setOn(left > 0);
-        sleepCap.setText(left > 0 ? "Sleep in " + duration((int) Math.ceil(left / 60_000.0)) : "Sleep timer");
+        sleepCap.setText(left <= 0 ? "Sleep timer" : (Power.atEnd(act) ? "At the end · " : "Sleep in ") + duration((int) Math.ceil(left / 60_000.0)));
     }
 
     private void refreshMemory() {
@@ -585,6 +627,7 @@ final class ControlCenter {
         pickPoster.setImageBitmap(nextPoster);
         pickName.setText(p.name);
         pickLine.setText(p.line);
+        pickKicker.setText("TONIGHT'S PICK  ·  " + p.src.toUpperCase(Locale.ROOT));
         pickAbout.setText(p.about);
         pickAbout.setVisibility(p.about.isEmpty() ? View.GONE : View.VISIBLE);
         pick.setVisibility(View.VISIBLE);
@@ -595,10 +638,15 @@ final class ControlCenter {
     /** Its trailer on YouTube, or the TV's own search when YouTube isn't installed. */
     private void watchTrailer() {
         if (shownPick == null) return;
-        Intent yt = new Intent(Intent.ACTION_SEARCH).setPackage("com.google.android.youtube.tv")
-                .putExtra(android.app.SearchManager.QUERY, shownPick.query);
-        Intent any = new Intent("android.search.action.GLOBAL_SEARCH").putExtra(android.app.SearchManager.QUERY, shownPick.query);
-        launch(yt.resolveActivity(act.getPackageManager()) != null ? yt : any, pick);
+        launch(Picks.watch(act, shownPick), pick);
+    }
+
+    /** The pool was made again for a new taste (or switched off): the next opening shows a pick from it. */
+    void picksChanged() {
+        nextPick = null;
+        nextPoster = null;
+        shownPick = null;
+        if (!Prefs.on(act, Prefs.PICKS)) pick.setVisibility(View.GONE);
     }
 
     private static String compact(long ms) {
@@ -680,11 +728,24 @@ final class ControlCenter {
 
     private void standby() {
         host.closeCc(false);
-        if (!Power.screenOff(act)) host.hud(R.drawable.ic_info, "Standby needs the Aura admin. Run setup again");
+        if (!Power.screenOff(act)) host.hud(R.drawable.ic_info, "Standby needs setup · Settings, Set up on this TV");
     }
 
     private void cycleSleep() {
         long left = Power.sleepLeftMs(act);
+        // with no way to switch the TV off, a timer would only fade the sound out and leave it on
+        if (left <= 0 && !Power.canSleep(act)) {
+            host.hud(R.drawable.ic_info, "The sleep timer needs setup · Settings, Set up on this TV");
+            return;
+        }
+        // first, when something with an end is playing: sleep when it ends
+        if (left <= 0 && Power.setSleepAtEnd(act)) {
+            refreshSleep();
+            host.hud(R.drawable.ic_moon, "TV sleeps when this ends · in " + duration((int) Math.ceil(Power.sleepLeftMs(act) / 60_000.0)));
+            return;
+        }
+        // from "when this ends", on to the usual steps
+        if (Power.atEnd(act)) left = 0;
         int cur = (int) Math.ceil(left / 60_000.0), next = 0;
         for (int step : SLEEP_STEPS) {
             if (step > cur) {
@@ -701,81 +762,6 @@ final class ControlCenter {
     private static String duration(int min) {
         if (min < 60) return min + " min";
         return min % 60 == 0 ? (min / 60) + " h" : (min / 60) + " h " + (min % 60) + " min";
-    }
-
-    private void boost() {
-        final ActivityManager am = Compat.svc(act, ActivityManager.class);
-        final long before = freeBytes();
-        boostValue.setText("Freeing…");
-        new Thread(() -> {
-            // who holds the memory before freeing it, so the result can name them
-            List<Ram.Use> heavy = Reports.allowed(act) ? Ram.heaviest(act) : new ArrayList<>();
-            for (ApplicationInfo ai : act.getPackageManager().getInstalledApplications(0)) {
-                String p = ai.packageName;
-                if (KEEP_ALIVE.contains(p) || p.startsWith("com.realtek") || p.equals(act.getPackageName())) continue;
-                am.killBackgroundProcesses(p);
-            }
-            SystemClock.sleep(900);
-            final long freed = Math.max(0, freeBytes() - before) / (1024 * 1024);
-            final String who = heaviestFreed(heavy);
-            // some TVs (Android 11 here) refuse to close other apps for a launcher; then say who's
-            // holding memory instead of claiming a saving that didn't happen
-            final String holders = who == null ? holders(heavy) : null;
-            act.runOnUiThread(() -> {
-                refreshMemory();
-                String msg = who != null ? "Freed " + freed + " MB  ·  " + who
-                        : holders != null ? holders + " · the TV frees them when it needs room"
-                        : "Memory is already lean";
-                host.hud(R.drawable.ic_bolt, msg);
-            });
-        }, "boost").start();
-    }
-
-    /**
-     * "Netflix was holding 80 MB": the biggest app whose memory went, by its own name. An app
-     * that restarted a small helper still counts if most of its memory was given back.
-     */
-    private String heaviestFreed(List<Ram.Use> before) {
-        if (before.isEmpty()) return null;
-        java.util.Map<String, Long> now = new java.util.HashMap<>();
-        for (Ram.Use u : Ram.heaviest(act)) now.put(u.pkg, u.kb);
-        for (Ram.Use u : before) {
-            long left = now.containsKey(u.pkg) ? now.get(u.pkg) : 0;
-            if (u.kb - left < 20 * 1024 || left > u.kb / 2 || u.pkg.equals(act.getPackageName())) continue;
-            try {
-                CharSequence name = act.getPackageManager().getApplicationLabel(act.getPackageManager().getApplicationInfo(u.pkg, 0));
-                return name + " was holding " + ((u.kb - left) / 1024) + " MB";
-            } catch (android.content.pm.PackageManager.NameNotFoundException ignored) {
-                // a system process rather than an app: look further down the list
-            }
-        }
-        return null;
-    }
-
-    /** "Netflix 160 MB, Sony LIV 90 MB": the two biggest apps waiting in the background, by name. */
-    private String holders(List<Ram.Use> heavy) {
-        StringBuilder b = new StringBuilder();
-        int n = 0;
-        android.content.pm.PackageManager pm = act.getPackageManager();
-        for (Ram.Use u : heavy) {
-            if (n >= 2 || u.kb < 30 * 1024) break;
-            if (u.pkg.equals(act.getPackageName()) || KEEP_ALIVE.contains(u.pkg)) continue;
-            try {
-                android.content.pm.ApplicationInfo ai = pm.getApplicationInfo(u.pkg, 0);
-                // the apps you open, not the TV's own services
-                if ((ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0 && pm.getLeanbackLaunchIntentForPackage(u.pkg) == null) continue;
-                b.append(n == 0 ? "" : ", ").append(pm.getApplicationLabel(ai)).append(' ').append(u.kb / 1024).append(" MB");
-                n++;
-            } catch (android.content.pm.PackageManager.NameNotFoundException ignored) {
-            }
-        }
-        return n == 0 ? null : b.toString();
-    }
-
-    private long freeBytes() {
-        ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
-        Compat.svc(act, ActivityManager.class).getMemoryInfo(mi);
-        return mi.availMem;
     }
 
     // ---- widgets -----------------------------------------------------------------------------

@@ -720,6 +720,19 @@ final class Switcher extends FrameLayout {
         stamps.put(pkg, stamp);
     }
 
+    /**
+     * The screen {@code pkg} was left on arrived after the deck opened (it's shrunk and checked
+     * off the main thread, which can take longer than Home twice): its card shows it now.
+     */
+    void repaint(String pkg, Tiles.Painter face) {
+        for (int i = 0; i < apps.size(); i++) {
+            if (!apps.get(i).pkg.equals(pkg)) continue;
+            card(i).repaint(face);
+            // painted from this picture: the next opening needn't make the card again
+            madeStamp.put(pkg, stamps.get(pkg));
+        }
+    }
+
     /** While the home screen idles: the cards for {@code recent} made and painted, ready for Home twice. */
     void prepare(Map<String, Long> recent, Map<String, Long> faces) {
         if (isOpen()) return;
@@ -737,6 +750,7 @@ final class Switcher extends FrameLayout {
 
     /** The tile look changed: cards are made again in the new one. */
     void forget() {
+        removeCallbacks(paintNext);
         made.clear();
         toPaint.clear();
     }

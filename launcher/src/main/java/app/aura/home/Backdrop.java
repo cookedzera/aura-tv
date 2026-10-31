@@ -219,6 +219,9 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         if (on) intro = 0f;
     }
 
+    /** Light mode: the drift redrawn twice a second; slow enough that its steps can't be seen. */
+    static boolean calm;
+
     void start() {
         if (running) return;
         running = true;
@@ -344,7 +347,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
                 || now - defocusStart < defocusMs;
         // the drift alone moves ~1px/s, so a quarter of the rate is visually identical and spares
         // the CPU and GPU on a TV that's also decoding video
-        if (busy || (++frame % 4) == 0) {
+        if (busy || (++frame % (calm ? 30 : 4)) == 0) {
             step(now);
             invalidate();
             for (int i = 0; i < ticks.size(); i++) ticks.get(i).onTick(now);
@@ -741,9 +744,11 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     static Bitmap blur(Bitmap src) {
         Bitmap quarter = Bitmap.createScaledBitmap(src, Math.max(1, src.getWidth() / 4), Math.max(1, src.getHeight() / 4), true);
         Bitmap small = Bitmap.createScaledBitmap(quarter, 128, 72, true);
+        if (quarter != src && quarter != small) quarter.recycle();
         int w = small.getWidth(), h = small.getHeight();
         int[] px = new int[w * h], tmp = new int[w * h];
         small.getPixels(px, 0, w, 0, 0, w, h);
+        if (small != src) small.recycle();
         for (int pass = 0; pass < 3; pass++) {
             boxBlur(px, tmp, w, h, 4, true);
             boxBlur(tmp, px, w, h, 4, false);
@@ -757,6 +762,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         int w = small.getWidth(), h = small.getHeight();
         int[] px = new int[w * h], tmp = new int[w * h];
         small.getPixels(px, 0, w, 0, 0, w, h);
+        if (small != src) small.recycle();
         for (int pass = 0; pass < 3; pass++) {
             boxBlur(px, tmp, w, h, 1, true);
             boxBlur(tmp, px, w, h, 1, false);

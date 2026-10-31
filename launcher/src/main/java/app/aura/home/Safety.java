@@ -85,7 +85,7 @@ final class Safety {
      * The TV's own home screen: a system app answering Home, other than Aura and any fallback.
      * None (the factory launcher was switched off): Home stays with Aura, safe mode is all there is.
      */
-    private static String original(Context c) {
+    static String original(Context c) {
         PackageManager pm = c.getPackageManager();
         ResolveInfo settings = pm.resolveActivity(new Intent(Settings.ACTION_SETTINGS), PackageManager.MATCH_DEFAULT_ONLY);
         String skip = settings != null && settings.activityInfo != null ? settings.activityInfo.packageName : "";

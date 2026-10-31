@@ -22,7 +22,7 @@ import android.view.animation.LinearInterpolator;
  * then the sun flares and the screen dissolves into the photograph.
  */
 final class Splash extends View {
-    private static final String WORD = "Aura", CREDIT = "coded by iravi :)";
+    private static final String WORD = "Aura", CREDIT = "cookedzera";
     /** How long the credit holds once loading has landed, before the dissolve. */
     private static final long CREDIT_MS = 1500;
 

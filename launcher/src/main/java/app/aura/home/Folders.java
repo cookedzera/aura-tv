@@ -32,7 +32,7 @@ final class Folders {
         }
     }
 
-    /** Names offered for a new folder, so making one needs no keyboard. */
+    /** Names offered for a folder, so naming one needs no keyboard; any other can be typed. */
     static final String[] NAMES = {"Movies & Shows", "Music", "Kids", "Sports", "News", "Games", "Tools", "Favourites"};
     private static final String KEY = "folders";
 
@@ -108,14 +108,25 @@ final class Folders {
         save(c, all);
     }
 
-    /** The next of the preset names, so OK on Rename steps through them. */
-    static void rename(Context c, String id) {
+    /** Any name you like (typed with the keyboard, or one of the suggestions). */
+    static void rename(Context c, String id, String name) {
         Map<String, Folder> all = all(c);
         Folder f = all.get(id);
-        if (f == null) return;
-        int at = java.util.Arrays.asList(NAMES).indexOf(f.name);
-        f.name = NAMES[(at + 1) % NAMES.length];
+        if (f == null || name == null || name.trim().isEmpty()) return;
+        f.name = name.trim();
         save(c, all);
+    }
+
+    /** The preset names no folder uses yet, to offer as one-press names. */
+    static List<String> suggestions(Context c) {
+        List<String> out = new ArrayList<>();
+        Map<String, Folder> all = all(c);
+        for (String n : NAMES) {
+            boolean used = false;
+            for (Folder f : all.values()) if (f.name.equalsIgnoreCase(n)) used = true;
+            if (!used) out.add(n);
+        }
+        return out;
     }
 
     /** Every app back on the grid. */

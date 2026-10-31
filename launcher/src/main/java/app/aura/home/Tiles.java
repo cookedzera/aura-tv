@@ -25,7 +25,28 @@ final class Tiles {
     /** Lifted logos by package and size; null marks a banner that had nothing to lift. */
     private static final Map<String, Bitmap> LOGOS = new HashMap<>();
 
+    static void trim() {
+        LOGOS.clear();
+    }
+
     private Tiles() { }
+
+    /** Your own picture for an app (see {@link Art}), filling the tile in every look. */
+    static Painter picture(Bitmap b) {
+        return (c, w, h) -> {
+            float k = Math.max(w / (float) b.getWidth(), h / (float) b.getHeight());
+            android.graphics.Matrix m = new android.graphics.Matrix();
+            m.setScale(k, k);
+            m.postTranslate((w - b.getWidth() * k) / 2f, (h - b.getHeight() * k) / 2f);
+            c.drawBitmap(b, m, new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG));
+        };
+    }
+
+    /** An app's tile art in a look ({@link Prefs#TILE_STYLES}); your own picture, where there is one, in any look. */
+    static Painter forStyle(AppRepo.App a, String style) {
+        if (a.art != null) return picture(a.art);
+        return style.equals("glass") ? glass(a) : style.equals("vivid") ? vivid(a) : style.equals("midnight") ? midnight(a) : app(a);
+    }
 
     static Painter app(AppRepo.App a) {
         if (a.banner != null) return (c, w, h) -> banner(c, a.banner, w, h);

@@ -25,6 +25,7 @@ import java.net.Socket;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Locale;
@@ -51,7 +52,54 @@ final class Drop {
 
         /** An app arrived and Android is asking, on the TV, whether to install it. */
         void onApk(String name);
+
+        /** Text typed on the phone's key page (a TMDB key): the TV checks and keeps it. */
+        default void onKey(String text) {
+        }
+
+        /** A saved setup was brought back from the phone: {@code count} settings. */
+        default void onRestored(int count) {
+        }
+
+        /** A picture for an app's tile arrived and was kept. */
+        default void onArt(String pkg) {
+        }
+
+        /** The 6-digit code from the TV's wireless debugging, typed on the phone. */
+        /** Text typed on the phone's "Type on the TV" field; returns true when Aura handled it directly. */
+        default boolean onType(String text) {
+            return false;
+        }
+
+        default void onPairCode(String code) {
+        }
     }
+
+    /** A listener for the small pages (a key, a backup, a tile's picture): the photo calls do nothing. */
+    static class Quiet implements Listener {
+        @Override
+        public void onProgress(String name, long done, long total, int index, int count) {
+        }
+
+        @Override
+        public void onAdded(JSONObject entry, int index, int count) {
+        }
+
+        @Override
+        public void onFailed(String name, String why) {
+        }
+
+        @Override
+        public void onChanged() {
+        }
+
+        @Override
+        public void onApk(String name) {
+        }
+    }
+
+    /** The app whose tile the art page is for, while it's open. */
+    volatile String artFor;
 
     private static final int PORT = 8686;
     private static final long MAX_APK = 500L << 20;
@@ -160,6 +208,66 @@ final class Drop {
                 boolean ok = Mine.remove(app, rest.substring(5));
                 if (ok) main.post(listener::onChanged);
                 send(s, ok ? 200 : 404, "application/json", ("{\"ok\":" + ok + "}").getBytes(StandardCharsets.UTF_8));
+            } else if (rest.equals("/key")) {
+                if (method.equals("POST")) {
+                    String text = new String(body(in, head, 4096), StandardCharsets.UTF_8).trim();
+                    main.post(() -> listener.onKey(text));
+                    send(s, 200, "application/json", "{\"ok\":true}".getBytes(StandardCharsets.UTF_8));
+                } else {
+                    send(s, 200, "text/html; charset=utf-8", KEY_PAGE.getBytes(StandardCharsets.UTF_8));
+                }
+            } else if (rest.equals("/pair")) {
+                if (method.equals("POST")) {
+                    String code = new String(body(in, head, 64), StandardCharsets.UTF_8).replaceAll("[^0-9]", "");
+                    boolean ok = code.length() == 6;
+                    if (ok) main.post(() -> listener.onPairCode(code));
+                    send(s, 200, "application/json", ("{\"ok\":" + ok + "}").getBytes(StandardCharsets.UTF_8));
+                } else {
+                    send(s, 200, "text/html; charset=utf-8", page("The pairing code", "On the TV: Developer options, Wireless debugging, Pair device with pairing code. Leave that open, and type the six digits it shows here.",
+                            "<input id=\"k\" inputmode=\"numeric\" autocomplete=\"one-time-code\" maxlength=\"6\" placeholder=\"123456\" style=\"width:100%;box-sizing:border-box;font:600 34px/1 ui-monospace,monospace;"
+                                    + "letter-spacing:.3em;text-align:center;padding:16px;border-radius:18px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.07);color:#fff\">"
+                                    + "<button class=\"b\" id=\"b\" style=\"border:0\">Pair</button>",
+                            "b.onclick=async()=>{const v=k.value.replace(/[^0-9]/g,'');if(v.length!=6){s.textContent='Six digits, as the TV shows them.';return}"
+                                    + "s.textContent='Pairing… look at the TV.';try{const r=await fetch('pair',{method:'POST',body:v});const j=await r.json();"
+                                    + "s.textContent=j.ok?'Sent. The TV takes it from here.':'Six digits, as the TV shows them.'}catch(e){s.textContent='Could not reach the TV.'}}"));
+                }
+            } else if (rest.equals("/backup")) {
+                send(s, 200, "text/html; charset=utf-8", page("Your Aura setup", "Save a copy of your profiles, app order, folders, tiles and choices to this phone, or bring one back. Photos stay where they are.",
+                        "<a class=\"b\" href=\"backup.json\" download=\"aura-setup.json\">Save a copy</a>"
+                                + "<label class=\"b ghost\">Bring one back<input id=\"f\" type=\"file\" accept=\".json,application/json\" hidden></label>",
+                        "f.onchange=async()=>{const x=f.files[0];if(!x)return;s.textContent='Sending…';try{const r=await fetch('restore',{method:'POST',body:await x.text()});"
+                                + "const j=await r.json();s.textContent=j.ok?'Back on the TV: '+j.count+' settings. Aura is starting again.':'That file is not an Aura setup.'}catch(e){s.textContent='Could not reach the TV.'}}"));
+            } else if (rest.equals("/backup.json")) {
+                send(s, 200, "application/json", Backup.export(app).getBytes(StandardCharsets.UTF_8),
+                        "Content-Disposition: attachment; filename=\"aura-setup.json\"\r\n");
+            } else if (method.equals("POST") && rest.equals("/restore")) {
+                int n;
+                try {
+                    n = Backup.restore(app, new String(body(in, head, 2 << 20), StandardCharsets.UTF_8));
+                } catch (JSONException e) {
+                    n = -1;
+                }
+                send(s, 200, "application/json", ("{\"ok\":" + (n >= 0) + ",\"count\":" + Math.max(n, 0) + "}").getBytes(StandardCharsets.UTF_8));
+                final int count = n;
+                if (count >= 0) main.postDelayed(() -> listener.onRestored(count), 600);
+            } else if (rest.equals("/art")) {
+                String pkg = artFor;
+                if (pkg == null) {
+                    send(s, 404, "text/plain", new byte[0]);
+                } else if (method.equals("POST")) {
+                    boolean ok = Art.save(app, pkg, body(in, head, 25 << 20));
+                    if (ok) main.post(() -> listener.onArt(pkg));
+                    send(s, 200, "application/json", ("{\"ok\":" + ok + "}").getBytes(StandardCharsets.UTF_8));
+                } else {
+                    send(s, 200, "text/html; charset=utf-8", page("A picture for its tile", "Choose a photo or a banner: it's cropped to fit the tile, wide like a TV.",
+                            "<label class=\"b\">Choose a picture<input id=\"f\" type=\"file\" accept=\"image/*\" hidden></label>",
+                            "f.onchange=async()=>{const x=f.files[0];if(!x)return;s.textContent='Sending…';try{const r=await fetch('art',{method:'POST',body:x});"
+                                    + "const j=await r.json();s.textContent=j.ok?'On the TV now.':'The TV could not read that picture.'}catch(e){s.textContent='Could not reach the TV.'}}"));
+                }
+            } else if (method.equals("POST") && rest.equals("/type")) {
+                String text = new String(body(in, head, 4096), StandardCharsets.UTF_8).trim();
+                boolean ok = !text.isEmpty() && typeToTv(text);
+                send(s, 200, "application/json", ("{\"ok\":" + ok + "}").getBytes(StandardCharsets.UTF_8));
             } else if (method.equals("POST") && rest.equals("/only")) {
                 Prefs.set(app, Prefs.MINE_ONLY, "1".equals(args.get("on")));
                 main.post(listener::onChanged);
@@ -172,6 +280,85 @@ final class Drop {
             close(s);
         }
     }
+
+    /** A short request body, up to {@code max} bytes. */
+    /** Routes text typed on the phone to Aura's active field/search first, then to Android's ADB input shell. */
+    private boolean typeToTv(String text) {
+        final boolean[] handled = new boolean[1];
+        final Object lock = new Object();
+        main.post(() -> {
+            try {
+                handled[0] = listener.onType(text);
+            } finally {
+                synchronized (lock) {
+                    lock.notifyAll();
+                }
+            }
+        });
+        synchronized (lock) {
+            try {
+                lock.wait(1500);
+            } catch (InterruptedException ignored) {
+            }
+        }
+        return handled[0] || Adb.type(app, text);
+    }
+
+    private static byte[] body(InputStream in, Map<String, String> head, int max) throws IOException {
+        int len;
+        try {
+            len = Integer.parseInt(head.containsKey("content-length") ? head.get("content-length") : "0");
+        } catch (NumberFormatException e) {
+            len = 0;
+        }
+        len = Math.max(0, Math.min(len, max));
+        byte[] b = new byte[len];
+        int done = 0;
+        while (done < len) {
+            int n = in.read(b, done, len - done);
+            if (n < 0) break;
+            done += n;
+        }
+        return done == len ? b : Arrays.copyOf(b, done);
+    }
+
+    /** A small page for the phone in Aura's look: a title, a line, its buttons, a status line and a script. */
+    private static byte[] page(String title, String lede, String buttons, String script) {
+        return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+                + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"theme-color\" content=\"#070a12\">"
+                + "<title>Aura</title><style>"
+                + "body{margin:0;min-height:100vh;padding:32px 18px;box-sizing:border-box;background:radial-gradient(120% 60% at 80% -10%,rgba(255,166,92,.22),transparent 60%),#070a12;"
+                + "color:#fff;font:16px/1.45 -apple-system,BlinkMacSystemFont,Inter,'Segoe UI',Roboto,system-ui,sans-serif}"
+                + "main{max-width:520px;margin:0 auto}small{color:rgba(255,255,255,.62);font-weight:700;letter-spacing:.28em;text-transform:uppercase;font-size:12px}"
+                + "h1{font-size:36px;line-height:1.05;letter-spacing:-.03em;margin:16px 0 10px}p{color:rgba(255,255,255,.62);margin:0 0 22px}"
+                + ".b{display:block;box-sizing:border-box;text-align:center;margin-top:12px;width:100%;padding:18px;border-radius:22px;font-weight:750;font-size:17px;"
+                + "color:#1b0f05;text-decoration:none;background:linear-gradient(135deg,#ffc27a,#ff8c5a);cursor:pointer}"
+                + ".ghost{color:#fff;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18)}#s{margin-top:18px;min-height:1.4em;color:rgba(255,255,255,.75)}"
+                + "</style></head><body><main><small>Aura</small><h1>" + title + "</h1><p>" + lede + "</p>" + buttons
+                + "<div id=\"s\"></div></main><script>" + script + "</script></body></html>").getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** The phone's page for a TMDB key: paste it (copied from TMDB's own settings page), send it to the TV. */
+    private static final String KEY_PAGE = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"theme-color\" content=\"#070a12\">"
+            + "<title>Aura · TMDB key</title><style>"
+            + "body{margin:0;min-height:100vh;padding:32px 18px;box-sizing:border-box;background:radial-gradient(120% 60% at 80% -10%,rgba(255,166,92,.22),transparent 60%),#070a12;"
+            + "color:#fff;font:16px/1.45 -apple-system,BlinkMacSystemFont,Inter,'Segoe UI',Roboto,system-ui,sans-serif}"
+            + "main{max-width:520px;margin:0 auto}small{color:rgba(255,255,255,.62);font-weight:700;letter-spacing:.28em;text-transform:uppercase;font-size:12px}"
+            + "h1{font-size:36px;line-height:1.05;letter-spacing:-.03em;margin:16px 0 10px}p{color:rgba(255,255,255,.62);margin:0 0 20px}a{color:#ffc27a}"
+            + "textarea{width:100%;box-sizing:border-box;min-height:110px;padding:14px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.18);"
+            + "background:rgba(255,255,255,.07);color:#fff;font:15px/1.4 ui-monospace,Menlo,Consolas,monospace;word-break:break-all;resize:vertical}"
+            + "button{margin-top:14px;width:100%;padding:18px;border:0;border-radius:22px;font-weight:750;font-size:17px;color:#1b0f05;"
+            + "background:linear-gradient(135deg,#ffc27a,#ff8c5a)}#s{margin-top:16px;min-height:1.4em;color:rgba(255,255,255,.75)}</style></head>"
+            + "<body><main><small>Aura</small><h1>Your TMDB key</h1>"
+            + "<p>On <a href=\"https://www.themoviedb.org/settings/api\" target=\"_blank\" rel=\"noopener\">themoviedb.org → Settings → API</a> "
+            + "(a free account), copy the <b>API Key</b> or the <b>API Read Access Token</b> and paste it here.</p>"
+            + "<textarea id=\"k\" autocomplete=\"off\" autocapitalize=\"off\" spellcheck=\"false\" placeholder=\"Paste your key\"></textarea>"
+            + "<button id=\"b\">Send to the TV</button><div id=\"s\"></div></main><script>"
+            + "b.onclick=async()=>{const v=k.value.trim();if(!v){s.textContent='Paste the key first.';return}"
+            + "s.textContent='Sending…';try{const r=await fetch(location.pathname,{method:'POST',body:v});"
+            + "s.textContent=r.ok?'Sent. The TV checks it now: look at the screen.':'The TV did not take it. Try again.'}"
+            + "catch(e){s.textContent='Could not reach the TV. Same Wi-Fi?'}}</script></body></html>";
 
     private void upload(Socket s, InputStream in, Map<String, String> head, Map<String, String> args)
             throws IOException, JSONException {

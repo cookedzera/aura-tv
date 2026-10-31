@@ -43,6 +43,9 @@
   .field input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--ink); font: inherit;
     padding: 12px 0; }
   .field input::placeholder { color: var(--faint); }
+  .field button { background: rgba(255,255,255,.14); color: var(--ink); border: 0; border-radius: 13px;
+    padding: 10px 16px; font: 600 14px/1 inherit; cursor: pointer; flex: none; }
+  .field button:active { background: rgba(255,255,255,.24); }
   .hint { color: var(--faint); font-size: 13px; margin: 10px 4px 0; }
   h2 { font-size: 12px; letter-spacing: .24em; text-transform: uppercase; color: var(--faint); margin: 34px 4px 12px;
     font-weight: 700; display: flex; justify-content: space-between; align-items: baseline; }
@@ -100,6 +103,12 @@
   </label>
   <div class="field"><input id="title" maxlength="60" placeholder="Add a title (optional)" autocomplete="off"></div>
   <p class="hint">Portrait shots are framed whole on a soft blur. GIFs play as they are. Up to 40 MB each.</p>
+
+  <h2><span>Type on the TV</span><span id="tstat"></span></h2>
+  <form class="field" id="tform">
+    <input id="tbox" maxlength="200" placeholder="Find an app, or type into a field on the TV" autocomplete="off">
+    <button type="submit">Send</button>
+  </form>
 
   <h2 id="qh" hidden>Sending</h2>
   <div class="queue" id="queue"></div>
@@ -200,6 +209,21 @@ $('only').onclick = async () => {
   const on = !$('only').classList.contains('on');
   $('only').classList.toggle('on', on);
   await fetch(base + '/only?on=' + (on ? 1 : 0), {method: 'POST'});
+};
+
+$('tform').onsubmit = async e => {
+  e.preventDefault();
+  const v = $('tbox').value.trim();
+  if (!v) return;
+  $('tstat').textContent = 'Sending…';
+  try {
+    const r = await fetch(base + '/type', {method: 'POST', body: v});
+    const j = await r.json();
+    $('tstat').textContent = j.ok ? 'Sent to the TV' : 'Focus a text field on the TV first';
+    if (j.ok) $('tbox').value = '';
+  } catch (err) {
+    $('tstat').textContent = 'Lost the TV';
+  }
 };
 
 refresh();

@@ -28,7 +28,9 @@ import java.util.Random;
  * The first time Aura opens on a TV: a short welcome on frosted glass over the photograph. A look
  * for the tiles, shown with your own apps; then the features, each with a small live preview, on
  * or off; then three things worth knowing. Every choice applies at once and can be changed later
- * in Settings. Built only when shown, and let go of when done.
+ * in Settings. Where Android keeps Home for its own launcher (Google TV, Fire TV), two more pages
+ * hand it to Aura: set up on the TV itself through USB debugging, or from a computer. Built only
+ * when shown, and let go of when done.
  */
 final class Welcome extends FrameLayout {
     interface Host {
@@ -39,8 +41,8 @@ final class Welcome extends FrameLayout {
 
         void done();
 
-        /** This TV can't be asked: say how to choose Aura by hand. */
-        void homeHint();
+        /** What happened when asked to make Aura home, or what to do next. */
+        void homeHint(String text);
     }
 
     /** Pref key, label, what it does, preview, what to refresh. */
@@ -118,11 +120,24 @@ final class Welcome extends FrameLayout {
         setVisibility(VISIBLE);
         setAlpha(0f);
         animate().alpha(1f).setDuration(700).setStartDelay(0).setInterpolator(Ui.SOFT).start();
+        // Android restarted Aura as setup finished: straight back to say it's done
+        if (Prefs.device(act).getBoolean("welcome_resume", false)) {
+            Prefs.device(act).edit().remove("welcome_resume").apply();
+            setupDone = true;
+            show(5, 0);
+            post(() -> finishSetup(null));
+            return;
+        }
         show(0, 0);
     }
 
     private void finish() {
         Prefs.device(act).edit().putBoolean("welcomed", true).apply();
+        removeCallbacks(poll);
+        if (pairDrop != null) {
+            pairDrop.stop();
+            pairDrop = null;
+        }
         page = -1;
         if (preview != null) preview.stop();
         animate().alpha(0f).setDuration(420).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(() -> {
@@ -138,7 +153,9 @@ final class Welcome extends FrameLayout {
     boolean key(int code) {
         if (page < 0) return true;
         if (code == KeyEvent.KEYCODE_BACK) {
-            if (page > 0) show(page - 1, -1);
+            // the two ways of setting Home up lead back to the choice between them
+            if (setupBusy) return true;
+            if (page > 0) show(page == 7 ? 5 : page == 5 || page == 6 ? 4 : page - 1, -1);
             return true;
         }
         if (Pad.isConfirm(code)) {
@@ -182,7 +199,14 @@ final class Welcome extends FrameLayout {
         targets.clear();
         actions.clear();
         preview = null;
-        View v = p == 0 ? hello() : p == 1 ? look() : p == 2 ? choices() : ready();
+        removeCallbacks(poll);
+        if (p != 7 && pairDrop != null) {
+            pairDrop.stop();
+            pairDrop = null;
+        }
+        View v = p == 0 ? hello() : p == 1 ? look() : p == 2 ? choices() : p == 3 ? ready() : p == 4 ? homeWays() : p == 5 ? onTv()
+                : p == 6 ? fromPc() : wireless();
+        if (p == 5 || p == 6) postDelayed(poll, 1200);
         pageView = v;
         stage.addView(v, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         v.setAlpha(0f);
@@ -191,11 +215,13 @@ final class Welcome extends FrameLayout {
         for (int i = 0; i < dots.getChildCount(); i++) {
             View d = dots.getChildAt(i);
             LinearLayout.LayoutParams dl = (LinearLayout.LayoutParams) d.getLayoutParams();
-            dl.width = Ui.dp(i == p ? 20 : 6);
+            // the Home setup pages belong to the last step
+            boolean here = i == Math.min(p, 3);
+            dl.width = Ui.dp(here ? 20 : 6);
             d.setLayoutParams(dl);
-            d.setAlpha(i == p ? 0.95f : 0.35f);
+            d.setAlpha(here ? 0.95f : 0.35f);
         }
-        int start = p == 1 ? Math.max(0, java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act))) : 0;
+        int start = p == 1 ? Math.max(0, java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act))) : p == 5 ? setupStart() : 0;
         v.post(() -> focus(Math.min(start, targets.size() - 1)));
     }
 
@@ -342,17 +368,392 @@ final class Welcome extends FrameLayout {
         if (HomeRole.held(act)) {
             col.addView(button("Start watching", true, this::finish), wrap(40));
         } else {
-            // the Home button still opens the old home screen: Android asks once, on the screen
+            // the Home button still opens the old home screen: Android asks once, on the screen. Where
+            // it keeps Home for its own launcher (Google TV), the next page sets Aura's Home button up
             LinearLayout buttons = new LinearLayout(act);
             buttons.addView(button("Make Aura your home", true, () -> {
+                if (HomeRole.needsSetup(act)) {
+                    HomeKeys.setTakeover(act, true);
+                    if (!HomeKeys.set(act, true)) {
+                        show(4, 1);
+                        return;
+                    }
+                    finish();
+                    host.homeHint("Home now opens Aura");
+                    return;
+                }
                 finish();
-                if (!HomeRole.ask(act)) host.homeHint();
+                String m = HomeRole.make(act);
+                if (m != null) host.homeHint(m);
             }), wrap(0));
             LinearLayout.LayoutParams sl = wrap(0);
             sl.leftMargin = Ui.dp(14);
             buttons.addView(button("Not now", false, this::finish), sl);
             col.addView(buttons, wrap(40));
         }
+        horizontal = true;
+        return centred(col);
+    }
+
+    // ---- making Aura home where Android keeps Home for its own launcher ----------------------
+
+    /** Steps done on the "On this TV" page; Aura running through setup; finished. */
+    private final TextView[] marks = new TextView[3];
+    private TextView setupStatus, setupButton;
+    private boolean setupBusy, setupDone, lastDev, lastUsb;
+
+    /** While a setup page is open, its ticks follow Android's own switches as they're flipped. */
+    private final Runnable poll = new Runnable() {
+        @Override
+        public void run() {
+            if (page != 5 && page != 6) return;
+            refreshSetup();
+            postDelayed(this, 1200);
+        }
+    };
+
+    private boolean devOn() {
+        return android.provider.Settings.Global.getInt(act.getContentResolver(), android.provider.Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 0;
+    }
+
+    private boolean usbOn() {
+        return android.provider.Settings.Global.getInt(act.getContentResolver(), android.provider.Settings.Global.ADB_ENABLED, 0) != 0;
+    }
+
+    /** Google TV keeps Home whatever is chosen: the ways Aura can take it over, once. */
+    private View homeWays() {
+        LinearLayout col = column(Gravity.CENTER_HORIZONTAL);
+        col.addView(kicker("ONE MORE STEP"), wrap(0));
+        col.addView(title("Make Aura your home"), wrap(6));
+        TextView body = line(HomeRole.other(act) + " keeps the Home button for itself, whatever you choose. Aura can take it over, once, in one of these ways.");
+        body.setSingleLine(false);
+        body.setGravity(Gravity.CENTER_HORIZONTAL);
+        body.setMaxWidth(Ui.dp(560));
+        body.setLineSpacing(Ui.dpf(3), 1f);
+        col.addView(body, wrap(10));
+        LinearLayout list = column(Gravity.START);
+        way(list, "On this TV  ·  recommended", () -> show(5, 1));
+        way(list, "From a computer", () -> show(6, 1));
+        if (HomeRole.byHand(act)) {
+            way(list, "By hand, in Accessibility", () -> {
+                finish();
+                String m = HomeRole.make(act);
+                if (m != null) host.homeHint(m);
+            });
+        }
+        way(list, "Later", () -> {
+            finish();
+            host.homeHint("Whenever you like: Settings, Home button");
+        });
+        col.addView(list, wrap(30));
+        horizontal = false;
+        return centred(col);
+    }
+
+    private void way(LinearLayout list, String label, Runnable run) {
+        Row r = new Row(act, label);
+        r.arrow();
+        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(Ui.dp(400), Ui.dp(42));
+        l.topMargin = Ui.dp(list.getChildCount() == 0 ? 0 : 8);
+        list.addView(r, l);
+        targets.add(r);
+        actions.add(run);
+    }
+
+    /** The TV setting itself up, through USB debugging, the way a computer would: three steps that tick themselves off. */
+    private View onTv() {
+        LinearLayout col = column(Gravity.START);
+        col.addView(kicker("ON THIS TV"), wrap(0));
+        col.addView(title("Three steps, once"), wrap(6));
+        col.addView(line("Each one ticks itself off as you go. Back to Aura with the Back button."), wrap(6));
+        col.addView(stepRow(0, "Turn on Developer options",
+                "Settings, System, About: press OK on Android TV OS build seven times, until it says you're a developer.",
+                button("Open About", false, () -> openSettings(android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS))), wrap(24));
+        col.addView(stepRow(1, "Turn on USB debugging",
+                "In Developer options, switch on USB debugging. Some TVs call it Network debugging.",
+                button("Developer options", false, () -> openSettings(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))), wrap(14));
+        setupButton = button(setupDone ? "Start watching" : "Connect", true, this::connect);
+        col.addView(stepRow(2, "Let Aura in",
+                "Android asks \"Allow USB debugging?\": tick Always allow from this computer, then Allow. Aura does the rest.", setupButton), wrap(14));
+        setupStatus = Ui.text(act, 14, Ui.medium, 0xE6FFFFFF);
+        setupStatus.setSingleLine(false);
+        setupStatus.setMaxWidth(Ui.dp(760));
+        col.addView(setupStatus, wrap(20));
+        // some newer Google TVs have no plain USB debugging to connect through: wireless debugging, paired by code
+        if (Adb.wireless()) col.addView(button("No USB debugging? Use wireless debugging", false, () -> show(7, 1)), wrap(12));
+        lastDev = devOn();
+        lastUsb = usbOn();
+        refreshSetup();
+        horizontal = false;
+        return centred(col);
+    }
+
+    /** A step: its number (a tick once done), what to do, and the button that takes you there. */
+    private View stepRow(int i, String head, String how, View action) {
+        LinearLayout r = new LinearLayout(act);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setClipChildren(false);
+        TextView mark = Ui.text(act, 13, Ui.bold, 0xFFFFFFFF);
+        mark.setGravity(Gravity.CENTER);
+        mark.setText(String.valueOf(i + 1));
+        mark.setBackground(pill(0x2EFFFFFF, 15));
+        marks[i] = mark;
+        r.addView(mark, new LinearLayout.LayoutParams(Ui.dp(30), Ui.dp(30)));
+        LinearLayout words = column(Gravity.START);
+        TextView h = Ui.text(act, 16, Ui.semibold, 0xFFFFFFFF);
+        h.setText(head);
+        words.addView(h);
+        TextView s = Ui.text(act, 12.5f, Ui.regular, 0xA6FFFFFF);
+        s.setSingleLine(false);
+        s.setMaxLines(2);
+        s.setText(how);
+        words.addView(s, wrap(2));
+        LinearLayout.LayoutParams wl = new LinearLayout.LayoutParams(Ui.dp(500), ViewGroup.LayoutParams.WRAP_CONTENT);
+        wl.leftMargin = Ui.dp(16);
+        wl.rightMargin = Ui.dp(24);
+        r.addView(words, wl);
+        LinearLayout.LayoutParams al = new LinearLayout.LayoutParams(Ui.dp(206), ViewGroup.LayoutParams.WRAP_CONTENT);
+        r.addView(action, al);
+        return r;
+    }
+
+    private void mark(int i, boolean done) {
+        if (marks[i] == null) return;
+        marks[i].setText(done ? "✓" : String.valueOf(i + 1));
+        marks[i].setTextColor(done ? 0xFF0B3D22 : 0xFFFFFFFF);
+        marks[i].setBackground(pill(done ? 0xFF7BE0A8 : 0x2EFFFFFF, 15));
+    }
+
+    /** The first step still to do, for focus. */
+    private int setupStart() {
+        return setupDone ? 2 : !devOn() ? 0 : !usbOn() ? 1 : 2;
+    }
+
+    /** The ticks and the line under them, from Android's switches; focus moves on as a step is done. */
+    private void refreshSetup() {
+        boolean dev = devOn(), usb = usbOn();
+        if (page == 5) {
+            mark(0, dev || setupDone);
+            mark(1, dev && usb || setupDone);
+            mark(2, setupDone);
+            if (!setupBusy && !setupDone) {
+                setupStatus.setText(!dev ? "Start with step 1." : !usb ? "Developer options are on. Now step 2." : "Ready. Press Connect.");
+            }
+            // a step just done here: on to the next one's button
+            if (dev && !lastDev && at == 0) focus(usb ? 2 : 1);
+            else if (usb && !lastUsb && at <= 1) focus(2);
+        } else if (page == 6 && !setupDone && Compat.granted(act, android.Manifest.permission.WRITE_SECURE_SETTINGS)) {
+            // the computer granted it: Aura can switch its Home button on by itself now
+            HomeKeys.setTakeover(act, true);
+            if (HomeKeys.set(act, true)) {
+                setupDone = true;
+                setupStatus.setText("Done. Home now opens Aura.");
+                setupButton.setText("Start watching");
+                focus(targets.indexOf(setupButton));
+            }
+        }
+        lastDev = dev;
+        lastUsb = usb;
+    }
+
+    private void openSettings(String action) {
+        try {
+            act.startActivity(new android.content.Intent(action).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (RuntimeException e) {
+            act.startActivity(new android.content.Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        }
+    }
+
+    /** Connect to the TV's own debugging, Android asking once; then every extra switched on, Home first. */
+    private void connect() {
+        if (setupDone) {
+            finish();
+            return;
+        }
+        if (setupBusy) return;
+        if (!usbOn()) {
+            setupStatus.setText(!devOn() ? "Developer options first: step 1." : "Switch on USB debugging first: step 2.");
+            return;
+        }
+        setupBusy = true;
+        setupStatus.setText("Android is asking on the screen: tick Always allow, then Allow.");
+        new Thread(() -> {
+            String r = Adb.connect(act);
+            act.runOnUiThread(() -> {
+                if (page != 5) {
+                    setupBusy = false;
+                    return;
+                }
+                if (r.equals(Adb.OK) || r.equals(Adb.OPEN_DOOR)) {
+                    switchOn();
+                    return;
+                }
+                setupBusy = false;
+                setupStatus.setText(r.equals(Adb.DENIED) ? "Android didn't let Aura in. Press Connect again, tick Always allow, then Allow."
+                        : r.equals(Adb.OFF) ? "Aura can't reach debugging yet. Check USB debugging is on (or Network debugging), then Connect."
+                        : "Couldn't connect. Try again in a moment.");
+            });
+        }, "welcome-connect").start();
+    }
+
+    /** Setup's steps, counted on the line; Android restarts Aura at the very end, and the welcome comes back to say it's done. */
+    private void switchOn() {
+        Adb.runSetup(act, new Adb.Progress() {
+            @Override
+            public void step(int i, int n, String name) {
+                String now = "Switching everything on  ·  " + (i + 1) + " of " + n + (name.equals("Speed") ? "  ·  about a minute" : "");
+                if (setupStatus == null) return;
+                act.runOnUiThread(() -> setupStatus.setText(now));
+            }
+
+            @Override
+            public void restarting(int ok, int n, List<String> failed) {
+                Prefs.device(act).edit().putBoolean("welcome_resume", true).commit();
+            }
+
+            @Override
+            public void done(int ok, int n, List<String> failed) {
+                act.runOnUiThread(() -> {
+                    Prefs.device(act).edit().remove("welcome_resume").apply();
+                    setupBusy = false;
+                    finishSetup(failed);
+                });
+            }
+        });
+    }
+
+    private void finishSetup(List<String> failed) {
+        // granted now: should the service still be off, Aura switches it on itself
+        if (!HomeRole.held(act)) {
+            HomeKeys.setTakeover(act, true);
+            HomeKeys.set(act, true);
+        }
+        setupDone = HomeRole.held(act) || HomeKeys.on(act);
+        if (page == 7) {
+            // back on the checklist, every step ticked, saying how it went
+            show(5, -1);
+            finishSetup(failed);
+            return;
+        }
+        if (page != 5) return;
+        setupStatus.setText(!setupDone ? "Home couldn't be handed over. Settings, Set up on this TV can try again."
+                : failed == null || failed.isEmpty() ? "Done. Home now opens Aura, and every extra is on."
+                : "Done. Home now opens Aura. Not switched on: " + android.text.TextUtils.join(", ", failed) + ".");
+        setupButton.setText(setupDone ? "Start watching" : "Try again");
+        refreshSetup();
+        focus(targets.indexOf(setupButton));
+    }
+
+    private Drop pairDrop;
+    private boolean pairing;
+
+    /**
+     * Wireless debugging (Android 11+): the TV shows a pairing code in a dialog that closes as soon
+     * as you leave it, so the code is typed on the phone, from a QR code, while the dialog stays open.
+     */
+    private View wireless() {
+        FrameLayout f = new FrameLayout(act);
+        LinearLayout row = new LinearLayout(act);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setClipChildren(false);
+        pairDrop = new Drop(act, new Drop.Quiet() {
+            @Override
+            public void onPairCode(String code) {
+                pairWith(code);
+            }
+        });
+        String url = pairDrop.start();
+        View code = url != null ? new SettingsPanel.Code(act, Qr.encode(url + "/pair")) : new View(act);
+        row.addView(code, new LinearLayout.LayoutParams(Ui.dp(200), Ui.dp(200)));
+        LinearLayout col = column(Gravity.START);
+        col.addView(kicker("WIRELESS DEBUGGING"), wrap(0));
+        col.addView(title("Pair with a code"), wrap(6));
+        String[] steps = {
+                "Developer options: switch on Wireless debugging.",
+                "Choose Pair device with pairing code. Leave it open.",
+                url != null ? "Scan this with your phone and type the six digits it shows." : "Connect the TV to Wi-Fi first: the code is typed on your phone."};
+        for (int i = 0; i < steps.length; i++) {
+            TextView t = Ui.text(act, 15, Ui.medium, 0xE6FFFFFF);
+            t.setSingleLine(false);
+            t.setMaxWidth(Ui.dp(470));
+            t.setText((i + 1) + "   " + steps[i]);
+            col.addView(t, wrap(i == 0 ? 18 : 10));
+        }
+        setupStatus = Ui.text(act, 14, Ui.medium, 0xB3FFFFFF);
+        setupStatus.setSingleLine(false);
+        setupStatus.setMaxWidth(Ui.dp(470));
+        setupStatus.setText("Waiting for the code…");
+        col.addView(setupStatus, wrap(18));
+        LinearLayout buttons = new LinearLayout(act);
+        buttons.addView(button("Developer options", true, () -> openSettings(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)), wrap(0));
+        col.addView(buttons, wrap(18));
+        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cl.leftMargin = Ui.dp(40);
+        row.addView(col, cl);
+        f.addView(row, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        horizontal = true;
+        return f;
+    }
+
+    /** The code from the phone: paired in the background (the dialog is still open on the TV), then set up as on page one. */
+    private void pairWith(String code) {
+        if (pairing || page != 7) return;
+        pairing = true;
+        setupStatus.setText("Pairing with the TV…");
+        new Thread(() -> {
+            String r = Adb.pair(act, code);
+            act.runOnUiThread(() -> {
+                pairing = false;
+                if (page != 7) return;
+                if (r.equals(Adb.OK) || r.equals(Adb.OPEN_DOOR)) {
+                    setupStatus.setText("Paired. Switching everything on…");
+                    setupBusy = true;
+                    switchOn();
+                    return;
+                }
+                setupStatus.setText(r.equals(Adb.DENIED) ? "That code didn't match. Open Pair device with pairing code again and send the new one."
+                        : r.equals(Adb.OFF) ? "No pairing dialog found. Open Pair device with pairing code, and keep it open while you send the code."
+                        : "Pairing didn't finish. Try again with a fresh code.");
+            });
+        }, "welcome-pair").start();
+    }
+
+    /** The same from a computer: the TV's address and two adb lines, and Aura finishes once the computer has run them. */
+    private View fromPc() {
+        LinearLayout col = column(Gravity.START);
+        col.addView(kicker("FROM A COMPUTER"), wrap(0));
+        col.addView(title("Two lines on a computer"), wrap(6));
+        TextView first = line("On the TV, switch on Developer options and USB debugging (steps 1 and 2 of On this TV). Then, on a computer on the same Wi-Fi with Android's adb:");
+        first.setSingleLine(false);
+        first.setMaxWidth(Ui.dp(760));
+        col.addView(first, wrap(10));
+        String ip = Drop.address();
+        TextView code = Ui.text(act, 15, android.graphics.Typeface.MONOSPACE, 0xFFFFFFFF);
+        code.setSingleLine(false);
+        code.setText("adb connect " + (ip != null ? ip : "<the TV's IP>") + ":5555\nadb shell pm grant " + act.getPackageName()
+                + " android.permission.WRITE_SECURE_SETTINGS");
+        code.setLineSpacing(Ui.dpf(6), 1f);
+        code.setBackground(pill(0x33000000, 14));
+        code.setPadding(Ui.dp(18), Ui.dp(14), Ui.dp(18), Ui.dp(14));
+        col.addView(code, wrap(14));
+        TextView then = line("Allow the question the TV asks. Aura notices and finishes by itself. For every extra at once, run setup-aura.ps1 from Aura's GitHub page instead.");
+        then.setSingleLine(false);
+        then.setMaxWidth(Ui.dp(760));
+        col.addView(then, wrap(14));
+        setupStatus = Ui.text(act, 14, Ui.medium, 0xE6FFFFFF);
+        setupStatus.setText(setupDone ? "Done. Home now opens Aura." : "Waiting for the computer…");
+        col.addView(setupStatus, wrap(18));
+        LinearLayout buttons = new LinearLayout(act);
+        buttons.addView(button(devOn() ? "Developer options" : "Open About", false, () -> openSettings(devOn()
+                ? android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS : android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS)), wrap(0));
+        setupButton = button(setupDone ? "Start watching" : "Later", true, () -> {
+            finish();
+            if (!setupDone) host.homeHint("Whenever you like: Settings, Home button");
+        });
+        LinearLayout.LayoutParams sl = wrap(0);
+        sl.leftMargin = Ui.dp(14);
+        buttons.addView(setupButton, sl);
+        col.addView(buttons, wrap(22));
         horizontal = true;
         return centred(col);
     }

@@ -26,6 +26,10 @@ final class AppRepo {
         Drawable banner, icon;
         int color;
         Intent launch;
+        /** Your own picture for its tile, sent from the phone (see {@link Art}); null for its own art. */
+        Bitmap art;
+        /** Installed since Aura was set up and not opened yet: its tile wears a small dot. */
+        boolean fresh;
     }
 
     private static final List<String> DEFAULT_DOCK = Arrays.asList(
@@ -40,6 +44,8 @@ final class AppRepo {
         collect(pm, apps, Intent.CATEGORY_LEANBACK_LAUNCHER, c.getPackageName());
         collect(pm, apps, Intent.CATEGORY_LAUNCHER, c.getPackageName());
         List<App> list = new ArrayList<>(apps.values());
+        for (App a : list) a.art = Art.load(c, a.pkg);
+        NewApps.mark(c, list);
         Collator col = Collator.getInstance();
         java.util.Collections.sort(list, (a, b) -> col.compare(a.label, b.label));
         return list;

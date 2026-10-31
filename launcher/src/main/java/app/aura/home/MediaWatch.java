@@ -62,4 +62,23 @@ public class MediaWatch extends NotificationListenerService {
         p.progress = length > 0 && at > 0 ? Math.min(1f, at / (float) length) : 0f;
         return p.title == null ? null : p;
     }
+
+    /**
+     * How long until what's playing ends, at its speed, counting the time since the app last said
+     * where it was; -1 when nothing is playing or it has no known length (live TV, a radio stream).
+     */
+    static long remainingMs(Context c) {
+        Playing p = now(c);
+        if (p == null || !p.playing) return -1;
+        PlaybackState st = p.controller.getPlaybackState();
+        MediaMetadata md = p.controller.getMetadata();
+        if (st == null || md == null) return -1;
+        long length = md.getLong(MediaMetadata.METADATA_KEY_DURATION);
+        if (length <= 0) return -1;
+        float speed = st.getPlaybackSpeed() > 0 ? st.getPlaybackSpeed() : 1f;
+        long since = android.os.SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime();
+        long at = st.getPosition() + (st.getLastPositionUpdateTime() > 0 ? (long) (since * speed) : 0);
+        long left = (long) ((length - at) / speed);
+        return left > 0 ? left : -1;
+    }
 }

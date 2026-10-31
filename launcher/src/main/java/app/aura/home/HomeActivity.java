@@ -77,6 +77,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    /** Recent apps read on their own thread: never queued behind the widgets' work or an app being stopped. */
+    private final ExecutorService recentWorker = Executors.newSingleThreadExecutor();
     private final int[] loc = new int[2];
 
     private SharedPreferences prefs;
@@ -161,7 +163,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         public void run() {
             View f = getCurrentFocus();
             // not on the switcher's cards: a sheen across one that size repaints most of the screen for a second
-            if (!held && !photo && !ccOpen && !editing && !switcher.isOpen() && f instanceof Card) ((Card) f).glint();
+            if (!held && !photo && !ccOpen && !editing && !Backdrop.calm && !switcher.isOpen() && f instanceof Card) ((Card) f).glint();
             handler.postDelayed(this, 6500);
         }
     };
@@ -188,12 +190,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         final String safe = Safety.check(this);
         Ui.init(this);
         prefs = Prefs.of(this);
-        Card.parallax = Prefs.on(this, Prefs.PARALLAX);
+        applyLight();
         // the TV's own city, if known, before anything asks the sun where it is
         Weather.placeSun(this);
         tim = (TvInputManager) getSystemService(Context.TV_INPUT_SERVICE);
         buildUi();
         setContentView(root);
+        applyLight();
         if (safe != null) {
             handler.postDelayed(() -> hud(R.drawable.ic_info, safe.equals("safe")
                     ? "Aura kept stopping, so some extras are off for now" : "Aura kept stopping: Home opens the TV's own home screen again"), 6000);
@@ -229,6 +232,18 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         pf.addAction(Intent.ACTION_PACKAGE_REPLACED);
         pf.addDataScheme("package");
         registerReceiver(packageReceiver, pf);
+        Previews.listener = shotTaken;
+    }
+
+    /** A picture of an app just taken (on the capture thread): an open switcher shows it at once. */
+    private final Previews.Listener shotTaken = (pkg, shot) -> runOnUiThread(() -> shotArrived(pkg, shot));
+
+    private void shotArrived(String pkg, android.graphics.Bitmap shot) {
+        if (isDestroyed() || !switcher.isOpen() || !pkg.equals(switcherOver)) return;
+        Tiles.Painter face = Previews.painter(shot);
+        faces.put(pkg, face);
+        switcher.face(pkg, SystemClock.uptimeMillis());
+        switcher.repaint(pkg, face);
     }
 
     @Override
@@ -263,20 +278,41 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request != HomeRole.REQUEST) return;
-        if (HomeRole.held(this)) hud(R.drawable.ic_check, "Home now opens Aura");
-        else homeHint();
+        if (HomeRole.held(this)) {
+            hud(R.drawable.ic_check, "Home now opens Aura");
+        } else if (result == RESULT_OK) {
+            // Android said yes, yet Home still opens another launcher: the Home button service takes it from here
+            String m = HomeRole.make(this);
+            if (m != null) hud(R.drawable.ic_info, m);
+        } else {
+            homeHint("Press Home on the remote and choose Aura, then Always");
+        }
         if (settings.isOpen()) settings.refresh();
     }
 
-    /** Android won't ask (or was told not to): how to choose Aura by hand. */
-    void homeHint() {
-        hud(R.drawable.ic_info, "Press Home on the remote and choose Aura, then Always");
+    void homeHint(String text) {
+        hud(R.drawable.ic_info, text);
+    }
+
+    private final Runnable homeCheck = this::checkHome;
+
+    /** Back from Android's Accessibility page: whether the Home button service came on there. */
+    private void checkHome() {
+        if (!HomeRole.waiting || !resumed) return;
+        HomeRole.waiting = false;
+        if (HomeKeys.live) hud(R.drawable.ic_check, "Home now opens Aura");
+        else hud(R.drawable.ic_info, "Aura's Home button is still off · Settings, Home button");
+        if (settings.isOpen()) settings.refresh();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         resumed = true;
+        // a sleep timer that couldn't switch the TV off left the sound faded: it comes back now
+        Power.recover(this);
+        // back from switching the Home button service on in Android's settings
+        if (HomeRole.waiting) handler.postDelayed(homeCheck, 800);
         wake();
         // back from an app: "jump back in" now knows what you just watched
         refreshWidgets(true);
@@ -298,9 +334,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // a picture held in memory for a switcher that didn't open is let go
         handler.removeCallbacks(dropFreshSoon);
         handler.postDelayed(dropFreshSoon, 5000);
-        // the switcher opens from this the moment Home is pressed again
+        // the switcher opens from this the moment Home is pressed again; back from an app, the list
+        // is read straight away, since the app just left goes first and Home twice comes quickly
         handler.removeCallbacks(warmRecentsSoon);
-        handler.postDelayed(warmRecentsSoon, 700);
+        handler.postDelayed(warmRecentsSoon, awayAt > recentAt ? 60 : 700);
     }
 
     /**
@@ -329,6 +366,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     protected void onPause() {
         super.onPause();
         resumed = false;
+        awayAt = SystemClock.uptimeMillis();
+        openWhenWarm = false;
         stack.stop();
         stopPreview();
         handler.removeCallbacks(rack);
@@ -350,7 +389,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     @Override
     protected void onDestroy() {
         unregisterReceiver(packageReceiver);
+        if (Previews.listener == shotTaken) Previews.listener = null;
         worker.shutdown();
+        recentWorker.shutdown();
         super.onDestroy();
     }
 
@@ -358,6 +399,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
         backdrop.trim(level);
+        if (level >= TRIM_MEMORY_RUNNING_LOW || level >= TRIM_MEMORY_MODERATE) {
+            Previews.trim();
+            Tiles.trim();
+            if (!switcher.isOpen()) {
+                faces.clear();
+                switcher.forget();
+            }
+        }
     }
 
     /**
@@ -440,6 +489,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         long now = SystemClock.uptimeMillis();
         boolean twice = now - lastHomeAt < 1300;
         lastHomeAt = twice ? 0 : now;
+        // a switcher still waiting for its list stays shut after a third press
+        if (!twice) openWhenWarm = false;
         if (switcher.isOpen()) {
             closeSwitcher();
             return;
@@ -545,6 +596,28 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
 
             @Override
+            public boolean type(String text) {
+                if (!resumed) return false;
+                wake();
+                if (settings.typeIntoField(text)) return true;
+                if (ask.isOpen()) {
+                    ask.type(text);
+                    return true;
+                }
+                if (findPanel.isOpen()) {
+                    findPanel.type(text);
+                    return true;
+                }
+                if (settings.isOpen()) closeSettings();
+                if (ccOpen) closeCc(false);
+                if (switcher.isOpen()) closeSwitcher();
+                if (nowPlaying.isOpen()) closeNowPlaying();
+                if (folderPanel.isOpen()) closeFolder();
+                openFind(text);
+                return true;
+            }
+
+            @Override
             public void hud(int icon, String text) {
                 HomeActivity.this.hud(icon, text);
             }
@@ -553,9 +626,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         folderPanel = new FolderPanel(this, new FolderPanel.Host() {
             @Override
             public Tiles.Painter art(AppRepo.App a) {
-                String style = Prefs.tileStyle(HomeActivity.this);
-                return style.equals("glass") ? Tiles.glass(a) : style.equals("vivid") ? Tiles.vivid(a)
-                        : style.equals("midnight") ? Tiles.midnight(a) : Tiles.app(a);
+                return artFor(a);
             }
 
             @Override
@@ -593,6 +664,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     closeFolder();
                     open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + a.pkg)), from);
                 }));
+                items.add(new AppMenu.Item(R.drawable.ic_settings, "Rename folder", () -> {
+                    menu.hide();
+                    String id = folderPanel.openId;
+                    closeFolder();
+                    if (id != null) nameFolder(id, false);
+                }));
                 menu.show(from, a.label, items);
             }
         });
@@ -623,6 +700,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             @Override
             public void close(AppRepo.App a) {
                 if (a.pkg.equals(switcherOver)) switcherOver = null;
+                // closed: not brought back to the front as the app last seen
+                if (a.pkg.equals(HomeKeys.lastApp)) HomeKeys.lastApp = null;
                 faces.remove(a.pkg);
                 Previews.forget(getApplicationContext(), a.pkg);
                 if (recentCache != null) recentCache.remove(a.pkg);
@@ -651,6 +730,63 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         root.addView(switcher, match());
         nowPlaying = new NowPlaying(this, backdrop);
         root.addView(nowPlaying, match());
+        ask = new Ask(this, backdrop);
+        root.addView(ask, match());
+        findPanel = new Find(this, new Find.Host() {
+            @Override
+            public List<AppRepo.App> apps() {
+                if (!Profiles.kids(HomeActivity.this)) return apps;
+                // a kids' profile doesn't find what's hidden from it
+                List<AppRepo.App> out = new ArrayList<>();
+                Set<String> hidden = Prefs.hidden(HomeActivity.this);
+                for (AppRepo.App a : apps) if (!hidden.contains(a.pkg)) out.add(a);
+                return out;
+            }
+
+            @Override
+            public List<AppRepo.App> suggested() {
+                List<AppRepo.App> out = new ArrayList<>();
+                for (Cell c : cells) {
+                    AppRepo.App a = find(c.tag);
+                    if (a != null) out.add(a);
+                }
+                return out;
+            }
+
+            @Override
+            public Tiles.Painter art(AppRepo.App a) {
+                return artFor(a);
+            }
+
+            @Override
+            public boolean glass() {
+                return Prefs.tileStyle(HomeActivity.this).equals("glass");
+            }
+
+            @Override
+            public Backdrop backdrop() {
+                return backdrop;
+            }
+
+            @Override
+            public void open(AppRepo.App a, View from) {
+                closeFind();
+                launch(a.launch, from, a.label);
+            }
+
+            @Override
+            public void everywhere(String text) {
+                closeFind();
+                Intent i = new Intent("android.search.action.GLOBAL_SEARCH").putExtra(android.app.SearchManager.QUERY, text)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                try {
+                    startActivity(i);
+                } catch (RuntimeException e) {
+                    voiceSearch();
+                }
+            }
+        });
+        root.addView(findPanel, match());
         buildHud();
         buildMoment();
 
@@ -830,7 +966,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         col.setClipChildren(false);
         col.setClipToPadding(false);
         addSide(col, R.drawable.ic_apps, "Apps", () -> focusGrid(0), true);
-        addSide(col, R.drawable.ic_mic, "Search", this::voiceSearch, false);
+        addSide(col, R.drawable.ic_search, "Find an app", () -> openFind(""), false);
         addSide(col, R.drawable.ic_hdmi, "Inputs", () -> openCc(true), false);
         addSide(col, R.drawable.ic_photo, "Photo mode", () -> setPhoto(true), false);
         LinearLayout.LayoutParams rl = lp(Ui.dp(22), Ui.hair(), 0, 10);
@@ -1057,12 +1193,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     // ---- apps --------------------------------------------------------------------------------
 
     private void reloadApps() {
+        reloadApps(false);
+    }
+
+    private void reloadApps(boolean force) {
         final Context app = getApplicationContext();
         worker.execute(() -> {
             final List<AppRepo.App> list = AppRepo.load(app);
             runOnUiThread(() -> {
                 if (isDestroyed()) return;
-                boolean changed = cells.isEmpty() || !samePackages(list, apps);
+                boolean changed = force || cells.isEmpty() || !samePackages(list, apps);
                 apps = list;
                 cache = list;
                 if (changed) populate();
@@ -1083,17 +1223,29 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return null;
     }
 
-    /** Live inputs first, then your apps in your order, then anything new, alphabetically. */
+    /**
+     * Live inputs first, then your apps in your order, then anything new, alphabetically. A tile
+     * painted from exactly the same things as before (app, look, picture, name) is kept as it is
+     * and only moved: hiding one app or renaming a folder no longer repaints every tile.
+     */
     private void populate() {
         String keep = gridAt < cells.size() ? cells.get(gridAt).tag : null;
         // on the first fill the window may already have parked focus on the rail; the grid takes it
         boolean firstFill = cells.isEmpty(), hadFocus = zone == GRID && getCurrentFocus() instanceof Card;
         stopPreview();
-        for (Cell c : cells) page.removeView(c);
+        Map<String, Cell> old = new java.util.HashMap<>();
+        for (Cell c : cells) old.put(c.tag, c);
         cells.clear();
+        boolean calm = Perf.light(this);
         for (String[] in : live) {
             final String id = in[0], label = in[1];
+            Cell kept = reuse(old, "input:" + id, "input|" + label);
+            if (kept != null) {
+                cells.add(kept);
+                continue;
+            }
             final Cell cell = new Cell(this, Tiles.input(this, label), 0xFF46D7C8, label, "input:" + id, TILE_W, TILE_H);
+            cell.sig = "input|" + label;
             cell.card.glass = backdrop;
             cell.card.onClick = () -> open(new Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(id)), cell.card);
             cell.card.onLongClick = this::openMenu;
@@ -1135,10 +1287,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         for (Object entry : entries) {
             if (entry instanceof Folders.Folder) {
                 final Folders.Folder f = (Folders.Folder) entry;
-                final Cell cell = new Cell(this, Tiles.folder(folderApps(f), !glassTiles), 0xFF9AA6BA, f.name, f.tag(), TILE_W, TILE_H);
-                if (glassTiles) cell.card.glass = backdrop;
+                List<AppRepo.App> inside = folderApps(f);
+                StringBuilder sig = new StringBuilder("folder|").append(style).append('|').append(f.name);
+                for (AppRepo.App a : inside) sig.append('|').append(System.identityHashCode(a));
+                Cell cell = reuse(old, f.tag(), sig.toString());
+                if (cell == null) {
+                    cell = new Cell(this, Tiles.folder(inside, !glassTiles), 0xFF9AA6BA, f.name, f.tag(), TILE_W, TILE_H);
+                    cell.sig = sig.toString();
+                    if (glassTiles) cell.card.glass = backdrop;
+                }
                 cell.setNamesAlways(namesAlways);
-                cell.card.sway = true;
+                cell.card.sway = !calm;
                 cell.card.onClick = () -> openFolder(f.id);
                 cell.card.onLongClick = this::openMenu;
                 cells.add(cell);
@@ -1146,25 +1305,34 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
             final AppRepo.App a = (AppRepo.App) entry;
             sorted.add(a);
-            // glass panes tinted in the app's colour, its colour vivid, midnight, or the original banners
-            Tiles.Painter art = glassTiles ? Tiles.glass(a) : style.equals("vivid") ? Tiles.vivid(a)
-                    : style.equals("midnight") ? Tiles.midnight(a) : Tiles.app(a);
-            final Cell cell = new Cell(this, art, a.color, a.label, a.pkg, TILE_W, TILE_H);
-            if (glassTiles) cell.card.glass = backdrop;
+            // glass panes tinted in the app's colour, its colour vivid, midnight, or the original
+            // banners; your own picture for it in any of them
+            String sig = "app|" + style + "|" + System.identityHashCode(a) + "|" + a.label;
+            Cell cell = reuse(old, a.pkg, sig);
+            if (cell == null) {
+                cell = new Cell(this, artFor(a), a.color, a.label, a.pkg, TILE_W, TILE_H);
+                cell.sig = sig;
+                if (glassTiles && a.art == null) cell.card.glass = backdrop;
+            }
             cell.setNamesAlways(namesAlways);
-            cell.card.sway = true;
-            cell.card.onClick = () -> launch(a.launch, cell.card, a.label);
+            cell.card.sway = !calm;
+            // installed since Aura came and not opened yet: a small dot
+            cell.card.badge = a.fresh;
+            final Card card = cell.card;
+            cell.card.onClick = () -> launch(a.launch, card, a.label);
             cell.card.onLongClick = this::openMenu;
             cells.add(cell);
         }
+        // tiles nothing kept: gone from the page
+        for (Cell c : old.values()) page.removeView(c);
         int at = 0;
         for (int i = 0; i < cells.size(); i++) {
             Cell c = cells.get(i);
             // only the focused tile casts a shadow: two dozen resting shadows cost frames for nothing
-            c.card.setElevation(0f);
+            if (!c.card.isFocused()) c.card.setElevation(0f);
             c.setTranslationX(cellX(i));
             c.setTranslationY(cellY(i));
-            page.addView(c, new FrameLayout.LayoutParams(Ui.dp(TILE_W), WRAP));
+            if (c.getParent() == null) page.addView(c, new FrameLayout.LayoutParams(Ui.dp(TILE_W), WRAP));
             if (c.tag.equals(keep)) at = i;
         }
         gridLabel.setText("YOUR APPS  ·  " + (sorted.size() + foldered.size()));
@@ -1178,6 +1346,19 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             progressSplash();
         }
         refreshWidgets(true);
+    }
+
+    /** The tile for {@code tag} from before, taken out of {@code old}, if it was painted from {@code sig}. */
+    private static Cell reuse(Map<String, Cell> old, String tag, String sig) {
+        Cell c = old.get(tag);
+        if (c == null || !sig.equals(c.sig)) return null;
+        old.remove(tag);
+        return c;
+    }
+
+    /** An app's art in the look chosen, or your own picture for it. */
+    private Tiles.Painter artFor(AppRepo.App a) {
+        return Tiles.forStyle(a, Prefs.tileStyle(this));
     }
 
     private float cellX(int i) {
@@ -1230,6 +1411,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             String pkg = intent.getPackage() != null ? intent.getPackage()
                     : intent.getComponent() != null ? intent.getComponent().getPackageName() : null;
             Habits.opened(getApplicationContext(), pkg);
+            seen(pkg);
             if (pkg != null && recentCache != null) {
                 // first in the switcher at once, before the history catches up
                 java.util.LinkedHashMap<String, Long> r = new java.util.LinkedHashMap<>();
@@ -1239,6 +1421,20 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
         } catch (ActivityNotFoundException | SecurityException e) {
             hud(R.drawable.ic_info, "Couldn't open " + label);
+        }
+    }
+
+    /** Opened at last: a new app's dot goes. */
+    private void seen(String pkg) {
+        AppRepo.App a = pkg == null ? null : find(pkg);
+        if (a == null || !a.fresh) return;
+        a.fresh = false;
+        NewApps.opened(getApplicationContext(), pkg);
+        for (Cell c : cells) {
+            if (c.tag.equals(pkg)) {
+                c.card.badge = false;
+                c.card.invalidate();
+            }
         }
     }
 
@@ -1265,7 +1461,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             final String top = Habits.topToday(app);
             Map<String, Float> score = null;
             Object[] recent = null;
-            if (habits && !list.isEmpty()) {
+            boolean full = habits && !list.isEmpty();
+            if (full) {
                 score = Habits.forNow(app);
                 Set<String> installed = new HashSet<>();
                 for (AppRepo.App a : list) if (watchable(a.pkg)) installed.add(a.pkg);
@@ -1274,8 +1471,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             final Map<String, Float> s = score;
             final Object[] r = recent;
             // what you're partway through outranks habits
-            final List<Continue.Item> cw = habits ? Continue.all(app, 4) : null;
-            final Extras x = habits ? extras(app) : null;
+            final List<Continue.Item> cw = full ? Continue.all(app, 4) : null;
+            final Extras x = full ? extras(app) : null;
             final long data = dataToday(app, c.getTimeInMillis());
             runOnUiThread(() -> {
                 if (isDestroyed()) return;
@@ -1490,15 +1687,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (most != null && used.add(most.pkg)) out.add(appSlide(most, "MOST WATCHED TODAY", "Where most of today's screen time went"));
         if (x != null && x.pick != null) {
             SmartStack.Slide s = new SmartStack.Slide();
-            s.kicker = "TONIGHT'S PICK  ·  TOP RATED";
+            s.kicker = "TONIGHT'S PICK  ·  " + x.pick.why;
             s.title = x.pick.name;
             s.sub = x.pick.line;
             s.art = x.pickArt;
             s.color = 0xFFE8B04A;
-            Intent yt = new Intent(Intent.ACTION_SEARCH).setPackage("com.google.android.youtube.tv")
-                    .putExtra(android.app.SearchManager.QUERY, x.pick.query);
-            s.intent = yt.resolveActivity(getPackageManager()) != null ? yt
-                    : new Intent("android.search.action.GLOBAL_SEARCH").putExtra(android.app.SearchManager.QUERY, x.pick.query);
+            s.intent = Picks.watch(this, x.pick);
             s.label = x.pick.name + " trailer";
             s.dwellMs = 6_000;
             out.add(s);
@@ -1600,7 +1794,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (vertical) {
                 page.setTranslationY(base + reach * k);
                 for (Widget w : widgets) if (w.getAlpha() > 0f) w.invalidate();
-                for (Cell c : cells) c.card.invalidate();
+                for (Cell c : cells) if (c.card.glass != null) c.card.invalidate();
             } else {
                 target.setTranslationX(reach * k);
             }
@@ -1619,7 +1813,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             page.setTranslationY((float) a.getAnimatedValue());
             // the glass samples the photo at its own position, so it is repainted as it travels
             for (Widget w : widgets) if (w.getAlpha() > 0f) w.invalidate();
-            for (Cell c : cells) c.card.invalidate();
+            for (Cell c : cells) if (c.card.glass != null) c.card.invalidate();
         });
         scrollAnim.start();
         // the greeting and the status pill leave on any scroll (the apps pass beneath them); the
@@ -1781,7 +1975,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         bloom.moveTo(cx / w, cy / h, 900);
         bloom.setColor(color, 700);
         // while a key is held the parallax waits: restarting it every hop would keep the GPU at full rate
-        if (!held) backdrop.setParallax(-(cx / w - 0.5f) * Ui.dpf(24));
+        if (!held && !Backdrop.calm) backdrop.setParallax(-(cx / w - 0.5f) * Ui.dpf(24));
     }
 
     private void showTip(View n, String label) {
@@ -1827,7 +2021,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private boolean overlayOpen() {
         return welcome != null || settings != null && settings.isOpen() || folderPanel != null && folderPanel.isOpen()
                 || switcher != null && switcher.isOpen() || nowPlaying != null && nowPlaying.isOpen()
-                || menu != null && menu.isOpen();
+                || menu != null && menu.isOpen() || ask != null && ask.isOpen() || findPanel != null && findPanel.isOpen();
     }
 
     private void setRacked(boolean on) {
@@ -1857,8 +2051,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             backdrop.setDefocus(HOME_DEFOCUS, 520);
             bloom.setStrength(glow(), 520);
             story.hide(300);
+            home.setVisibility(View.VISIBLE);
         }
-        home.animate().alpha(on ? 0f : 1f).setDuration(on ? 1600 : 420).setStartDelay(0).setInterpolator(Ui.SOFT).start();
+        home.animate().alpha(on ? 0f : 1f).setDuration(on ? 1600 : 420).setStartDelay(0).setInterpolator(Ui.SOFT)
+                .withEndAction(on ? () -> {
+                    if (photo) home.setVisibility(View.INVISIBLE);
+                } : null).start();
     }
 
     // ---- keys --------------------------------------------------------------------------------
@@ -1887,6 +2085,22 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (!down) return true;
             welcome.key(code);
             return swallow(code);
+        }
+        // finding an app: the field, the keyboard and the results have the keys; Back leaves it
+        if (findPanel.isOpen()) {
+            if (down && code == KeyEvent.KEYCODE_BACK) {
+                closeFind();
+                return swallow(code);
+            }
+            return super.dispatchKeyEvent(e);
+        }
+        // the name card: the field and the keyboard have the keys; Back leaves it
+        if (ask.isOpen()) {
+            if (down && code == KeyEvent.KEYCODE_BACK) {
+                closeAsk();
+                return swallow(code);
+            }
+            return super.dispatchKeyEvent(e);
         }
         if (!down) {
             if (held && isArrow(code)) settle();
@@ -1949,6 +2163,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (ccOpen) return cc.handleKey(code, getCurrentFocus()) ? swallow(code) : super.dispatchKeyEvent(e);
         // the settings list focuses and scrolls itself
         if (settings.isOpen()) return super.dispatchKeyEvent(e);
+        // a letter on a keyboard remote: straight into finding an app, the letter typed
+        if (first && code >= KeyEvent.KEYCODE_A && code <= KeyEvent.KEYCODE_Z && !folderPanel.isOpen()) {
+            int ch = e.getUnicodeChar();
+            openFind(ch > 0 ? String.valueOf((char) ch) : "");
+            return swallow(code);
+        }
         return homeKey(code, e) ? swallow(code) : super.dispatchKeyEvent(e);
     }
 
@@ -2185,9 +2405,37 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         hideTip();
         switcherOver = over;
         if (over != null) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
-        // straight away from what's kept warm; the list refreshes behind it for next time
-        if (recentCache != null) showSwitcher(recentCache);
-        warmRecents(recentCache == null);
+        // the app just left always goes first: the one opened over, else the last one the Home
+        // button service saw. Without either, a list read before Aura last went to an app can't
+        // know it, so the deck waits the moment it takes to read it afresh
+        String newest = newest(over, recentCache);
+        if (recentCache != null && (recentAt >= awayAt || newest != null)) {
+            recentCache = withNewest(recentCache, newest);
+            showSwitcher(recentCache);
+            // the list refreshes behind it for next time
+            warmRecents(false);
+        } else {
+            warmRecents(true);
+        }
+    }
+
+    /** The app the switcher should put first: the one it opens over, else the newest the Home button service saw. */
+    private static String newest(String over, Map<String, Long> recent) {
+        if (over != null) return over;
+        String last = HomeKeys.lastApp;
+        if (last == null || !HomeKeys.live) return null;
+        Long head = recent == null || recent.isEmpty() ? null : recent.values().iterator().next();
+        return head == null || HomeKeys.lastAppAt > head ? last : null;
+    }
+
+    /** {@code recent} with {@code pkg} moved (or added) to the front. */
+    private java.util.LinkedHashMap<String, Long> withNewest(java.util.LinkedHashMap<String, Long> recent, String pkg) {
+        if (pkg == null || find(pkg) == null) return recent;
+        if (!recent.isEmpty() && recent.keySet().iterator().next().equals(pkg)) return recent;
+        java.util.LinkedHashMap<String, Long> r = new java.util.LinkedHashMap<>();
+        r.put(pkg, pkg.equals(HomeKeys.lastApp) ? HomeKeys.lastAppAt : System.currentTimeMillis());
+        for (Map.Entry<String, Long> e : recent.entrySet()) if (!e.getKey().equals(pkg)) r.put(e.getKey(), e.getValue());
+        return r;
     }
 
     private final Runnable dropFreshSoon = () -> {
@@ -2202,27 +2450,37 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     /** The switcher's list, newest first, read off the main thread and kept for an instant open. */
     private java.util.LinkedHashMap<String, Long> recentCache;
+    /** When that list was read, and when Aura last went behind an app (uptime): older than that, it may miss the app just left. */
+    private long recentAt, awayAt;
+    /** Home twice came while the list was being read: the switcher opens as soon as it's in. */
+    private boolean openWhenWarm;
+    private int warming;
 
     private void warmRecents(boolean thenOpen) {
+        if (thenOpen) openWhenWarm = true;
         final Context app = getApplicationContext();
         final Set<String> launchable = new HashSet<>();
         for (AppRepo.App a : apps) if (watchable(a.pkg)) launchable.add(a.pkg);
-        worker.execute(() -> {
+        final long readAt = SystemClock.uptimeMillis();
+        warming++;
+        recentWorker.execute(() -> {
             final java.util.LinkedHashMap<String, Long> recent = Habits.recentList(app, launchable, 8);
             final Map<String, Tiles.Painter> f = new java.util.HashMap<>();
             final Map<String, Long> stamps = new java.util.HashMap<>();
             faces(app, recent.keySet(), f, stamps, keptFaces, keptStamps);
             runOnUiThread(() -> {
+                warming--;
                 if (isDestroyed()) return;
-                recentCache = recent;
+                recentAt = Math.max(recentAt, readAt);
+                recentCache = withNewest(recent, newest(switcherOver, recent));
                 faces = f;
                 keptFaces = f;
                 keptStamps = stamps;
-                if (thenOpen && !overlayOpen() && !ccOpen && (resumed || switcherOver != null)) {
-                    switcher.prepare(recent, stamps);
-                    showSwitcher(recent);
-                } else {
-                    switcher.prepare(recent, stamps);
+                switcher.prepare(recentCache, stamps);
+                // the last read in flight answers a Home twice that came while it was reading
+                if (openWhenWarm && warming == 0) {
+                    openWhenWarm = false;
+                    if (!overlayOpen() && !ccOpen && (resumed || switcherOver != null)) showSwitcher(recentCache);
                 }
             });
         });
@@ -2388,9 +2646,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             final String id = pkg.substring(7);
             items.add(new AppMenu.Item(R.drawable.ic_settings, "Rename", () -> {
                 closeMenu(card);
-                Folders.rename(this, id);
-                populate();
-                focusTag(pkg);
+                nameFolder(id, false);
             }));
             items.add(new AppMenu.Item(R.drawable.ic_apps, "Remove folder", () -> {
                 closeMenu(card);
@@ -2416,21 +2672,29 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             closeMenu(card);
             chooseFolder(pkg, label, card);
         }));
-        items.add(new AppMenu.Item(R.drawable.ic_hide, "Hide from home", () -> {
-            closeMenu(card);
-            Prefs.hide(this, pkg, true);
-            populate();
-            hud(R.drawable.ic_hide, label + " is hidden  ·  Settings brings it back");
-        }));
-        items.add(new AppMenu.Item(R.drawable.ic_info, "App info", () -> {
-            closeMenu(card);
-            open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + pkg)), card);
-        }));
-        if (removable(pkg)) items.add(new AppMenu.Item(R.drawable.ic_trash, "Uninstall", () -> {
-            closeMenu(card);
-            // Android asks to confirm; the grid updates itself once the app is gone
-            open(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + pkg)), card);
-        }));
+        // a kids' profile can move apps and make folders, nothing more
+        if (!Profiles.kids(this)) {
+            items.add(new AppMenu.Item(R.drawable.ic_picture, "Change its picture", () -> {
+                closeMenu(card);
+                openSettings();
+                if (settings.isOpen()) settings.art(pkg, label);
+            }));
+            items.add(new AppMenu.Item(R.drawable.ic_hide, "Hide from home", () -> {
+                closeMenu(card);
+                Prefs.hide(this, pkg, true);
+                populate();
+                hud(R.drawable.ic_hide, label + " is hidden  ·  Settings brings it back");
+            }));
+            items.add(new AppMenu.Item(R.drawable.ic_info, "App info", () -> {
+                closeMenu(card);
+                open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + pkg)), card);
+            }));
+            if (removable(pkg)) items.add(new AppMenu.Item(R.drawable.ic_trash, "Uninstall", () -> {
+                closeMenu(card);
+                // Android asks to confirm; the grid updates itself once the app is gone
+                open(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + pkg)), card);
+            }));
+        }
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         menu.show(card, label, items);
     }
@@ -2520,7 +2784,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             AppRepo.saveDock(prefs, order);
             populate();
             focusTag(f.tag());
-            hud(R.drawable.ic_check, "New folder: " + f.name + "  ·  hold OK on it to rename");
+            // named straight away, the suggestion already typed in: OK keeps it, or type your own
+            nameFolder(f.id, true);
         }));
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         menu.show(card, "ADD " + label + " TO", items);
@@ -2549,6 +2814,71 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         folderPanel.close();
         stack.hold(false);
         focusTag(tag);
+    }
+
+    private Find findPanel;
+    private View beforeFind;
+
+    private void openFind(String typed) {
+        if (findPanel.isOpen() || ccOpen || settings.isOpen() || welcome != null) return;
+        handler.removeCallbacks(rack);
+        handler.removeCallbacks(goPhoto);
+        stopPreview();
+        hideTip();
+        beforeFind = getCurrentFocus();
+        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        stack.hold(true);
+        findPanel.open(typed);
+        handler.postDelayed(() -> {
+            if (findPanel.isOpen()) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
+        }, 300);
+    }
+
+    private void closeFind() {
+        if (!findPanel.isOpen()) return;
+        for (View v : behindCc()) v.setVisibility(View.VISIBLE);
+        home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        findPanel.close();
+        stack.hold(false);
+        if (beforeFind == null || !beforeFind.isAttachedToWindow() || !beforeFind.requestFocus()) focusGrid(gridAt);
+        wake();
+    }
+
+    private Ask ask;
+    /** The tile focus returns to once the name card closes. */
+    private String askTag;
+
+    /** A folder's name, typed with the TV's keyboard or picked from the suggestions. */
+    private void nameFolder(String id, boolean fresh) {
+        Folders.Folder f = Folders.all(this).get(id);
+        if (f == null) return;
+        handler.removeCallbacks(rack);
+        handler.removeCallbacks(goPhoto);
+        stopPreview();
+        askTag = f.tag();
+        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        List<String> names = Folders.suggestions(this);
+        names.remove(f.name);
+        ask.show(fresh ? "NAME YOUR NEW FOLDER" : "RENAME " + f.name.toUpperCase(Locale.getDefault()), f.name,
+                "Type a name, then OK", names, name -> {
+                    Folders.rename(this, id, name);
+                    afterAsk();
+                    hud(R.drawable.ic_check, fresh ? "New folder: " + name : "Renamed to " + name);
+                });
+    }
+
+    /** Back on the name card: the name stays as it was. */
+    private void closeAsk() {
+        ask.cancel();
+        afterAsk();
+    }
+
+    private void afterAsk() {
+        home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        populate();
+        if (askTag != null) focusTag(askTag);
+        askTag = null;
+        wake();
     }
 
     /** Focus the grid tile with this tag, if it's there. */
@@ -2745,6 +3075,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     @Override
+    public void recents() {
+        closeCc(false);
+        openSwitcher();
+    }
+
+    @Override
     public void photoMode() {
         handler.postDelayed(() -> setPhoto(true), 450);
     }
@@ -2774,7 +3110,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         story.tick(now);
         refreshStatus();
         // the sky and your day every minute; habits only when the hour turns
-        refreshWidgets(hour != lastHour);
+        refreshWidgets(lastHour != -1 && hour != lastHour);
         watchSky();
         showWeather();
         if (resumed && Prefs.on(this, Prefs.WEATHER)) {
@@ -2791,7 +3127,40 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private SettingsPanel settings;
     private View beforeSettings;
 
+    /** Until when the PIN just typed keeps a kids' profile unlocked. */
+    private long unlockedUntil;
+
+    /** {@code then}, after the parents' PIN when this is a kids' profile (one PIN lasts ten minutes). */
+    @Override
+    public void guarded(Runnable then) {
+        if (!Profiles.kids(this) || !Profiles.hasPin(this) || SystemClock.uptimeMillis() < unlockedUntil) {
+            then.run();
+            return;
+        }
+        askTag = null;
+        View before = getCurrentFocus();
+        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        ask.showPin("FOR GROWN-UPS", pin -> {
+            home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+            if (!Profiles.pinOk(this, pin)) {
+                hud(R.drawable.ic_info, "That's not the PIN");
+                if (before != null && before.isAttachedToWindow()) before.requestFocus();
+                return;
+            }
+            unlockedUntil = SystemClock.uptimeMillis() + 10 * 60_000L;
+            then.run();
+        });
+    }
+
     private void openSettings() {
+        if (!Profiles.kids(this) || SystemClock.uptimeMillis() < unlockedUntil || !Profiles.hasPin(this)) {
+            openSettingsNow();
+            return;
+        }
+        guarded(this::openSettingsNow);
+    }
+
+    private void openSettingsNow() {
         if (settings.isOpen() || ccOpen) return;
         if (editing) stopEdit();
         stopPreview();
@@ -2848,18 +3217,53 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 break;
             case "profile":
                 // another person's home screen: rebuilt from their own settings
-                recreate();
+                prefs = Prefs.of(this);
+                unlockedUntil = 0;
+                beforeSettings = null;
+                switcher.forget();
+                stopPreview();
+                live.clear();
+                live.addAll(liveInputs());
+                if (!Prefs.on(this, Prefs.TOP_SHELF)) hideShelf();
+                applyLight();
+                layoutWidgets(false);
+                gridAt = 0;
+                scrollTo(0);
+                populate();
+                if (settings.isOpen()) {
+                    if (Profiles.kids(this) && Profiles.hasPin(this)) closeSettings();
+                    else {
+                        settings.refresh();
+                        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+                    }
+                }
+                backdrop.reload();
+                cc.picksChanged();
+                showWeather();
                 break;
             case "shelf":
                 if (!Prefs.on(this, Prefs.TOP_SHELF)) hideShelf();
                 break;
             case "parallax":
-                Card.parallax = Prefs.on(this, Prefs.PARALLAX);
+            case "light":
+                applyLight();
+                // tiles sway or stay still with it
+                populate();
+                home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+                break;
+            case "art":
+                // a tile's own picture came or went: the list read again, the grid repainted
+                reloadApps(true);
                 break;
             case "photos":
             case "daily":
                 // pure black, your own photos only, Picture of the Day, or one removed: the wall moves on to the new set
                 backdrop.reload();
+                break;
+            case "picks":
+                // a new taste (or Tonight's pick switched on or off): the stack and Control Center follow
+                cc.picksChanged();
+                refreshWidgets(true);
                 break;
             case "weather":
                 showWeather();
@@ -2873,6 +3277,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             default:
                 break;
         }
+    }
+
+    /** Light mode (see {@link Perf}): stillness wherever movement costs frames. */
+    private void applyLight() {
+        boolean light = Perf.light(this);
+        Card.parallax = !light && Prefs.on(this, Prefs.PARALLAX);
+        Backdrop.calm = light;
+        if (bloom != null) bloom.setVisibility(light ? View.GONE : View.VISIBLE);
     }
 
     private List<AppRepo.App> hiddenApps() {
@@ -3059,8 +3471,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
 
             @Override
-            public void homeHint() {
-                HomeActivity.this.homeHint();
+            public void homeHint(String text) {
+                HomeActivity.this.homeHint(text);
             }
         });
         root.addView(welcome, match());

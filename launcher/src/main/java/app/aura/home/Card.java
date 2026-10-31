@@ -53,7 +53,7 @@ final class Card extends View {
     private final int[] loc = new int[2];
     private int paneKey = -1;
 
-    private final Tiles.Painter painter;
+    private Tiles.Painter painter;
     private final float radius;
     private final RectF rect = new RectF();
     private final Paint art = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
@@ -181,6 +181,14 @@ final class Card extends View {
     /** The card's painted picture (for the switcher's zoom to grow from); null before its first layout. */
     Bitmap art() {
         return bitmap;
+    }
+
+    /** A new picture, painted at once (a switcher card whose screen arrived after it was made). */
+    void repaint(Tiles.Painter p) {
+        painter = p;
+        int w = getWidth(), h = getHeight();
+        if (w > 0 && h > 0) onSizeChanged(w, h, w, h);
+        invalidate();
     }
 
     void setDim(float d) {

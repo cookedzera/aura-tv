@@ -15,11 +15,15 @@ import java.util.List;
  * style, widgets, wallpaper and switches. The first profile uses Aura's original settings, so
  * nothing changes for anyone who never adds one. TV-wide things (Block ads, weather location,
  * updates) are shared by everyone.
+ *
+ * A profile can be for kids: Settings, the TV's own settings and an app's Hide and Uninstall then
+ * ask for the parents' PIN, and hidden apps can't be found by typing either.
  */
 final class Profiles {
     static final class Profile {
         final String id, name;
         final int color;
+        boolean kids;
 
         Profile(String id, String name, int color) {
             this.id = id;
@@ -40,6 +44,11 @@ final class Profiles {
         return c.getSharedPreferences("aura_profiles", Context.MODE_PRIVATE);
     }
 
+    /** Read afresh next time (a backup was just restored). */
+    static void forget() {
+        current = null;
+    }
+
     static String current(Context c) {
         String id = current;
         if (id == null) id = current = store(c).getString("current", MAIN);
@@ -58,7 +67,9 @@ final class Profiles {
             JSONArray a = new JSONArray(store(c).getString("list", "[]"));
             for (int i = 0; i < a.length(); i++) {
                 JSONObject o = a.getJSONObject(i);
-                out.add(new Profile(o.getString("id"), o.getString("name"), o.optInt("color", COLORS[0])));
+                Profile p = new Profile(o.getString("id"), o.getString("name"), o.optInt("color", COLORS[0]));
+                p.kids = o.optBoolean("kids", false);
+                out.add(p);
             }
         } catch (JSONException ignored) {
         }
@@ -74,7 +85,7 @@ final class Profiles {
     private static void save(Context c, List<Profile> list) {
         JSONArray a = new JSONArray();
         try {
-            for (Profile p : list) a.put(new JSONObject().put("id", p.id).put("name", p.name).put("color", p.color));
+            for (Profile p : list) a.put(new JSONObject().put("id", p.id).put("name", p.name).put("color", p.color).put("kids", p.kids));
         } catch (JSONException ignored) {
         }
         store(c).edit().putString("list", a.toString()).apply();
@@ -93,6 +104,39 @@ final class Profiles {
     static void use(Context c, String id) {
         current = id;
         store(c).edit().putString("current", id).apply();
+    }
+
+    /** The profile in use is a kids' one: grown-up things ask for the PIN. */
+    static boolean kids(Context c) {
+        String cur = current(c);
+        for (Profile p : all(c)) if (p.id.equals(cur)) return p.kids;
+        return false;
+    }
+
+    static void setKids(Context c, String id, boolean on) {
+        List<Profile> list = all(c);
+        for (Profile p : list) if (p.id.equals(id)) p.kids = on;
+        save(c, list);
+    }
+
+    // ---- the parents' PIN, kept only as a hash ---------------------------------------------------
+
+    static boolean hasPin(Context c) {
+        return !c.getSharedPreferences("aura", Context.MODE_PRIVATE).getString("parent_pin", "").isEmpty();
+    }
+
+    static void setPin(Context c, String pin) {
+        c.getSharedPreferences("aura", Context.MODE_PRIVATE).edit().putString("parent_pin", hash(pin)).apply();
+    }
+
+    static boolean pinOk(Context c, String pin) {
+        return hash(pin).equals(c.getSharedPreferences("aura", Context.MODE_PRIVATE).getString("parent_pin", "-"));
+    }
+
+    private static String hash(String pin) {
+        StringBuilder s = new StringBuilder();
+        for (byte b : Spake2.sha(("aura-pin:" + pin).getBytes(java.nio.charset.StandardCharsets.UTF_8), "SHA-256")) s.append(String.format("%02x", b));
+        return s.toString();
     }
 
     /** Removes a profile and its settings; the main one stays. */

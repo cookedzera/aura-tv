@@ -20,6 +20,8 @@
     <!-- the Wi-Fi sheet reads the connected network's name from the Wi-Fi status report; granted over ADB at setup -->
     <uses-permission android:name="android.permission.DUMP" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- usage history for For You and Today; activated once over ADB with "appops set ... GET_USAGE_STATS allow" -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
     <!-- Wikimedia Picture of the Day, fetched in a background job that survives reboots -->
@@ -111,6 +113,12 @@
         </receiver>
 
         <receiver android:name=".SleepReceiver" android:exported="false" />
+        <!-- after a restart, on Google TV: Aura's Home button service back on if the TV dropped it -->
+        <receiver android:name=".Boot" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
         <receiver android:name=".Updater$Done" android:exported="false" />
 
         <!-- Now Playing: approved over ADB as a notification listener so Android shares media sessions -->

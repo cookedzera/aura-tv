@@ -178,8 +178,24 @@ public class Ambient extends DreamService implements Backdrop.Listener {
             }
         }
         try {
-            if (start) android.provider.Settings.System.putInt(c.getContentResolver(), android.provider.Settings.System.SCREEN_OFF_TIMEOUT, v);
-            else android.provider.Settings.Secure.putInt(c.getContentResolver(), "sleep_timeout", v);
+            if (start) {
+                android.provider.Settings.System.putInt(c.getContentResolver(), android.provider.Settings.System.SCREEN_OFF_TIMEOUT, v);
+                // Android switches off at whichever comes first: a screensaver starting after the TV
+                // has turned off would never show, so turning off moves to just after it
+                int off = offMs(c);
+                if (off >= 0 && off < v) {
+                    int later = -1;
+                    for (int s : OFF_MS) {
+                        if (s >= v) {
+                            later = s;
+                            break;
+                        }
+                    }
+                    android.provider.Settings.Secure.putInt(c.getContentResolver(), "sleep_timeout", later);
+                }
+            } else {
+                android.provider.Settings.Secure.putInt(c.getContentResolver(), "sleep_timeout", v);
+            }
         } catch (SecurityException | IllegalArgumentException e) {
             return now;
         }

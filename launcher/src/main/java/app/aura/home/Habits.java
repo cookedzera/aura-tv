@@ -97,19 +97,30 @@ final class Habits {
      * Up to {@code max} apps among {@code allowed}, most recently used first, each with when it was
      * last on screen. For the app switcher. Off the main thread.
      */
-    static java.util.LinkedHashMap<String, Long> recentList(Context c, java.util.Set<String> allowed, int max) {
+    /** When each app last came to the front, as read from Android so far, and up to when it was read. */
+    private static final Map<String, Long> seen = new HashMap<>();
+    private static long seenTo;
+
+    static synchronized java.util.LinkedHashMap<String, Long> recentList(Context c, java.util.Set<String> allowed, int max) {
         java.util.LinkedHashMap<String, Long> out = new java.util.LinkedHashMap<>();
         long now = System.currentTimeMillis();
         Map<String, Long> last = new HashMap<>();
         // without usage access, Aura's own list is still there
         if (granted(c)) {
-            UsageEvents events = Compat.svc(c, UsageStatsManager.class).queryEvents(now - 7 * DAY, now);
+            // a week of history is read once; after that only what's new (with a minute's overlap,
+            // as events can land late), so the list is quick to read the moment Home is pressed twice
+            long from = now - 7 * DAY;
+            if (seenTo > 0 && seenTo <= now) from = Math.max(from, seenTo - 60_000);
+            else seen.clear();
+            UsageEvents events = Compat.svc(c, UsageStatsManager.class).queryEvents(from, now);
             UsageEvents.Event e = new UsageEvents.Event();
             while (events.hasNextEvent()) {
                 events.getNextEvent(e);
-                if (e.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND && allowed.contains(e.getPackageName())) {
-                    last.put(e.getPackageName(), e.getTimeStamp());
-                }
+                if (e.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) seen.put(e.getPackageName(), e.getTimeStamp());
+            }
+            seenTo = now;
+            for (Map.Entry<String, Long> s : seen.entrySet()) {
+                if (allowed.contains(s.getKey()) && s.getValue() >= now - 7 * DAY) last.put(s.getKey(), s.getValue());
             }
         }
         // Android's history on some TVs only reaches back to the last power-on: Aura's own list
@@ -196,8 +207,13 @@ final class Habits {
      * its own totals drop. Aura counts each boot from the events it's sure of, carries the total
      * from earlier boots today, and never lets a restart take time away.
      */
+    /** The last reading, kept a few seconds: the widget, its top app and Control Center all ask within the same moment. */
+    private static Map<String, Long> memo;
+    private static long memoAt;
+
     private static synchronized Map<String, Long> today(Context c) {
         long now = System.currentTimeMillis(), boot = now - android.os.SystemClock.elapsedRealtime();
+        if (memo != null && now - memoAt >= 0 && now - memoAt < 20_000) return new HashMap<>(memo);
         Calendar cal = Calendar.getInstance();
         cal.set(Calendar.HOUR_OF_DAY, 0);
         cal.set(Calendar.MINUTE, 0);
@@ -235,7 +251,9 @@ final class Habits {
         for (Map.Entry<String, Long> e : thisBoot.entrySet()) {
             total.put(e.getKey(), (total.containsKey(e.getKey()) ? total.get(e.getKey()) : 0) + e.getValue());
         }
-        return total;
+        memo = total;
+        memoAt = now;
+        return new HashMap<>(total);
     }
 
     /** Time on screen per app between two moments, from the moments each came and went. */

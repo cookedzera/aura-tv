@@ -35,6 +35,7 @@ final class Mosaic extends Scene {
     private static final class Tile {
         final RectF box = new RectF();
         Bitmap now, next;
+        BitmapShader nowShader, nextShader;
         Backdrop.Wallpaper wall, nextWall;
         long foldAt = -1, shownAt;
         final Matrix m = new Matrix();
@@ -94,6 +95,7 @@ final class Mosaic extends Scene {
                 if (t.now != null) t.now.recycle();
                 if (t.next != null) t.next.recycle();
                 t.now = t.next = null;
+                t.nowShader = t.nextShader = null;
             }
         });
     }
@@ -135,13 +137,16 @@ final class Mosaic extends Scene {
                     b.recycle();
                     return;
                 }
+                BitmapShader sh = new BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
                 if (first || t.now == null) {
                     t.now = b;
+                    t.nowShader = sh;
                     t.wall = w;
                     t.shownAt = SystemClock.uptimeMillis();
                     if (t == tiles[0]) caption(w);
                 } else {
                     t.next = b;
+                    t.nextShader = sh;
                     t.nextWall = w;
                     t.foldAt = SystemClock.uptimeMillis();
                 }
@@ -195,18 +200,20 @@ final class Mosaic extends Scene {
                 // the old picture folds away around the tile's middle, the new one unfolds into place
                 boolean firstHalf = f < 0.5f;
                 float ang = firstHalf ? 90 * Ui.SOFT.getInterpolation(f * 2) : -90 * (1 - Ui.SOFT.getInterpolation((f - 0.5f) * 2));
-                draw(c, t, firstHalf ? t.now : t.next, ang, now, s);
+                draw(c, t, firstHalf ? t.now : t.next, firstHalf ? t.nowShader : t.nextShader, ang, now, s);
                 if (f >= 1f) {
                     if (t.now != null) t.now.recycle();
                     t.now = t.next;
+                    t.nowShader = t.nextShader;
                     t.wall = t.nextWall;
                     t.next = null;
+                    t.nextShader = null;
                     t.foldAt = -1;
                     t.shownAt = now;
                     if (t == tiles[0]) caption(t.wall);
                 }
             } else if (t.now != null) {
-                draw(c, t, t.now, 0, now, s);
+                draw(c, t, t.now, t.nowShader, 0, now, s);
             }
         }
         if (running) {
@@ -216,8 +223,8 @@ final class Mosaic extends Scene {
     }
 
     /** One tile: the photograph covering it, drifting slowly, folded by {@code angle} around its middle. */
-    private void draw(Canvas c, Tile t, Bitmap b, float angle, long now, float s) {
-        if (b == null) return;
+    private void draw(Canvas c, Tile t, Bitmap b, BitmapShader sh, float angle, long now, float s) {
+        if (b == null || sh == null) return;
         RectF box = t.box;
         float age = (now - t.shownAt) / 1000f;
         float k = Math.max(box.width() / b.getWidth(), box.height() / b.getHeight()) * (1.06f + 0.04f * (float) Math.sin(age / 9));
@@ -225,7 +232,6 @@ final class Mosaic extends Scene {
         float dy = (box.height() - b.getHeight() * k) / 2f;
         t.m.setScale(k, k);
         t.m.postTranslate(box.left + dx, box.top + dy);
-        BitmapShader sh = new BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
         sh.setLocalMatrix(t.m);
         pic.setShader(sh);
         c.save();
