@@ -22,6 +22,8 @@ class GlassFrame extends FrameLayout {
     float darkness;
     /** White frosting laid over the blur, for clear light glass rather than smoked glass. */
     float frost;
+    /** How much of the photograph's colour comes through: panes are neutral, full-screen veils keep its mood. */
+    float saturation;
     int plainColor = 0x1AFFFFFF;
     boolean edgeLight = true;
     float highlight;
@@ -38,6 +40,7 @@ class GlassFrame extends FrameLayout {
         this.backdrop = backdrop;
         this.radius = Ui.dpf(radiusDp);
         this.darkness = darkness;
+        saturation = radiusDp > 0 ? Ui.GLASS_SAT : 0.85f;
         setWillNotDraw(false);
         edge.setStyle(Paint.Style.STROKE);
         edge.setStrokeWidth(Math.max(1f, Ui.dpf(0.75f)));
@@ -84,21 +87,21 @@ class GlassFrame extends FrameLayout {
     protected void onSizeChanged(int w, int h, int ow, int oh) {
         super.onSizeChanged(w, h, ow, oh);
         box.set(0, 0, w, h);
-        edge.setShader(new LinearGradient(0, 0, 0, h,
-                new int[]{0x6BFFFFFF, 0x17FFFFFF, 0x0DFFFFFF}, new float[]{0f, 0.4f, 1f}, Shader.TileMode.CLAMP));
+        // a hairline all the way round, brightest where the light falls on the top edge
+        edge.setShader(new LinearGradient(0, 0, w * 0.35f, h,
+                new int[]{0x8CFFFDF9, 0x3DFFFDF9, 0x2EFFFFFF}, new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
     }
 
     @Override
     protected void onDraw(Canvas c) {
-        int frostC = Ui.withAlpha(0xFFFFFFFF, Math.round(255 * frost));
+        int frostC = Ui.withAlpha(Ui.IVORY, Math.round(255 * frost));
         int hi = Ui.withAlpha(0xFFFFFFFF, Math.round(245 * highlight));
         if (backdrop == null) {
             fill.setColor(Ui.over(Ui.over(plainColor, frostC), hi));
             c.drawRoundRect(box, radius, radius, fill);
             return;
         }
-        int tint = Ui.withAlpha(Ui.mix(0xFF000000, Ui.mix(backdrop.accent(), 0xFF000000, 0.45f), 0.22f),
-                Math.round(255 * darkness));
+        int tint = Ui.withAlpha(Ui.SMOKE, Math.round(255 * darkness));
         if (!backdrop.hasImage()) {
             fill.setColor(Ui.over(Ui.over(tint, frostC), hi));
             c.drawRoundRect(box, radius, radius, fill);
@@ -108,7 +111,7 @@ class GlassFrame extends FrameLayout {
             tintKey = tint;
             frostKey = frostC;
             highlightKey = hi;
-            blurPaint.setColorFilter(Ui.glass(1.7f, tint, frostC, hi));
+            blurPaint.setColorFilter(Ui.glass(saturation, tint, frostC, hi));
         }
         getLocationInWindow(loc);
         backdrop.drawBlurRound(c, box, radius, loc[0], loc[1], blurPaint);

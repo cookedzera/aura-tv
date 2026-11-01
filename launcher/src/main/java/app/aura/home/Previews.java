@@ -37,7 +37,7 @@ final class Previews {
     private static final String DIR = "previews", KEY = "set_previews";
     private static final long MAX_AGE = 2 * 86_400_000L;
     /** One file at a time, in order: a capture, then a deletion, never interleaved. */
-    private static final ExecutorService IO = Executors.newSingleThreadExecutor();
+    private static final ExecutorService IO = Compat.background("previews", android.os.Process.THREAD_PRIORITY_BACKGROUND);
     /** The newest capture, still in memory for a switcher opening over its app this very moment. */
     private static volatile Bitmap fresh;
     private static volatile String freshPkg;

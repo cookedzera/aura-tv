@@ -101,6 +101,18 @@ final class Drop {
     /** The app whose tile the art page is for, while it's open. */
     volatile String artFor;
 
+    /**
+     * The routes this server answers, when it was opened for one thing (a key, a pairing code, a
+     * tile's picture, a backup): null for the full phone page. A code for pairing then can't also
+     * fetch the backup, restore one, or send an app to install.
+     */
+    private volatile java.util.Set<String> only;
+
+    Drop only(String... routes) {
+        only = new java.util.HashSet<>(java.util.Arrays.asList(routes));
+        return this;
+    }
+
     private static final int PORT = 8686;
     private static final long MAX_APK = 500L << 20;
     private static final String ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
@@ -191,6 +203,11 @@ final class Drop {
             }
             String rest = target.substring(base.length());
             Map<String, String> args = args(query);
+            java.util.Set<String> allowed = only;
+            if (allowed != null && !rest.isEmpty() && !allowed.contains(rest)) {
+                send(s, 404, "text/plain", new byte[0]);
+                return;
+            }
             if (rest.isEmpty()) {
                 send(s, 302, "text/plain", new byte[0], "Location: " + base + "/\r\n");
             } else if (rest.equals("/")) {
@@ -214,7 +231,11 @@ final class Drop {
                     main.post(() -> listener.onKey(text));
                     send(s, 200, "application/json", "{\"ok\":true}".getBytes(StandardCharsets.UTF_8));
                 } else {
-                    send(s, 200, "text/html; charset=utf-8", KEY_PAGE.getBytes(StandardCharsets.UTF_8));
+                    String page = unsplashKey ? KEY_PAGE.replace("TMDB key", "Unsplash key")
+                            .replace("<p>On <a href=\"https://www.themoviedb.org/settings/api\"", "<p>On <a href=\"https://unsplash.com/oauth/applications\"")
+                            .replace("themoviedb.org → Settings → API</a> (a free account), copy the <b>API Key</b> or the <b>API Read Access Token</b>",
+                                    "unsplash.com → Your apps</a> (a free account), create an app and copy its <b>Access Key</b>") : KEY_PAGE;
+                    send(s, 200, "text/html; charset=utf-8", page.getBytes(StandardCharsets.UTF_8));
                 }
             } else if (rest.equals("/pair")) {
                 if (method.equals("POST")) {
@@ -337,6 +358,9 @@ final class Drop {
                 + "</style></head><body><main><small>Aura</small><h1>" + title + "</h1><p>" + lede + "</p>" + buttons
                 + "<div id=\"s\"></div></main><script>" + script + "</script></body></html>").getBytes(StandardCharsets.UTF_8);
     }
+
+    /** The key page asks for an Unsplash key rather than a TMDB one (Settings → Wallpaper sources). */
+    boolean unsplashKey;
 
     /** The phone's page for a TMDB key: paste it (copied from TMDB's own settings page), send it to the TV. */
     private static final String KEY_PAGE = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"

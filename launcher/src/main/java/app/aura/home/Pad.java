@@ -85,7 +85,11 @@ class Pad extends GlassFrame {
     @Override
     public boolean onKeyDown(int code, KeyEvent e) {
         if (isConfirm(code)) {
-            if (e.getRepeatCount() == 0) e.startTracking();
+            if (e.getRepeatCount() == 0) {
+                e.startTracking();
+                animate().scaleX(focusScale * 0.96f).scaleY(focusScale * 0.96f).setDuration(80).setStartDelay(0)
+                        .setInterpolator(Ui.DECEL).setUpdateListener(null).start();
+            }
             return true;
         }
         return super.onKeyDown(code, e);
@@ -95,6 +99,8 @@ class Pad extends GlassFrame {
     public boolean onKeyLongPress(int code, KeyEvent e) {
         if (isConfirm(code) && onLongClick != null) {
             longFired = true;
+            animate().scaleX(isFocused() ? focusScale : 1f).scaleY(isFocused() ? focusScale : 1f)
+                    .setDuration(260).setStartDelay(0).setInterpolator(Ui.SPRING).setUpdateListener(null).start();
             onLongClick.run();
             return true;
         }
@@ -104,13 +110,10 @@ class Pad extends GlassFrame {
     @Override
     public boolean onKeyUp(int code, KeyEvent e) {
         if (isConfirm(code)) {
-            if (!longFired && !e.isCanceled() && onClick != null) {
-                animate().scaleX(focusScale * 0.95f).scaleY(focusScale * 0.95f).setDuration(70).setStartDelay(0)
-                        .setInterpolator(Ui.DECEL).setUpdateListener(null)
-                        .withEndAction(() -> animate().scaleX(isFocused() ? focusScale : 1f)
-                                .scaleY(isFocused() ? focusScale : 1f).setDuration(260).setInterpolator(Ui.SPRING).start())
-                        .start();
-                onClick.run();
+            if (!longFired) {
+                animate().scaleX(isFocused() ? focusScale : 1f).scaleY(isFocused() ? focusScale : 1f)
+                        .setDuration(260).setStartDelay(0).setInterpolator(Ui.SPRING).setUpdateListener(null).start();
+                if (!e.isCanceled() && onClick != null) onClick.run();
             }
             longFired = false;
             return true;

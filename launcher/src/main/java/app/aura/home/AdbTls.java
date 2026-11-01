@@ -67,21 +67,18 @@ final class AdbTls {
         if (nsd == null) return null;
         final AtomicReference<InetSocketAddress> found = new AtomicReference<>();
         final CountDownLatch done = new CountDownLatch(1);
+        // Android 11 allows only one active resolveService at a time (FAILURE_ALREADY_ACTIVE)
+        final java.util.ArrayDeque<NsdServiceInfo> queue = new java.util.ArrayDeque<>();
+        final boolean[] busy = {false};
         NsdManager.DiscoveryListener l = new NsdManager.DiscoveryListener() {
             @Override
             public void onServiceFound(NsdServiceInfo info) {
-                nsd.resolveService(info, new NsdManager.ResolveListener() {
-                    @Override
-                    public void onResolveFailed(NsdServiceInfo i, int error) {
-                    }
-
-                    @Override
-                    public void onServiceResolved(NsdServiceInfo i) {
-                        if (i.getHost() == null) return;
-                        found.compareAndSet(null, new InetSocketAddress(i.getHost(), i.getPort()));
-                        done.countDown();
-                    }
-                });
+                synchronized (queue) {
+                    queue.add(info);
+                    if (busy[0]) return;
+                    busy[0] = true;
+                }
+                resolveNext(nsd, queue, busy, found, done);
             }
 
             @Override
@@ -110,12 +107,58 @@ final class AdbTls {
             done.await(ms, TimeUnit.MILLISECONDS);
         } catch (InterruptedException | RuntimeException ignored) {
         } finally {
+            synchronized (queue) {
+                queue.clear();
+            }
             try {
                 nsd.stopServiceDiscovery(l);
             } catch (RuntimeException ignored) {
             }
         }
         return found.get();
+    }
+
+    private static void resolveNext(NsdManager nsd, java.util.ArrayDeque<NsdServiceInfo> queue, boolean[] busy,
+                                    AtomicReference<InetSocketAddress> found, CountDownLatch done) {
+        final NsdServiceInfo next;
+        synchronized (queue) {
+            if (found.get() != null || queue.isEmpty()) {
+                busy[0] = false;
+                return;
+            }
+            busy[0] = true;
+            next = queue.poll();
+        }
+        try {
+            nsd.resolveService(next, new NsdManager.ResolveListener() {
+                @Override
+                public void onResolveFailed(NsdServiceInfo i, int error) {
+                    resolveNext(nsd, queue, busy, found, done);
+                }
+
+                @Override
+                public void onServiceResolved(NsdServiceInfo i) {
+                    if (ownHost(i.getHost())) {
+                        found.compareAndSet(null, new InetSocketAddress(i.getHost(), i.getPort()));
+                        done.countDown();
+                    }
+                    resolveNext(nsd, queue, busy, found, done);
+                }
+            });
+        } catch (RuntimeException e) {
+            resolveNext(nsd, queue, busy, found, done);
+        }
+    }
+
+    /** True only when {@code host} is one of this TV's own network addresses (never another device on Wi-Fi). */
+    private static boolean ownHost(java.net.InetAddress host) {
+        if (host == null) return false;
+        if (host.isLoopbackAddress()) return true;
+        try {
+            return java.net.NetworkInterface.getByInetAddress(host) != null;
+        } catch (java.net.SocketException e) {
+            return false;
+        }
     }
 
     // ---- TLS with Aura's own key ---------------------------------------------------------------

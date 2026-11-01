@@ -48,6 +48,9 @@ final class Switcher extends FrameLayout {
         /** Forget it in recents and ask Android to free it. */
         void close(AppRepo.App a);
 
+        /** Forget and stop every app in the deck at once. */
+        void closeAll(List<AppRepo.App> all);
+
         /** Everything was closed: {@code count} apps. */
         void cleared(int count);
 
@@ -658,8 +661,8 @@ final class Switcher extends FrameLayout {
         if (busy) return;
         busy = true;
         int n = apps.size();
+        host.closeAll(new ArrayList<>(apps));
         for (int k = 0; k < items.size(); k++) {
-            host.close(apps.get(k));
             items.get(k).animate().translationY(-Ui.dp(420)).setStartDelay(40L * Math.abs(k - at)).setDuration(340).setInterpolator(Ui.SOFT).start();
         }
         shadow.animate().translationY(-Ui.dp(420)).setStartDelay(0).setDuration(340).setInterpolator(Ui.SOFT).start();
@@ -691,9 +694,14 @@ final class Switcher extends FrameLayout {
 
     /**
      * Cards kept between openings, painted ahead of time: building and painting eight at the moment
-     * Home is pressed twice made the first frames stutter. Each costs ~2 MB at this size; at most six.
+     * Home is pressed twice made the first frames stutter. Each costs ~2 MB at this size; at most eight.
      */
-    private final Map<String, LinearLayout> made = new java.util.HashMap<>();
+    private final Map<String, LinearLayout> made = new java.util.LinkedHashMap<String, LinearLayout>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, LinearLayout> eldest) {
+            return size() > 8;
+        }
+    };
     private final java.util.ArrayDeque<AppRepo.App> toPaint = new java.util.ArrayDeque<>();
     private final Runnable paintNext = new Runnable() {
         @Override
@@ -738,11 +746,10 @@ final class Switcher extends FrameLayout {
         if (isOpen()) return;
         stamps.clear();
         stamps.putAll(faces);
-        if (made.size() > 6) made.clear();
         toPaint.clear();
         for (String pkg : recent.keySet()) {
             AppRepo.App a = host.find(pkg);
-            if (a != null && (!made.containsKey(a.pkg) || stale(a.pkg))) toPaint.add(a);
+            if (a != null && (made.get(a.pkg) == null || stale(a.pkg))) toPaint.add(a);
         }
         removeCallbacks(paintNext);
         if (!toPaint.isEmpty()) postDelayed(paintNext, 32);

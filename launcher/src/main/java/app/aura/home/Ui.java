@@ -2,6 +2,9 @@ package app.aura.home;
 
 import android.animation.TimeInterpolator;
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BlurMaskFilter;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
@@ -18,11 +21,23 @@ final class Ui {
     static float density = 1f, scaled = 1f;
     static Typeface thin, light, regular, medium, semibold, bold, heavy;
 
-    /** Under-damped spring: quick lift with a soft overshoot. */
-    static final TimeInterpolator SPRING = t -> (float) (1 - Math.exp(-5.2 * t) * Math.cos(8.2 * t));
+    /** Calm hydraulic spring: quick lift with a gentle, weightless settle. */
+    static final TimeInterpolator SPRING = t -> (float) (1 - Math.exp(-6.0 * t) * Math.cos(4.2 * t));
     static final TimeInterpolator EMPHASIZED = new PathInterpolator(0.2f, 0f, 0f, 1f);
     static final TimeInterpolator SOFT = new PathInterpolator(0.4f, 0f, 0.2f, 1f);
     static final TimeInterpolator DECEL = new DecelerateInterpolator(2f);
+
+    /**
+     * The glass: the photograph behind it mostly drained of colour, so every pane reads as neutral
+     * frosted glass on any wallpaper, between a smoke that holds back bright skies and an ivory frost.
+     */
+    static final float GLASS_SAT = 0.4f;
+    static final int SMOKE = 0xFF101215, IVORY = 0xFFFFFDF9;
+    /** The focus ring: warm ivory, a touch brighter at the top, as if lit from above. */
+    static final int RING_TOP = 0xFFFBF2E7, RING_BOTTOM = 0xFFEADCCA;
+    /** How far a raised pane's shadow ({@link #shadow}) reaches past the pane, in dp. */
+    static final float SHADOW_REACH = 24f;
+    private static final java.util.HashMap<String, Bitmap> SHADOWS = new java.util.HashMap<>();
 
     private Ui() { }
 
@@ -155,6 +170,37 @@ final class Ui {
         m.setSaturation(saturation);
         m.postConcat(new ColorMatrix(new float[]{k, 0, 0, 0, r, 0, k, 0, 0, g, 0, 0, k, 0, b, 0, 0, 0, 1, 0}));
         return new ColorMatrixColorFilter(m);
+    }
+
+    /**
+     * The soft shadow a raised pane of {@code w} x {@code h} px casts, as an alpha mask a quarter of
+     * the size, drawn stretched over the pane's area plus {@link #SHADOW_REACH} on every side: a blur
+     * is smooth, so the small mask can't be told apart and costs a sixteenth to make and keep. Made
+     * once per size, at layout, and shared by every pane of that size.
+     */
+    static Bitmap shadow(int w, int h, float radius) {
+        String key = w + "x" + h + "r" + Math.round(radius);
+        Bitmap b = SHADOWS.get(key);
+        if (b != null) return b;
+        float reach = dpf(SHADOW_REACH) / 4f;
+        b = Bitmap.createBitmap(Math.max(1, Math.round(w / 4f + 2 * reach)), Math.max(1, Math.round(h / 4f + 2 * reach)),
+                Bitmap.Config.ALPHA_8);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setMaskFilter(new BlurMaskFilter(Math.max(1f, dpf(10) / 4f), BlurMaskFilter.Blur.NORMAL));
+        // a touch narrower than the pane, as beneath a card held up off a table
+        float in = dpf(8) / 4f;
+        new Canvas(b).drawRoundRect(reach + in, reach + in / 2f, reach + w / 4f - in, reach + h / 4f, radius / 4f, radius / 4f, p);
+        SHADOWS.put(key, b);
+        return b;
+    }
+
+    /** Lays {@link #shadow} under a pane {@code w} x {@code h}, dropped {@code drop} px and at {@code alpha}. */
+    static void drawShadow(Canvas c, Bitmap shadow, int w, int h, float drop, int alpha, Paint p, android.graphics.Matrix m) {
+        float reach = dpf(SHADOW_REACH);
+        m.setScale((w + 2 * reach) / shadow.getWidth(), (h + 2 * reach) / shadow.getHeight());
+        m.postTranslate(-reach, -reach + drop);
+        p.setAlpha(alpha);
+        c.drawBitmap(shadow, m, p);
     }
 
     static float clamp(float v, float lo, float hi) {

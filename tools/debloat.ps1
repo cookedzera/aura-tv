@@ -2,7 +2,8 @@
 # Every change is `pm disable-user` -- nothing is uninstalled. Undo with restore.ps1.
 param(
     [string]$Tv = $env:AURA_TV,
-    [switch]$IncludeGoogleTvHome   # only after the new launcher is installed and set as home
+    [switch]$IncludeGoogleTvHome,   # only after the new launcher is installed and set as home
+    [switch]$DisableChromecast      # optional: disable Chromecast built-in if you don't cast from phone/laptop
 )
 if (-not $Tv) { throw "Pass the TV's address, e.g. -Tv 192.168.1.50:5555, or set `$env:AURA_TV." }
 
@@ -34,12 +35,14 @@ $targets = [ordered]@{
     "com.realtek.tv.atv"                            = "Analog antenna/cable tuner"
     "com.realtek.dtv"                               = "Digital antenna/cable tuner"
     # Features you said you don't use
-    "com.google.android.apps.mediashell"            = "Chromecast built-in (casting)"
     "com.google.android.tv.remote.service"          = "Phone-as-remote service"
     "com.google.android.apps.tv.dreamx"             = "Google ambient screensaver (replaced by Aura's)"
     "com.google.android.youtube.tvmusic"            = "YouTube Music"
     "com.google.android.videos"                     = "Google TV store (rent/buy, home-screen promos)"
     "com.google.android.play.games"                 = "Play Games"
+}
+if ($DisableChromecast) {
+    $targets["com.google.android.apps.mediashell"] = "Chromecast built-in (casting)"
 }
 if ($IncludeGoogleTvHome) {
     $targets["com.google.android.apps.tv.launcherx"] = "Google TV home screen (ads, ~150 MB RAM)"

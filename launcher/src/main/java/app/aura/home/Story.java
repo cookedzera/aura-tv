@@ -30,7 +30,7 @@ import java.util.Random;
 final class Story extends FrameLayout implements Backdrop.Tick {
     private static final int WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
     /** How long a caption stays before it leaves the picture to itself. */
-    private static final long CAPTION_MS = 14_000;
+    private static final long CAPTION_MS = 30_000;
 
     private final LinearLayout clock, caption;
     private final TextView time, date, title, about, credit;
@@ -68,10 +68,11 @@ final class Story extends FrameLayout implements Backdrop.Tick {
         caption.addView(title, lp(0, Gravity.END));
         about = Ui.text(c, 13.5f, Ui.regular, 0xADFFFFFF);
         about.setSingleLine(false);
-        about.setMaxLines(2);
+        // room for a few sentences about the place: something to read, not just a name
+        about.setMaxLines(3);
         about.setEllipsize(TextUtils.TruncateAt.END);
         about.setGravity(Gravity.END);
-        about.setMaxWidth(Ui.dp(400));
+        about.setMaxWidth(Ui.dp(460));
         about.setLineSpacing(Ui.dpf(2), 1f);
         caption.addView(about, lp(5, Gravity.END));
         credit = Ui.text(c, 11, Ui.regular, 0x6BFFFFFF);
@@ -140,8 +141,14 @@ final class Story extends FrameLayout implements Backdrop.Tick {
         if (w == shown) return;
         shown = w;
         String about = !w.line.isEmpty() ? w.line : w.region.replace(" · ", ", ");
-        String by = w.author.isEmpty() ? w.license : "Photo by " + w.author + (w.license.isEmpty() ? "" : "  ·  " + w.license);
-        change(w.place, about, by, animate);
+        // who took it, its licence, and where it came from (Windows Spotlight, Bing, Unsplash…)
+        StringBuilder by = new StringBuilder(w.author.isEmpty() ? "" : "Photo by " + w.author);
+        for (String part : new String[]{w.license, w.line.isEmpty() ? "" : w.region}) {
+            if (part.isEmpty()) continue;
+            if (by.length() > 0) by.append("  ·  ");
+            by.append(part);
+        }
+        change(w.place, about, by.toString(), animate);
     }
 
     /** Any other scene's caption: {@code context} (where, or what kind of scene) joins the credit line. */

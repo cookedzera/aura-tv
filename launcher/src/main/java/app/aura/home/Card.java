@@ -37,6 +37,8 @@ final class Card extends View {
     boolean sway;
     /** The bright ring on focus; the switcher's big cards go without, as on tvOS. */
     boolean bezel = true;
+    /** Apple TV tile: borderless rounded card that lifts with a deep drop shadow and glossy sheen. */
+    boolean tvos;
     /**
      * The picture's resolution against the card's size. The switcher's near-full-screen cards paint
      * at 0.6 and the GPU scales them up: their pictures are 640x360 anyway, and the texture to
@@ -68,7 +70,9 @@ final class Card extends View {
     /** Parallax on focus (Settings): the art moves a layer beneath the glass as the tile tilts. */
     static boolean parallax = true;
     private LinearGradient glintShader;
-    private Bitmap bitmap, reflection;
+    private Bitmap bitmap, reflection, liftShadow;
+    private final Paint shadowPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Matrix shadowMatrix = new Matrix();
     private float focus, dim, glintPos = -1f;
     private ValueAnimator focusAnim, glintAnim;
     private boolean longFired;
@@ -85,7 +89,7 @@ final class Card extends View {
             public void getOutline(View v, Outline o) {
                 o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), radius);
                 // a shadow would show through the glass and muddy it; the bloom lights glass instead
-                o.setAlpha(glass != null ? 0f : 1f);
+                o.setAlpha(glass != null || tvos ? 0f : 1f);
             }
         });
         // coloured shadows arrived in Android 9; earlier ones are simply grey
@@ -94,11 +98,10 @@ final class Card extends View {
             setOutlineAmbientShadowColor(Ui.mix(color, 0xFF000000, 0.4f));
         }
         rim.setStyle(Paint.Style.STROKE);
-        rim.setStrokeWidth(Ui.hair());
+        rim.setStrokeWidth(Math.max(1f, Ui.dpf(0.75f)));
         rim.setColor(0xFFFFFFFF);
         ring.setStyle(Paint.Style.STROKE);
-        ring.setStrokeWidth(Ui.dpf(radiusDp > 12 ? 2.5f : 2f));
-        ring.setColor(0xFFFFFFFF);
+        ring.setStrokeWidth(Ui.dpf(radiusDp > 12 ? 2.2f : 1.8f));
         shade.setColor(0xFF000000);
         mark.setColor(0xFFFFFFFF);
         mark.setShadowLayer(Ui.dpf(3), 0, Ui.dpf(1), 0x99000000);
@@ -121,8 +124,15 @@ final class Card extends View {
                 bs.setLocalMatrix(up);
             }
             art.setShader(bs);
+            // glass has no system shadow (it would show through the pane), so a lifted glass tile
+            // casts this one; opaque tiles keep their elevation shadow
+            liftShadow = (glass != null && bezel || tvos) && lift ? Ui.shadow(w, h, radius) : null;
         }
-        sheen.setShader(new LinearGradient(0, 0, w * 0.55f, h, 0x4DFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+        // a hairline all the way round the pane, brightest where the light falls on the top edge
+        rim.setShader(new LinearGradient(0, 0, w * 0.35f, h,
+                new int[]{0x8CFFFDF9, 0x3DFFFDF9, 0x2EFFFFFF}, new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
+        ring.setShader(new LinearGradient(0, 0, 0, h, Ui.RING_TOP, Ui.RING_BOTTOM, Shader.TileMode.CLAMP));
+        sheen.setShader(new LinearGradient(0, 0, w * 0.55f, h, 0x38FFFDF9, 0x00FFFFFF, Shader.TileMode.CLAMP));
         glintShader = new LinearGradient(0, 0, w * 0.42f, h, new int[]{0x00FFFFFF, 0x66FFFFFF, 0x00FFFFFF},
                 new float[]{0.4f, 0.5f, 0.6f}, Shader.TileMode.CLAMP);
         glint.setShader(glintShader);
@@ -200,22 +210,25 @@ final class Card extends View {
     @Override
     protected void onDraw(Canvas c) {
         int w = getWidth(), h = getHeight();
+        if (liftShadow != null && focus > 0f) {
+            // raised, the pane casts a soft shadow onto the photograph, falling further as it lifts
+            Ui.drawShadow(c, liftShadow, w, h, Ui.dpf(tvos ? 11 : 9) * focus, Math.round((tvos ? 165 : 120) * focus), shadowPaint, shadowMatrix);
+        }
         if (glass != null) {
-            // a little smoke for contrast, then a clean wash of the app's colour; focused, the pane lights up
-            int smoke = Ui.withAlpha(0xFF0E1116, Math.round(255 * 0.18f * (1f - focus)));
-            int wash = Ui.withAlpha(color, Math.round(255 * (0.15f + 0.1f * focus)));
-            int frost = Ui.withAlpha(0xFFFFFFFF, Math.round(255 * (0.07f + 0.15f * focus)));
+            // neutral frosted glass, the same on every wallpaper; focused, the pane fills with light
+            int smoke = Ui.withAlpha(Ui.SMOKE, Math.round(255 * (0.40f - 0.16f * focus)));
+            int frost = Ui.withAlpha(Ui.IVORY, Math.round(255 * (0.11f + 0.21f * focus)));
             if (glass.hasImage()) {
                 // one slice of the shared, pre-blurred photograph with the tints folded into its filter
                 int key = Math.round(focus * 64);
                 if (key != paneKey) {
                     paneKey = key;
-                    blur.setColorFilter(Ui.glass(1.6f, smoke, wash, frost));
+                    blur.setColorFilter(Ui.glass(Ui.GLASS_SAT, smoke, frost));
                 }
                 getLocationInWindow(loc);
                 glass.drawBlurRound(c, rect, radius, loc[0], loc[1], blur);
             } else {
-                pane.setColor(Ui.over(Ui.over(smoke, wash), frost));
+                pane.setColor(Ui.over(smoke, frost));
                 c.drawRoundRect(rect, radius, radius, pane);
             }
         }
@@ -255,13 +268,16 @@ final class Card extends View {
             shade.setAlpha(Math.round(255 * Math.min(0.85f, dim)));
             c.drawRoundRect(rect, radius, radius, shade);
         }
-        rim.setAlpha(Math.round((glass != null ? 72 : 46) * (1f - focus)));
-        float i = rim.getStrokeWidth() / 2f;
-        c.drawRoundRect(i, i, w - i, h - i, radius, radius, rim);
-        if (focus > 0f && bezel) {
-            // the ring sits just outside the art, like a lit bezel
-            float o = ring.getStrokeWidth() / 2f + Ui.dpf(1f);
-            ring.setAlpha(Math.round(245 * focus));
+        if (!tvos) {
+            rim.setAlpha(Math.round((glass != null ? 255 : 110) * (1f - 0.6f * focus)));
+            float i = rim.getStrokeWidth() / 2f;
+            c.drawRoundRect(i, i, w - i, h - i, radius, radius, rim);
+        }
+        if (focus > 0f && bezel && !tvos) {
+            // the ring sits just outside the art, a hair of the photo between them, like a lit bezel;
+            // it settles outward into place as it lights
+            float o = ring.getStrokeWidth() / 2f + Ui.dpf(1f) * (0.4f + 0.6f * focus);
+            ring.setAlpha(Math.round(255 * focus));
             c.drawRoundRect(-o, -o, w + o, h + o, radius + o, radius + o, ring);
         }
         if (badge) c.drawCircle(w - Ui.dpf(9), Ui.dpf(9), Ui.dpf(3.5f), mark);
@@ -281,7 +297,16 @@ final class Card extends View {
         focusAnim.start();
         if (lift) {
             if (swayAnim != null) swayAnim.cancel();
-            animate().scaleX(gained ? 1.1f : 1f).scaleY(gained ? 1.1f : 1f).translationZ(gained ? Ui.dpf(18) : 0f)
+            if (gained && sway) {
+                setCameraDistance(Ui.density * 5200);
+                // tvOS entry bank: the leading edge dips into the step and springs level on the GPU
+                if (direction == FOCUS_RIGHT) setRotationY(4.2f);
+                else if (direction == FOCUS_LEFT) setRotationY(-4.2f);
+                else if (direction == FOCUS_DOWN) setRotationX(-3.4f);
+                else if (direction == FOCUS_UP) setRotationX(3.4f);
+            }
+            float sc = gained ? (tvos ? 1.12f : 1.1f) : 1f;
+            animate().scaleX(sc).scaleY(sc).translationZ(gained ? Ui.dpf(18) : 0f)
                     .rotationX(0f).rotationY(0f)
                     .setInterpolator(gained ? Ui.SPRING : Ui.DECEL).setDuration(gained ? 460 : 240)
                     .setStartDelay(0).setUpdateListener(null).start();
@@ -317,6 +342,7 @@ final class Card extends View {
     private final Runnable hold = () -> {
         if (onLongClick == null || !isFocused()) return;
         longFired = true;
+        press(false);
         onLongClick.run();
     };
 
@@ -325,8 +351,12 @@ final class Card extends View {
         if (Pad.isConfirm(code)) {
             if (e.getRepeatCount() == 0) {
                 longFired = false;
+                press(true);
                 removeCallbacks(hold);
                 if (onLongClick != null) postDelayed(hold, android.view.ViewConfiguration.getLongPressTimeout());
+            } else if (!longFired && (e.getFlags() & KeyEvent.FLAG_LONG_PRESS) != 0) {
+                removeCallbacks(hold);
+                hold.run();
             }
             return true;
         }
@@ -337,10 +367,19 @@ final class Card extends View {
     public boolean onKeyUp(int code, KeyEvent e) {
         if (Pad.isConfirm(code)) {
             removeCallbacks(hold);
+            if (!longFired) press(false);
             if (!longFired && !e.isCanceled() && onClick != null) onClick.run();
             longFired = false;
             return true;
         }
         return super.onKeyUp(code, e);
+    }
+
+    private void press(boolean down) {
+        float s = down ? (lift ? 1.03f : 0.95f) : (isFocused() && lift ? (tvos ? 1.12f : 1.1f) : 1f);
+        float z = down ? (lift ? Ui.dpf(8) : 0f) : (isFocused() && lift ? Ui.dpf(18) : 0f);
+        animate().scaleX(s).scaleY(s).translationZ(z)
+                .setDuration(down ? 90 : 300).setStartDelay(0)
+                .setInterpolator(down ? Ui.DECEL : Ui.SPRING).setUpdateListener(null).start();
     }
 }

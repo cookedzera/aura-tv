@@ -19,6 +19,9 @@
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <!-- the Wi-Fi sheet reads the connected network's name from the Wi-Fi status report; granted over ADB at setup -->
     <uses-permission android:name="android.permission.DUMP" />
+    <!-- the remote's profile button: this TV's firmware opens Google TV's profile picker for it, and the
+         system log is the only place that says so; granted over ADB at setup (ProfileButton) -->
+    <uses-permission android:name="android.permission.READ_LOGS" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />

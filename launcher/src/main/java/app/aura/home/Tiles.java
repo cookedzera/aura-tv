@@ -2,6 +2,7 @@ package app.aura.home;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.BlurMaskFilter;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
@@ -33,18 +34,21 @@ final class Tiles {
 
     /** Your own picture for an app (see {@link Art}), filling the tile in every look. */
     static Painter picture(Bitmap b) {
+        // made once, not on every redraw of a tile that grows and glints as focus passes
+        final android.graphics.Matrix m = new android.graphics.Matrix();
+        final Paint p = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
         return (c, w, h) -> {
             float k = Math.max(w / (float) b.getWidth(), h / (float) b.getHeight());
-            android.graphics.Matrix m = new android.graphics.Matrix();
             m.setScale(k, k);
             m.postTranslate((w - b.getWidth() * k) / 2f, (h - b.getHeight() * k) / 2f);
-            c.drawBitmap(b, m, new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG));
+            c.drawBitmap(b, m, p);
         };
     }
 
     /** An app's tile art in a look ({@link Prefs#TILE_STYLES}); your own picture, where there is one, in any look. */
     static Painter forStyle(AppRepo.App a, String style) {
         if (a.art != null) return picture(a.art);
+        if (style.equals("tvos")) return tvos(a);
         return style.equals("glass") ? glass(a) : style.equals("vivid") ? vivid(a) : style.equals("midnight") ? midnight(a) : app(a);
     }
 
@@ -88,6 +92,50 @@ final class Tiles {
      * Vivid: the app's own colour as a rich, saturated gradient, lit from the top left, with its
      * white mark on it, the way app icons look on iOS. Opaque, painted once: as cheap as a tile gets.
      */
+    /**
+     * Apple TV (tvOS): each app keeps its own original banner or icon, finished with tvOS's top-lit
+     * dimensional gloss and, for icon-only apps, a vibrant gradient ground and rounded squircle badge.
+     */
+    static Painter tvos(AppRepo.App a) {
+        return (c, w, h) -> {
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG | Paint.FILTER_BITMAP_FLAG);
+            if (a.banner != null) {
+                banner(c, a.banner, w, h);
+                p.setShader(new RadialGradient(w * 0.30f, -h * 0.35f, w * 0.90f, 0x24FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+                c.drawRect(0, 0, w, h, p);
+                p.setShader(new LinearGradient(0, h * 0.65f, 0, h, 0x00000000, 0x22000000, Shader.TileMode.CLAMP));
+                c.drawRect(0, h * 0.65f, w, h, p);
+                return;
+            }
+            int base = saturate(a.color, 1.28f, 0.66f);
+            p.setShader(new LinearGradient(0, 0, w * 0.85f, h, Ui.mix(base, 0xFFFFFFFF, 0.16f), Ui.mix(base, 0xFF000000, 0.38f),
+                    Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, w, h, p);
+            p.setShader(new RadialGradient(w * 0.28f, -h * 0.35f, w * 0.90f, 0x2EFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, w, h, p);
+            p.setShader(null);
+            if (a.icon == null) return;
+            Drawable d = a.icon.getConstantState() != null ? a.icon.getConstantState().newDrawable().mutate() : a.icon;
+            int s = Math.round(h * 0.60f);
+            float x = (w - s) / 2f, y = (h - s) / 2f, rad = s * 0.225f;
+            Paint sh = new Paint(Paint.ANTI_ALIAS_FLAG);
+            sh.setColor(0x33000000);
+            sh.setMaskFilter(new BlurMaskFilter( Math.max(1f, h * 0.04f), BlurMaskFilter.Blur.NORMAL));
+            c.drawRoundRect(new RectF(x, y + h * 0.025f, x + s, y + s + h * 0.025f), rad, rad, sh);
+            Bitmap ib = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
+            d.setBounds(0, 0, s, s);
+            d.draw(new Canvas(ib));
+            BitmapShader bs = new BitmapShader(ib, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            Matrix m = new Matrix();
+            m.setTranslate(x, y);
+            bs.setLocalMatrix(m);
+            p.setShader(bs);
+            c.drawRoundRect(new RectF(x, y, x + s, y + s), rad, rad, p);
+            p.setShader(null);
+            ib.recycle();
+        };
+    }
+
     static Painter vivid(AppRepo.App a) {
         return (c, w, h) -> {
             int base = saturate(a.color, 1.25f, 0.62f);
@@ -219,6 +267,8 @@ final class Tiles {
                 p.setShader(sh);
                 c.drawRoundRect(x, y, x + s, y + s, s * 0.24f, s * 0.24f, p);
                 p.setShader(null);
+                // drawn: the small copy of the icon isn't needed any more
+                ib.recycle();
             }
         };
     }
@@ -232,91 +282,247 @@ final class Tiles {
         return android.graphics.Color.HSVToColor(hsv);
     }
 
-    /** The app's white mark lifted off its banner, or its own icon as a rounded tile, centred. */
+    /** A lifted mark's ivory: white with the faintest warmth, like the focus ring. */
+    private static final int MARK = 0xFCFBF8;
+
+    /**
+     * The app's mark in white, as the glass look shows every app: lifted off its banner, else off its
+     * icon. Failing both, the icon itself, in full colour.
+     */
     private static void mark(Canvas c, AppRepo.App a, int w, int h) {
-        {
-            String key = a.pkg + "@" + w + "x" + h;
-            if (!LOGOS.containsKey(key)) LOGOS.put(key, a.banner != null ? lift(a.banner, w, h) : null);
-            Bitmap logo = LOGOS.get(key);
-            if (logo != null) {
-                // a little breathing room, so no mark touches the pane's rounded edge
-                c.save();
+        // a pane not laid out yet (or hidden, as the widgets are in the tvOS style) has nothing to draw into
+        if (w <= 0 || h <= 0) return;
+        String key = a.pkg + "@" + w + "x" + h;
+        if (!LOGOS.containsKey(key)) {
+            Bitmap lifted = a.banner != null ? lift(a.banner, w, h) : null;
+            if (lifted == null && a.icon != null) lifted = liftIcon(a.icon, h);
+            LOGOS.put(key, lifted != null ? withShadow(lifted) : null);
+        }
+        Bitmap logo = LOGOS.get(key);
+        if (logo != null) {
+            c.save();
+            if (logo.getWidth() == w) {
+                // a banner's mark: a little breathing room, so no mark touches the pane's rounded edge
                 c.scale(0.8f, 0.8f, w / 2f, h / 2f);
                 c.drawBitmap(logo, 0, 0, new Paint(Paint.FILTER_BITMAP_FLAG));
-                c.restore();
-            } else if (a.icon != null) {
-                // the app's own icon as a rounded tile on the glass, edges anti-aliased via a shader
-                Drawable icon = a.icon.getConstantState() != null ? a.icon.getConstantState().newDrawable().mutate() : a.icon;
-                int s = Math.round(h * 0.62f);
-                Bitmap ib = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
-                icon.setBounds(0, 0, s, s);
-                icon.draw(new Canvas(ib));
-                float x = (w - s) / 2f, y = (h - s) / 2f;
-                BitmapShader sh = new BitmapShader(ib, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
-                Matrix m = new Matrix();
-                m.setTranslate(x, y);
-                sh.setLocalMatrix(m);
-                Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-                p.setShader(sh);
-                c.drawRoundRect(x, y, x + s, y + s, s * 0.24f, s * 0.24f, p);
+            } else {
+                c.drawBitmap(logo, (w - logo.getWidth()) / 2f, (h - logo.getHeight()) / 2f, new Paint(Paint.FILTER_BITMAP_FLAG));
             }
+            c.restore();
+        } else if (a.icon != null) {
+            // nothing clean to lift (a photograph, a pale badge with dark detail): the icon as it is
+            Drawable icon = a.icon.getConstantState() != null ? a.icon.getConstantState().newDrawable().mutate() : a.icon;
+            int s = Math.round(h * 0.60f);
+            Bitmap ib = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
+            icon.setBounds(0, 0, s, s);
+            icon.draw(new Canvas(ib));
+            float x = (w - s) / 2f, y = (h - s) / 2f;
+            BitmapShader sh = new BitmapShader(ib, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            Matrix m = new Matrix();
+            m.setTranslate(x, y);
+            sh.setLocalMatrix(m);
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+            p.setShader(sh);
+            c.drawRoundRect(x, y, x + s, y + s, s * 0.24f, s * 0.24f, p);
+            p.setShader(null);
+            ib.recycle();
         }
     }
 
     /**
-     * Keys out a banner's background: the colour running around its border, if that border is one
-     * flat colour. Whatever differs from it becomes white, its opacity following how much it differs,
-     * so lettering keeps its soft edges. Null when there is no flat background or no logo on it.
+     * The mark over a faint, soft shadow of itself, baked in once: it keeps the white legible where
+     * the glass is pale (a bright sky, or a pane lit by focus) and costs nothing to draw.
+     */
+    private static Bitmap withShadow(Bitmap mark) {
+        Paint blur = new Paint(Paint.ANTI_ALIAS_FLAG);
+        blur.setMaskFilter(new BlurMaskFilter(Ui.dpf(2.5f), BlurMaskFilter.Blur.NORMAL));
+        int[] off = new int[2];
+        Bitmap shadow = mark.extractAlpha(blur, off);
+        Bitmap out = Bitmap.createBitmap(mark.getWidth(), mark.getHeight(), Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(out);
+        Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
+        p.setColor(0x30000000);
+        c.drawBitmap(shadow, off[0], off[1] + Ui.dpf(1), p);
+        c.drawBitmap(mark, 0, 0, null);
+        shadow.recycle();
+        mark.recycle();
+        return out;
+    }
+
+    /**
+     * A banner's mark: its ground keyed out (see {@link #key}). Null when the banner is a photograph
+     * (a busy edge) or nothing on it makes a clean mark.
      */
     private static Bitmap lift(Drawable d, int w, int h) {
+        if (w < 16 || h < 16) return null;
         Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         banner(new Canvas(b), d, w, h);
         int[] px = new int[w * h];
         b.getPixels(px, 0, w, 0, 0, w, h);
-        int[] border = new int[2 * (w + h) * 2];
-        int n = 0;
-        for (int x = 0; x < w; x++) {
-            border[n++] = px[x];
-            border[n++] = px[w + x];
-            border[n++] = px[(h - 1) * w + x];
-            border[n++] = px[(h - 2) * w + x];
+        // a flat or graded ground changes slowly from one border pixel to the next; a photograph doesn't
+        long step = 0;
+        int steps = 0;
+        for (int x = 1; x < w; x++) {
+            step += colorStep(px[x], px[x - 1]) + colorStep(px[(h - 1) * w + x], px[(h - 1) * w + x - 1]);
+            steps += 2;
         }
-        for (int y = 0; y < h; y++) {
-            border[n++] = px[y * w];
-            border[n++] = px[y * w + 1];
-            border[n++] = px[y * w + w - 1];
-            border[n++] = px[y * w + w - 2];
+        for (int y = 1; y < h; y++) {
+            step += colorStep(px[y * w], px[(y - 1) * w]) + colorStep(px[y * w + w - 1], px[(y - 1) * w + w - 1]);
+            steps += 2;
         }
-        long sr = 0, sg = 0, sb = 0;
-        for (int i = 0; i < n; i++) {
-            sr += (border[i] >> 16) & 255;
-            sg += (border[i] >> 8) & 255;
-            sb += border[i] & 255;
-        }
-        int br = (int) (sr / n), bgr = (int) (sg / n), bb = (int) (sb / n);
-        long dev = 0;
-        for (int i = 0; i < n; i++) {
-            dev += Math.abs(((border[i] >> 16) & 255) - br) + Math.abs(((border[i] >> 8) & 255) - bgr) + Math.abs((border[i] & 255) - bb);
-        }
-        if (dev / (3.0 * n) > 16) return null; // a photo or a gradient: nothing flat to key out
-        int kept = 0;
-        for (int i = 0; i < px.length; i++) {
-            int p = px[i];
-            int dr = ((p >> 16) & 255) - br, dg = ((p >> 8) & 255) - bgr, db = (p & 255) - bb;
-            float a = (float) ((Math.sqrt(dr * dr + dg * dg + db * db) - 40) / 60.0);
-            if (a <= 0f) {
-                px[i] = 0;
-                continue;
-            }
-            if (a > 1f) a = 1f;
-            a = a * a * (3 - 2 * a);
-            if (a > 0.5f) kept++;
-            px[i] = (Math.round(a * 250) << 24) | 0xFFFFFF;
-        }
-        float cover = kept / (float) px.length;
-        if (cover < 0.01f || cover > 0.6f) return null;
-        b.setPixels(px, 0, w, 0, 0, w, h);
+        if (step / (double) steps > 14.0) return null;
+        int[] out = key(px, w, 1, 1, w - 2, h - 2);
+        if (out == null) return null;
+        b.setPixels(out, 0, w, 0, 0, w, h);
         return b;
+    }
+
+    /**
+     * An icon's mark, for an app whose banner gave none: a glyph standing on transparency (Kodi) as
+     * its silhouette; a badge's symbol keyed off its ground, flat or graded (JioHotstar's star); a dark
+     * badge with light lettering as a white badge with the lettering cut out of it (Sony LIV). Null
+     * for the rest, which keep their colours. Square; the caller centres it.
+     */
+    private static Bitmap liftIcon(Drawable d, int h) {
+        int s = Math.round(h * 0.86f);
+        if (s < 16) return null;
+        Drawable copy = d.getConstantState() != null ? d.getConstantState().newDrawable().mutate() : d;
+        Bitmap b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
+        copy.setBounds(0, 0, s, s);
+        copy.draw(new Canvas(b));
+        int[] px = new int[s * s];
+        b.getPixels(px, 0, s, 0, 0, s, s);
+        // the opaque shape's bounds, and how much of them it fills: a badge (square, squircle or disc,
+        // padded or not) fills most of them; a glyph standing on transparency, much less
+        int l = s, t = s, rt = -1, bm = -1, opaque = 0;
+        for (int y = 0; y < s; y++) {
+            for (int x = 0; x < s; x++) {
+                if ((px[y * s + x] >>> 24) <= 128) continue;
+                opaque++;
+                l = Math.min(l, x);
+                rt = Math.max(rt, x);
+                t = Math.min(t, y);
+                bm = Math.max(bm, y);
+            }
+        }
+        if (opaque == 0) {
+            b.recycle();
+            return null;
+        }
+        float fill = opaque / (float) ((rt - l + 1) * (bm - t + 1)), size;
+        if (fill < 0.7f) {
+            // a glyph: its silhouette, with any near-black detail cut out of it
+            for (int i = 0; i < px.length; i++) {
+                int p = px[i];
+                float a = (p >>> 24) / 255f * smooth((Math.max(r(p), Math.max(g(p), bl(p))) / 255f - 0.08f) / 0.27f);
+                px[i] = a <= 0f ? 0 : (Math.round(a * 248) << 24) | MARK;
+            }
+            size = 0.6f;
+        } else {
+            // a badge: its ground sampled on a frame well inside the shape, clear of rounded corners
+            int ix = Math.max(2, Math.round((rt - l) * 0.16f)), iy = Math.max(2, Math.round((bm - t) * 0.16f));
+            int x0 = l + ix, y0 = t + iy, x1 = rt - ix, y1 = bm - iy;
+            if (x1 - x0 < 8 || y1 - y0 < 8) {
+                b.recycle();
+                return null;
+            }
+            int[] keyed = key(px, s, x0, y0, x1, y1);
+            if (keyed != null) {
+                px = keyed;
+                size = 0.86f;
+            } else {
+                float ground = 0f;
+                for (int x = x0; x <= x1; x++) ground += luma(px[y0 * s + x]) + luma(px[y1 * s + x]);
+                if (ground / (2 * (x1 - x0 + 1)) >= 0.22f) {
+                    b.recycle();
+                    return null;
+                }
+                // a dark badge with light lettering: the badge in white, the lettering cut out of it,
+                // its corners rounded (some badges are drawn square and leave that to the launcher)
+                float rr = Math.min(rt - l, bm - t) * 0.22f;
+                for (int i = 0; i < px.length; i++) {
+                    int p = px[i], x = i % s, y = i / s;
+                    float dx = Math.max(0f, Math.max(l + rr - x, x - (rt - rr))), dy = Math.max(0f, Math.max(t + rr - y, y - (bm - rr)));
+                    float corner = Ui.clamp(rr - (float) Math.sqrt(dx * dx + dy * dy) + 0.5f, 0f, 1f);
+                    float a = corner * (p >>> 24) / 255f * (1f - smooth((luma(p) - 0.32f) / 0.4f));
+                    px[i] = a <= 0f ? 0 : (Math.round(a * 248) << 24) | MARK;
+                }
+                size = 0.62f;
+            }
+        }
+        b.setPixels(px, 0, s, 0, 0, s, s);
+        int out = Math.round(h * size);
+        if (out == s) return b;
+        Bitmap scaled = Bitmap.createScaledBitmap(b, out, out, true);
+        if (scaled != b) b.recycle();
+        return scaled;
+    }
+
+    /**
+     * Keys the ground out of the frame (x0, y0)-(x1, y1) of {@code px}, {@code w} wide: one flat colour
+     * or a smooth gradient, carried in from the frame's edges (a Coons patch). What differs from it
+     * becomes the ivory mark, its opacity following how much it differs, so lettering keeps its soft
+     * edges; outside the frame, nothing. Null when what's left is no logo: too little or too much of
+     * it, running off the edge, or a soft wash (a swoosh keyed off a gradient) instead of a clean shape.
+     */
+    private static int[] key(int[] px, int w, int x0, int y0, int x1, int y1) {
+        int c00 = px[y0 * w + x0], c10 = px[y0 * w + x1], c01 = px[y1 * w + x0], c11 = px[y1 * w + x1];
+        int[] out = new int[px.length];
+        int kept = 0, soft = 0, edge = 0;
+        for (int y = y0; y <= y1; y++) {
+            float v = (y - y0) / (float) Math.max(1, y1 - y0);
+            int left = px[y * w + x0], right = px[y * w + x1];
+            for (int x = x0; x <= x1; x++) {
+                float u = (x - x0) / (float) Math.max(1, x1 - x0);
+                float k00 = (1 - u) * (1 - v), k10 = u * (1 - v), k01 = (1 - u) * v, k11 = u * v;
+                int top = px[y0 * w + x], bot = px[y1 * w + x], p = px[y * w + x];
+                int dr = r(p) - clampByte((1 - u) * r(left) + u * r(right) + (1 - v) * r(top) + v * r(bot)
+                        - (k00 * r(c00) + k10 * r(c10) + k01 * r(c01) + k11 * r(c11)));
+                int dg = g(p) - clampByte((1 - u) * g(left) + u * g(right) + (1 - v) * g(top) + v * g(bot)
+                        - (k00 * g(c00) + k10 * g(c10) + k01 * g(c01) + k11 * g(c11)));
+                int db = bl(p) - clampByte((1 - u) * bl(left) + u * bl(right) + (1 - v) * bl(top) + v * bl(bot)
+                        - (k00 * bl(c00) + k10 * bl(c10) + k01 * bl(c01) + k11 * bl(c11)));
+                float a = smooth((float) (Math.sqrt(dr * dr + dg * dg + db * db) - 36) / 58f) * (p >>> 24) / 255f;
+                if (a <= 0f) continue;
+                if (a > 0.5f) {
+                    kept++;
+                    if (x < x0 + 3 || x > x1 - 3 || y < y0 + 3 || y > y1 - 3) edge++;
+                }
+                if (a > 0.3f && a < 0.7f) soft++;
+                out[y * w + x] = (Math.round(a * 248) << 24) | MARK;
+            }
+        }
+        float cover = kept / (float) ((x1 - x0 + 1) * (y1 - y0 + 1));
+        if (cover < 0.008f || cover > 0.55f || edge > (x1 - x0 + y1 - y0) * 0.45f || soft > kept * 0.14f) return null;
+        // a busy picture keys into specks, lone pixels with hardly a neighbour: no logo, so no mark
+        int specks = 0;
+        for (int y = y0 + 1; y < y1; y++) {
+            for (int x = x0 + 1; x < x1; x++) {
+                if ((out[y * w + x] >>> 24) <= 124) continue;
+                int near = ((out[y * w + x - 1] >>> 24) > 124 ? 1 : 0) + ((out[y * w + x + 1] >>> 24) > 124 ? 1 : 0)
+                        + ((out[(y - 1) * w + x] >>> 24) > 124 ? 1 : 0) + ((out[(y + 1) * w + x] >>> 24) > 124 ? 1 : 0);
+                if (near <= 1) specks++;
+            }
+        }
+        return specks > kept * 0.06f ? null : out;
+    }
+
+    private static float smooth(float x) {
+        if (x <= 0f) return 0f;
+        if (x >= 1f) return 1f;
+        return x * x * (3 - 2 * x);
+    }
+
+    private static float luma(int c) {
+        return (0.2126f * r(c) + 0.7152f * g(c) + 0.0722f * bl(c)) / 255f;
+    }
+
+    private static int r(int c) { return (c >> 16) & 255; }
+    private static int g(int c) { return (c >> 8) & 255; }
+    private static int bl(int c) { return c & 255; }
+    private static int clampByte(float v) { return Math.max(0, Math.min(255, Math.round(v))); }
+    private static int colorStep(int a, int b) {
+        return (Math.abs(r(a) - r(b)) + Math.abs(g(a) - g(b)) + Math.abs(bl(a) - bl(b))) / 3;
     }
 
     /** A live HDMI source on glass: the port glyph, its name and a red LIVE tag. */

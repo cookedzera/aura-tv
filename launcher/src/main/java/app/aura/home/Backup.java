@@ -28,8 +28,8 @@ final class Backup {
     private static final Set<String> LOCAL = new HashSet<>(Arrays.asList(
             "adb_ok", "adb_open", "keys_lag", "keys_healing", "crashes", "safe_at", "setup_note", "welcome_resume",
             "update_ver", "update_seen", "update_told", "listings_asked", "tmdb_session", "tmdb_account", "tmdb_user",
-            "pick_made_for", "pick_count", "pick_at", "geo_at", "wx_at", "wx", "saver_prev", "sleepAt", "sleepVol",
-            "sleepEnd", "known_pkgs", "new_pkgs", "welcomed", "keys_wanted", "adb_paired", "adb_tls_port", "set_light"));
+            "pick_made_for", "pick_count", "pick_at", "geo_at", "wx_at", "wx", "saver_prev", "sleepAt", "sleepVol", "sleepSet",
+            "sleepEnd", "known_pkgs", "new_pkgs", "welcomed", "keys_wanted", "adb_paired", "adb_tls_port", "set_light", "parent_pin"));
 
     private Backup() { }
 
@@ -68,6 +68,16 @@ final class Backup {
         JSONObject root = new JSONObject(json);
         if (root.optInt("aura", 0) < 1) throw new JSONException("not an Aura backup");
         JSONObject files = root.getJSONObject("files");
+        // every entry read first: a file broken halfway must not leave a profile already emptied
+        for (Iterator<String> it = files.keys(); it.hasNext(); ) {
+            JSONObject o = files.getJSONObject(it.next());
+            for (Iterator<String> ks = o.keys(); ks.hasNext(); ) {
+                JSONArray tv = o.getJSONArray(ks.next());
+                if (tv.length() != 2) throw new JSONException("not a setting");
+                tv.getString(0);
+                if (tv.getString(0).equals("S")) tv.getJSONArray(1);
+            }
+        }
         int n = 0;
         for (Iterator<String> it = files.keys(); it.hasNext(); ) {
             String name = it.next();

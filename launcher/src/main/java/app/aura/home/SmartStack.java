@@ -4,11 +4,16 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
+import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ComposeShader;
+import android.graphics.LightingColorFilter;
 import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
@@ -52,6 +57,8 @@ final class SmartStack extends FrameLayout {
         long dwellMs = 7_000;
         /** The shade's colour, taken from the artwork once and kept. */
         int tone;
+        /** A tiny blurred copy of the artwork, for the fill beside a picture narrower than the card. */
+        Bitmap blur;
     }
 
     interface Listener {
@@ -116,6 +123,7 @@ final class SmartStack extends FrameLayout {
                 // an app card's picture and every card's tone are worked out once; keep them
                 if (n.art == null && n.mark != null) n.art = old.art;
                 if (n.tone == 0) n.tone = old.tone;
+                if (n.blur == null && n.art == old.art) n.blur = old.blur;
             }
             slides.clear();
             slides.addAll(next);
@@ -127,7 +135,9 @@ final class SmartStack extends FrameLayout {
         int to = 0;
         for (int i = 0; keep != null && i < slides.size(); i++) if (sameCard(slides.get(i), keep)) to = i;
         dots.setCount(slides.size());
-        show(to, 0);
+        // fresh cards arriving while one is on show (a new episode, something just watched) fade in
+        // over it rather than cutting; the first cards, or an unseen stack, just appear
+        show(to, keep != null && isShown() && !sameCard(slides.get(to), keep) ? 2 : 0);
         if (running) schedule();
     }
 
@@ -168,7 +178,7 @@ final class SmartStack extends FrameLayout {
         handler.postDelayed(advance, s != null ? s.dwellMs : 7_000);
     }
 
-    /** Shows card {@code i}; {@code dir} 1 flips up to it, 0 shows it in place. */
+    /** Shows card {@code i}; {@code dir} 1 flips up to it, 2 fades to it in place, 0 shows it in place. */
     private void show(int i, int dir) {
         if (slides.isEmpty()) return;
         at = Compat.mod(i, slides.size());
@@ -191,7 +201,7 @@ final class SmartStack extends FrameLayout {
             in.bind(s);
             in.bringToFront();
             dots.bringToFront();
-            float lift = Ui.dpf(26);
+            float lift = dir == 2 ? 0f : Ui.dpf(26);
             // the old card lifts away as the new one rises from just below. Only position and
             // fade move: no scaling and no offscreen layers, which cost this TV's GPU a frame each
             out.animate().translationY(-lift).alpha(0f).setStartDelay(0)
@@ -210,15 +220,15 @@ final class SmartStack extends FrameLayout {
 
     /** One card: the picture, a shade in its own colour, a header chip, the words, and how far along. */
     private static final class Page extends FrameLayout {
-        final ImageView art, icon;
+        final ArtView art;
+        final ImageView icon;
         final View tint, floor;
         final TextView kicker, badge, title, sub;
         final HomeActivity.Meter bar;
 
         Page(Context c) {
             super(c);
-            art = new ImageView(c);
-            art.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            art = new ArtView(c);
             addView(art, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             // two soft shades: the card's own colour from the left, and a darker floor for the words
             tint = new View(c);
@@ -295,7 +305,11 @@ final class SmartStack extends FrameLayout {
             art.setTranslationY(0f);
         }
 
+        /** The slide on this page now: a picture finished for one dealt away since is not put up. */
+        private Slide bound;
+
         void bind(Slide s) {
+            bound = s;
             kicker.setText(s.kicker);
             badge.setVisibility(s.fresh ? View.VISIBLE : View.GONE);
             // its own copy: a drawable shared with the app's tile would fight over bounds and redraws
@@ -305,16 +319,34 @@ final class SmartStack extends FrameLayout {
             Ui.fit(title, s.title == null ? "" : s.title, Ui.dp(250), 20, 14);
             refresh(s);
             if (s.art != null) {
-                art.setImageBitmap(s.art);
+                art.set(s);
                 shade(s);
             } else {
                 // an app card's picture is drawn once, then kept on the slide and reused
-                post(() -> {
-                    if (s.art == null) s.art = markArt(s, Math.max(1, getWidth()), Math.max(1, getHeight()));
-                    art.setImageBitmap(s.art);
-                    shade(s);
-                });
+                post(() -> drawArt(s));
             }
+        }
+
+        /**
+         * Draws an app card's picture at the page's size. A page with no size yet (the widgets are
+         * hidden in the tvOS style) draws it the moment it's laid out, never at a pixel's width.
+         */
+        private void drawArt(Slide s) {
+            if (s != bound) return;
+            if (getWidth() <= 0 || getHeight() <= 0) {
+                addOnLayoutChangeListener(new OnLayoutChangeListener() {
+                    @Override
+                    public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) {
+                        if (r - l <= 0 || b - t <= 0) return;
+                        removeOnLayoutChangeListener(this);
+                        drawArt(s);
+                    }
+                });
+                return;
+            }
+            if (s.art == null) s.art = markArt(s, getWidth(), getHeight());
+            art.set(s);
+            shade(s);
         }
 
         /** What can change on a card while it's on show: its line and how far along. */
@@ -363,14 +395,126 @@ final class SmartStack extends FrameLayout {
             p.setShader(new LinearGradient(0, 0, w, h, Ui.mix(s.color, 0xFF000000, 0.72f), Ui.mix(s.color, 0xFF000000, 0.35f),
                     Shader.TileMode.CLAMP));
             c.drawRect(0, 0, w, h, p);
-            if (s.mark != null) {
-                int mw = Math.round(w * 0.42f), mh = Math.round(mw * 9 / 16f);
+            int mw = Math.round(w * 0.42f), mh = Math.round(mw * 9 / 16f);
+            if (s.mark != null && mw > 0 && mh > 0) {
                 c.save();
                 c.translate(w - mw - w * 0.09f, (h - mh) / 2f);
                 s.mark.paint(c, mw, mh);
                 c.restore();
             }
             return b;
+        }
+    }
+
+    /**
+     * A card's picture. One about as wide as the card fills it. A narrower one (a poster, or any
+     * picture on a stack widened to the whole row) is never stretched or cropped to a strip: it
+     * stands at full height on the right, its left edge fading into a dimmed, blurred copy of itself
+     * that fills the rest, as a streaming app's billboard does. All of it is worked out when the
+     * picture or the size changes; a frame is at most two bitmap draws.
+     */
+    private static final class ArtView extends View {
+        private final Paint fill = new Paint(Paint.FILTER_BITMAP_FLAG);
+        private final Paint pic = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private final Matrix fillMatrix = new Matrix(), picMatrix = new Matrix();
+        private final RectF picRect = new RectF();
+        private Slide slide;
+        private Bitmap fillArt;
+
+        ArtView(Context c) {
+            super(c);
+            // the fill is backdrop: dimmed, so the picture and the words stand in front of it
+            fill.setColorFilter(new LightingColorFilter(0xFF7A7A7A, 0));
+        }
+
+        @Override
+        public boolean hasOverlappingRendering() {
+            return false;
+        }
+
+        void set(Slide s) {
+            slide = s;
+            arrange();
+            invalidate();
+        }
+
+        @Override
+        protected void onSizeChanged(int w, int h, int ow, int oh) {
+            // the stack widens and narrows as other widgets are hidden or brought back
+            arrange();
+        }
+
+        private void arrange() {
+            Bitmap b = slide != null ? slide.art : null;
+            int w = getWidth(), h = getHeight();
+            pic.setShader(null);
+            fillArt = null;
+            if (b == null || w == 0 || h == 0) return;
+            float bw = b.getWidth(), bh = b.getHeight();
+            BitmapShader shader = new BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            if (slide.mark != null || bw / bh >= w / (float) h * 0.8f) {
+                // wide enough: it fills the card, centred
+                float k = Math.max(w / bw, h / bh);
+                picMatrix.setScale(k, k);
+                picMatrix.postTranslate((w - bw * k) / 2f, (h - bh * k) / 2f);
+                shader.setLocalMatrix(picMatrix);
+                pic.setShader(shader);
+                picRect.set(0, 0, w, h);
+                return;
+            }
+            if (slide.blur == null) slide.blur = soften(b);
+            fillArt = slide.blur;
+            float f = Math.max(w / (float) fillArt.getWidth(), h / (float) fillArt.getHeight());
+            fillMatrix.setScale(f, f);
+            fillMatrix.postTranslate((w - fillArt.getWidth() * f) / 2f, (h - fillArt.getHeight() * f) / 2f);
+            // full height on the right, its left side fading into the fill
+            float k = h / bh, pw = bw * k, x = w - pw;
+            picMatrix.setScale(k, k);
+            picMatrix.postTranslate(x, 0);
+            shader.setLocalMatrix(picMatrix);
+            LinearGradient fade = new LinearGradient(x, 0, x + pw * 0.45f, 0, 0x00000000, 0xFF000000, Shader.TileMode.CLAMP);
+            pic.setShader(new ComposeShader(shader, fade, PorterDuff.Mode.DST_IN));
+            picRect.set(x, 0, w, h);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            if (pic.getShader() == null) return;
+            if (fillArt != null) c.drawBitmap(fillArt, fillMatrix, fill);
+            c.drawRect(picRect, pic);
+        }
+
+        /** A tiny, blurred copy: stretched across the card it is only colour and light. */
+        private static Bitmap soften(Bitmap b) {
+            int w = 64, h = Math.max(2, Math.round(64f * b.getHeight() / b.getWidth()));
+            Bitmap small = Bitmap.createScaledBitmap(b, w, h, true);
+            int[] px = new int[w * h], tmp = new int[w * h];
+            small.getPixels(px, 0, w, 0, 0, w, h);
+            if (small != b) small.recycle();
+            for (int pass = 0; pass < 2; pass++) {
+                blur(px, tmp, w, h, true);
+                blur(tmp, px, w, h, false);
+            }
+            return Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888);
+        }
+
+        /** One box-blur pass (radius 3) along rows or columns, edges held. */
+        private static void blur(int[] in, int[] out, int w, int h, boolean rows) {
+            int len = rows ? w : h, lines = rows ? h : w, r = 3;
+            for (int line = 0; line < lines; line++) {
+                for (int i = 0; i < len; i++) {
+                    int sr = 0, sg = 0, sb = 0;
+                    for (int k = -r; k <= r; k++) {
+                        int j = Math.max(0, Math.min(len - 1, i + k));
+                        int p = in[rows ? line * w + j : j * w + line];
+                        sr += (p >> 16) & 255;
+                        sg += (p >> 8) & 255;
+                        sb += p & 255;
+                    }
+                    int n = 2 * r + 1;
+                    out[rows ? line * w + i : i * w + line] = 0xFF000000 | ((sr / n) << 16) | ((sg / n) << 8) | (sb / n);
+                }
+            }
         }
     }
 

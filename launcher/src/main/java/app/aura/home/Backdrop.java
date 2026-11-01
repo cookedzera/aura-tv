@@ -96,7 +96,15 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         void onTick(long now);
     }
 
-    private static final long SHOW_MS = 36_000, FADE_MS = 2_800, DRIFT_MS = 42_000;
+    // a photograph stays a minute and a half, drifting slowly the whole while: calmer to rest your eyes
+    // on, and fewer crossfades, which are the heaviest frames the home screen draws
+    private static final long FADE_MS = 2_800, DRIFT_MS = 96_000;
+    /** How long a photograph stays: 90 seconds on the home screen; the screensaver moves on sooner. */
+    private long showMs = 90_000;
+
+    void setShowMs(long ms) {
+        showMs = ms;
+    }
     private static final long INTRO_MS = 1_900, PARALLAX_MS = 950;
 
     private static final class Slide {
@@ -123,7 +131,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     private String wanted;
     /** The photo on show may have been removed or switched off: replace it as soon as possible. */
     private boolean stale;
-    private final ExecutorService io = Executors.newSingleThreadExecutor();
+    // just below the screen's priority: the first photograph is waited for, but never at a frame's expense
+    private final ExecutorService io = Compat.background("photos", android.os.Process.THREAD_PRIORITY_DEFAULT + 4);
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Random rnd = new Random();
     private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
@@ -165,7 +174,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     private void refreshWalls() {
         Context c = getContext();
         boolean daily = Prefs.on(c, Prefs.DAILY), only = Prefs.on(c, Prefs.MINE_ONLY), black = Prefs.on(c, Prefs.BLACK);
-        long stamp = ((Daily.stamp(c) * 31 + Mine.stamp(c)) * 4 + (daily ? 1 : 0) + (only ? 2 : 0)) * 2 + (black ? 1 : 0);
+        long stamp = (((Daily.stamp(c) * 31 + Gallery.stamp(c)) * 31 + Mine.stamp(c)) * 4 + (daily ? 1 : 0) + (only ? 2 : 0)) * 2 + (black ? 1 : 0);
         if (stamp == wallStamp && !walls.isEmpty()) return;
         wallStamp = stamp;
         walls.clear();
@@ -180,8 +189,12 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         walls.addAll(mine);
         // "only your photos" with none left falls back to everything, never to a black screen
         if (only && !mine.isEmpty()) return;
-        if (daily) walls.addAll(Daily.walls(c));
-        walls.addAll(builtIn);
+        if (daily) {
+            walls.addAll(Daily.walls(c));
+            walls.addAll(Gallery.walls(c));
+        }
+        // The bundled northern lights is the wall only while nothing else is there: a first start, no internet
+        if (walls.isEmpty()) walls.addAll(builtIn);
     }
 
     /** The newest imported photograph not yet shown: it goes on before anything else, once. */
@@ -264,6 +277,17 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         introStart = -1;
     }
 
+    /** Releases the background loader, callbacks and bitmaps when the host window is torn down. */
+    void release() {
+        stop();
+        main.removeCallbacksAndMessages(null);
+        trim(ComponentCallbacks2.TRIM_MEMORY_COMPLETE);
+        mirrors.clear();
+        ticks.clear();
+        listener = null;
+        io.shutdownNow();
+    }
+
     void skip() {
         if (incoming == null && !loading) nextAt = 0;
     }
@@ -302,7 +326,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
 
     /** How long one photograph stays before the next crossfade completes. */
     long cycleMs() {
-        return SHOW_MS + FADE_MS;
+        return showMs + FADE_MS;
     }
 
     boolean hasImage() {
@@ -313,7 +337,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     float shown() {
         Slide s = incoming != null ? incoming : current;
         if (s == null) return 0f;
-        return Math.min(1f, (SystemClock.uptimeMillis() - s.start) / (float) (SHOW_MS + FADE_MS));
+        return Math.min(1f, (SystemClock.uptimeMillis() - s.start) / (float) (showMs + FADE_MS));
     }
 
     Wallpaper wallpaper() {
@@ -343,14 +367,21 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     public void doFrame(long frameTimeNanos) {
         if (!running) return;
         long now = SystemClock.uptimeMillis();
-        boolean busy = incoming != null || intro < 1f || now - parallaxStart < PARALLAX_MS
-                || now - defocusStart < defocusMs;
+        boolean fade = incoming != null || intro < 1f || now - defocusStart < defocusMs;
+        boolean parallax = now - parallaxStart < PARALLAX_MS;
+        boolean drift = (++frame % (calm ? 30 : 4)) == 0;
+        boolean busy = fade || parallax || drift;
+
         // the drift alone moves ~1px/s, so a quarter of the rate is visually identical and spares
         // the CPU and GPU on a TV that's also decoding video
-        if (busy || (++frame % (calm ? 30 : 4)) == 0) {
+        if (busy) {
             step(now);
             invalidate();
             for (int i = 0; i < ticks.size(); i++) ticks.get(i).onTick(now);
+            // blur is 1/22 scale, so a 4dp parallax nudge is invisible inside glass; keep mirrors cached while focus animates
+            // through a crossfade the glass follows every third frame: its blur changes too slowly for
+            // the difference to show, and two dozen panes redrawn per frame is what made fades stutter
+            if (fade ? frame % 3 == 0 : !parallax && (frame % (calm ? 30 : 12)) == 0)
             for (int i = 0; i < mirrors.size(); i++) {
                 View v = mirrors.get(i);
                 if (v.isShown() && v.getAlpha() > 0f) v.invalidate();
@@ -378,7 +409,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
                 current.alpha = 1f;
                 accent = accentTo;
                 // a photo sent from the phone meanwhile goes straight on next
-                nextAt = now + (wanted != null || stale ? 0 : SHOW_MS);
+                nextAt = now + (wanted != null || stale ? 0 : showMs);
             }
         }
         float p = Math.min(1f, (now - parallaxStart) / (float) PARALLAX_MS);
@@ -521,7 +552,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
 
     private void load(int i, boolean first) {
         refreshWalls();
-        if (walls.isEmpty()) return;
+        // released (the screensaver ended): a late draw asking for the next photo must not reach the closed loader
+        if (walls.isEmpty() || io.isShutdown()) return;
         loading = true;
         // this load comes from the fresh list, so whatever made the old one stale is handled
         stale = false;
@@ -602,11 +634,11 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         return at.get(k);
     }
 
-    /** The first card in {@code deck} whose light suits {@code phase} (imports always do), or -1. */
+    /** The first card in {@code deck} whose light suits {@code phase} (your own photos always do), or -1. */
     private int suiting(List<String> deck, java.util.Map<String, Integer> at, Sun.Phase phase) {
         for (int k = 0; k < deck.size(); k++) {
             Wallpaper w = walls.get(at.get(deck.get(k)));
-            if (w.onDisk() || w.black || Sun.suits(w.mood, phase)) return k;
+            if (w.mine || w.black || Sun.suits(w.mood, phase)) return k;
         }
         return -1;
     }
@@ -620,7 +652,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             s.alpha = 1f;
             current = s;
             accent = accentFrom = accentTo = s.wall.accent;
-            nextAt = now + SHOW_MS;
+            nextAt = now + showMs;
             if (intro < 1f) introStart = now;
         } else {
             s.alpha = 0f;
@@ -677,6 +709,18 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         try (InputStream in = w.onDisk() ? new java.io.FileInputStream(w.path) : getContext().getAssets().open("wallpapers/" + w.file)) {
             Bitmap b = BitmapFactory.decodeStream(in);
             if (b == null) return null;
+            // no larger than the screen at the drift's deepest zoom (1.2x): a 1080p photograph on a
+            // 720p TV would hold twice the memory for detail no one can see
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            float k = 1.2f * Math.max(Math.max(dm.widthPixels, dm.heightPixels) / (float) b.getWidth(),
+                    Math.min(dm.widthPixels, dm.heightPixels) / (float) b.getHeight());
+            if (k < 0.95f) {
+                Bitmap fit = Bitmap.createScaledBitmap(b, Math.round(b.getWidth() * k), Math.round(b.getHeight() * k), true);
+                if (fit != b) {
+                    b.recycle();
+                    b = fit;
+                }
+            }
             b.prepareToDraw();
             Slide s = new Slide();
             s.wall = w;
@@ -758,7 +802,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
 
     /** A shallow depth-of-field copy: detail melts but shapes stay readable, like a lens racked to the foreground. */
     static Bitmap soften(Bitmap src) {
-        Bitmap small = Bitmap.createScaledBitmap(src, 512, 288, true);
+        Bitmap small = Bitmap.createScaledBitmap(src, 768, 432, true);
         int w = small.getWidth(), h = small.getHeight();
         int[] px = new int[w * h], tmp = new int[w * h];
         small.getPixels(px, 0, w, 0, 0, w, h);

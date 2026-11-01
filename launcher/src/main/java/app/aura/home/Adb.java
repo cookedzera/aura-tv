@@ -131,7 +131,8 @@ final class Adb {
                 }
             } catch (SocketTimeoutException | EOFException e) {
                 l.close();
-                throw new Denied("no answer");
+                // only an unanswered prompt is a refusal; a background call that timed out keeps the key trusted
+                throw mayAsk ? new Denied("no answer") : e;
             } catch (IOException | RuntimeException e) {
                 l.close();
                 throw e;
@@ -409,6 +410,8 @@ final class Adb {
         if (Build.VERSION.SDK_INT >= 33) s.add(new String[]{"Accessibility", "appops set " + p + " ACCESS_RESTRICTED_SETTINGS allow"});
         s.add(new String[]{"Block ads, animations", "pm grant " + p + " android.permission.WRITE_SECURE_SETTINGS"});
         s.add(new String[]{"Wi-Fi name", "pm grant " + p + " android.permission.DUMP"});
+        // the firmware takes the remote's profile button for Google TV's picker: the log is how Aura knows
+        if (Safety.hasGoogleTvHome(c)) s.add(new String[]{"Profile button", "pm grant " + p + " android.permission.READ_LOGS"});
         s.add(new String[]{"Memory", "pm grant " + p + " android.permission.PACKAGE_USAGE_STATS"});
         s.add(new String[]{"Smart Stack, Today", "appops set " + p + " GET_USAGE_STATS allow"});
         if (Build.VERSION.SDK_INT >= 23) s.add(new String[]{"Wi-Fi sheet", "pm grant " + p + " android.permission.ACCESS_FINE_LOCATION"});
@@ -460,24 +463,29 @@ final class Adb {
         }, "adb-setup").start();
     }
 
-    /** Stops an app outright, as Android's own Force stop does. False when Aura can't. */
     /** Types {@code text} into whatever field is focused on the TV via Android's input shell. */
     static boolean type(Context c, String text) {
         if (text == null || text.isEmpty() || !on(c)) return false;
-        StringBuilder sb = new StringBuilder("input text \"");
+        StringBuilder sb = new StringBuilder("input text '");
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
             if (ch == ' ') sb.append("%s");
-            else if (ch == '"' || ch == '\\' || ch == '$' || ch == '`' || ch == '!' || ch == ';') sb.append('\\').append(ch);
+            else if (ch == '\'') sb.append("'\\''");
+            // input text turns %s into a space; splitting % and s across two calls keeps a literal %s intact
+            else if (ch == '%' && i + 1 < text.length() && text.charAt(i + 1) == 's') sb.append("%' && input text '");
             else if (ch >= 0x21 && ch <= 0x7e) sb.append(ch);
         }
-        sb.append('"');
+        sb.append('\'');
         return run(c, sb.toString()) != null;
     }
 
-    static boolean forceStop(Context c, String pkg) {
+    /** Stops one or more apps outright over a single connection, as Android's own Force stop does. False when Aura can't. */
+    static boolean forceStop(Context c, String... pkgs) {
+        List<String> cmds = new ArrayList<>();
         // a package name, and nothing a shell would read as more
-        if (!pkg.matches("[A-Za-z0-9_.]+")) return false;
-        return run(c, "am force-stop " + pkg) != null;
+        for (String pkg : pkgs) {
+            if (pkg != null && pkg.matches("[A-Za-z0-9_.]+")) cmds.add("am force-stop " + pkg);
+        }
+        return !cmds.isEmpty() && run(c, cmds.toArray(new String[0])) != null;
     }
 }

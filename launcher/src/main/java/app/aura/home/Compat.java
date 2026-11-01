@@ -24,6 +24,23 @@ import java.util.Map;
  * newest TVs. Features 5.1 has no counterpart for are switched off at their call sites.
  */
 final class Compat {
+    /**
+     * One thread for work behind the screen (apps, artwork, weather, the stack, photos), at a lower
+     * priority than drawing: Android runs it in the same group as the screen, so at the same priority
+     * it competed for every frame, worst just after the TV starts, while Android is busy too.
+     */
+    static java.util.concurrent.ExecutorService background(String name, int priority) {
+        return java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(() -> {
+            android.os.Process.setThreadPriority(priority);
+            r.run();
+        }, name));
+    }
+
+    /** True for the first minutes after the TV started, while Android is still busy starting everything else. */
+    static boolean justBooted() {
+        return android.os.SystemClock.elapsedRealtime() < 4 * 60_000L;
+    }
+
     private static final Map<Class<?>, String> NAMES = new HashMap<>();
 
     static {
@@ -80,7 +97,11 @@ final class Compat {
     @SuppressWarnings("deprecation")
     static boolean online(ConnectivityManager cm) {
         if (cm == null) return false;
-        if (Build.VERSION.SDK_INT >= 23) return cm.getActiveNetwork() != null;
+        if (Build.VERSION.SDK_INT >= 23) {
+            // connected isn't online: a network with no way out (a router without internet) doesn't count
+            android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(cm.getActiveNetwork());
+            return nc != null && nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        }
         android.net.NetworkInfo ni = cm.getActiveNetworkInfo();
         return ni != null && ni.isConnected();
     }

@@ -37,20 +37,15 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Fresh photographs every day: Wikimedia Commons' Picture of the Day, fetched in the background with
- * no account or API key, sized for the TV and filed with its title, description, photographer and
- * licence. Landscape photographs only; the newest few dozen are kept and the rest deleted.
- * Requests are spaced out and back off when Wikimedia asks, as its API etiquette requires.
+ * The background job's schedule and two helpers the photograph sources share (a headline from a
+ * title, the light a photograph belongs to). Wikimedia's Picture of the Day used to arrive here; it
+ * made way for {@link Gallery}, and what it left on the TV is cleared on the next run.
  */
 final class Daily {
     private static final String DIR = "daily", INDEX = "index.json";
-    private static final String FEED = "https://api.wikimedia.org/feed/v1/wikipedia/en/featured/";
-    private static final String UA = "AuraTV/5.6 (open-source Android TV home screen; Wikimedia Picture of the Day)";
-    private static final int KEEP = 40, BACKLOG_DAYS = 30, W = 1536, H = 864;
     /** The periodic job and the catch-up job may fire together; imports run one at a time. */
     private static final Object LOCK = new Object();
     static final int JOB_DAILY = 41, JOB_NOW = 42;
-    private static final long GAP_MS = 6_000;
 
     private Daily() { }
 
@@ -68,15 +63,26 @@ final class Daily {
                     .setPersisted(true)
                     .build());
         }
-        if ((!have(c, today()) || Picks.stale(c) || Fresh.stale(c)) && !Compat.pending(js, JOB_NOW)) {
+        if ((Gallery.hungry(c) || Picks.stale(c) || Fresh.stale(c)) && !Compat.pending(js, JOB_NOW)) {
             js.schedule(new JobInfo.Builder(JOB_NOW, job)
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                    .setMinimumLatency(20_000)
+                    // just after the TV started, Android is busy enough: the catch-up waits a few minutes
+                    .setMinimumLatency(Compat.justBooted() ? 180_000 : 20_000)
                     .build());
         }
     }
 
     // ---- reading (for the backdrop) ----------------------------------------------------------
+
+    /** A run in a few seconds, whatever the schedule: the photo sources just changed. */
+    static void soon(Context c) {
+        JobScheduler js = Compat.svc(c, JobScheduler.class);
+        if (js == null) return;
+        js.schedule(new JobInfo.Builder(JOB_NOW, new ComponentName(c, DailyJob.class))
+                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                .setMinimumLatency(3_000)
+                .build());
+    }
 
     static String today() {
         return new SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(new Date());
@@ -87,7 +93,10 @@ final class Daily {
         return new File(dir(c), INDEX).lastModified();
     }
 
-    /** Imported photographs, newest first, skipping any whose file has gone. */
+    /**
+     * Imported photographs, newest first, skipping any whose file has gone. Wikimedia's Picture of the
+     * Day has made way for {@link Gallery}: nothing is imported any more, so this is empty.
+     */
     static List<Backdrop.Wallpaper> walls(Context c) {
         List<Backdrop.Wallpaper> out = new ArrayList<>();
         JSONArray index = readIndex(c);
@@ -98,14 +107,6 @@ final class Daily {
         return out;
     }
 
-    private static boolean have(Context c, String day) {
-        JSONArray index = readIndex(c);
-        for (int i = 0; i < index.length(); i++) {
-            if (day.equals(index.optJSONObject(i).optString("day"))) return true;
-        }
-        return prefs(c).getStringSet("daily_tried", new HashSet<>()).contains(day);
-    }
-
     // ---- importing (on the job's thread) -----------------------------------------------------
 
     /**
@@ -114,164 +115,16 @@ final class Daily {
      */
     static boolean run(Context c) {
         synchronized (LOCK) {
-            return runLocked(c);
+            // Wikimedia's Picture of the Day made way for Gallery's sources: what it left on the TV goes
+            File[] old = dir(c).listFiles();
+            for (int i = 0; old != null && i < old.length; i++) //noinspection ResultOfMethodCallIgnored
+                old[i].delete();
+            return true;
         }
-    }
-
-    private static boolean runLocked(Context c) {
-        if (!Prefs.on(c, Prefs.DAILY)) return true; // switched off in Settings
-        File dir = dir(c);
-        if (!dir.isDirectory() && !dir.mkdirs()) return true;
-        JSONArray index = readIndex(c);
-        Set<String> done = new HashSet<>(), tried = new HashSet<>(prefs(c).getStringSet("daily_tried", new HashSet<>()));
-        for (int i = 0; i < index.length(); i++) done.add(index.optJSONObject(i).optString("day"));
-        Calendar cal = Calendar.getInstance();
-        SimpleDateFormat key = new SimpleDateFormat("yyyy-MM-dd", Locale.ROOT), path = new SimpleDateFormat("yyyy/MM/dd", Locale.ROOT);
-        boolean complete = true, first = true;
-        for (int d = 0; d < BACKLOG_DAYS; d++, cal.add(Calendar.DAY_OF_MONTH, -1)) {
-            String day = key.format(cal.getTime());
-            if (done.contains(day) || tried.contains(day)) continue;
-            try {
-                if (!first) Thread.sleep(GAP_MS);
-                first = false;
-                JSONObject entry = fetch(c, day, path.format(cal.getTime()), cal.getTime(), dir);
-                if (entry != null) {
-                    index.put(entry);
-                    write(c, prune(c, index));
-                }
-                tried.add(day);
-            } catch (InterruptedException e) {
-                complete = false;
-                break;
-            } catch (IOException | JSONException | RuntimeException e) {
-                complete = false;
-                break;
-            }
-        }
-        // remember only recent attempts, so the set stays small
-        Set<String> recent = new HashSet<>();
-        cal = Calendar.getInstance();
-        for (int d = 0; d < BACKLOG_DAYS + 2; d++, cal.add(Calendar.DAY_OF_MONTH, -1)) {
-            String day = key.format(cal.getTime());
-            if (tried.contains(day)) recent.add(day);
-        }
-        prefs(c).edit().putStringSet("daily_tried", recent).apply();
-        return complete;
-    }
-
-    /** One day's Picture of the Day, filed on disk; null if that day's picture isn't a landscape photograph. */
-    private static JSONObject fetch(Context c, String day, String datePath, Date date, File dir)
-            throws IOException, JSONException, InterruptedException {
-        byte[] body = get(FEED + datePath);
-        if (body == null) return null;
-        JSONObject img = new JSONObject(new String(body, StandardCharsets.UTF_8)).optJSONObject("image");
-        if (img == null) return null;
-        JSONObject orig = img.optJSONObject("image");
-        if (orig == null) return null;
-        int ow = orig.optInt("width"), oh = orig.optInt("height");
-        String src = orig.optString("source");
-        int q = src.indexOf('?');
-        if (q >= 0) src = src.substring(0, q);
-        // TV-shaped photographs only: 5:4 or wider, large, and a JPEG (diagrams and scans tend to be PNG/TIFF/SVG)
-        if (ow < 1920 || ow < oh * 1.24f || !src.toLowerCase(Locale.ROOT).matches(".+\\.jpe?g")) return null;
-
-        Thread.sleep(GAP_MS);
-        byte[] data = get(thumb(src, 1920));
-        if (data == null) {
-            Thread.sleep(GAP_MS);
-            data = get(thumb(src, 1280));
-        }
-        if (data == null) return null;
-        Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length);
-        if (b == null) return null;
-        Bitmap fit = cover(b);
-        b.recycle();
-
-        File out = new File(dir, day + ".jpg"), tmp = new File(dir, day + ".tmp");
-        try (FileOutputStream fo = new FileOutputStream(tmp)) {
-            fit.compress(Bitmap.CompressFormat.JPEG, 90, fo);
-        }
-        if (!tmp.renameTo(out)) throw new IOException("couldn't file " + out);
-
-        String caption = clean(img.optJSONObject("structured") != null && img.optJSONObject("structured").optJSONObject("captions") != null
-                ? img.optJSONObject("structured").optJSONObject("captions").optString("en") : "");
-        String description = clean(img.optJSONObject("description") != null ? img.optJSONObject("description").optString("text") : "");
-        JSONObject e = new JSONObject();
-        e.put("file", out.getName());
-        e.put("path", out.getAbsolutePath());
-        e.put("day", day);
-        e.put("place", place(img.optString("title"), caption.isEmpty() ? description : caption));
-        e.put("region", "Picture of the day · " + new SimpleDateFormat("d MMMM", Locale.getDefault()).format(date));
-        e.put("line", sentence(caption.isEmpty() ? description : caption, 150));
-        e.put("author", cut(clean(img.optJSONObject("artist") != null ? img.optJSONObject("artist").optString("text") : ""), 40));
-        e.put("license", img.optJSONObject("license") != null ? img.optJSONObject("license").optString("type") : "");
-        e.put("source", img.optString("file_page"));
-        e.put("mood", mood(fit));
-        e.put("accent", String.format(Locale.ROOT, "#%06X", AppRepo.colorOf(new BitmapDrawable(c.getResources(), fit)) & 0xFFFFFF));
-        fit.recycle();
-        return e;
-    }
-
-    /**
-     * GET with Wikimedia's etiquette: a descriptive User-Agent, and on 429/503 a pause (Retry-After
-     * if given) before trying again. Null for a missing page; IOException when the network fails.
-     */
-    private static byte[] get(String url) throws IOException, InterruptedException {
-        for (int attempt = 0; ; attempt++) {
-            HttpURLConnection con = (HttpURLConnection) new URL(url).openConnection();
-            con.setRequestProperty("User-Agent", UA);
-            con.setConnectTimeout(15_000);
-            con.setReadTimeout(30_000);
-            try {
-                int code = con.getResponseCode();
-                if (code == 429 || code == 503) {
-                    if (attempt >= 3) throw new IOException("rate limited");
-                    long wait = 20_000L * (attempt + 1);
-                    try {
-                        wait = Math.max(wait, Long.parseLong(con.getHeaderField("Retry-After")) * 1000);
-                    } catch (NumberFormatException ignored) {
-                    }
-                    Thread.sleep(Math.min(wait, 120_000));
-                    continue;
-                }
-                if (code == 404 || code == 400) return null;
-                if (code != 200) throw new IOException("HTTP " + code);
-                try (InputStream in = con.getInputStream()) {
-                    ByteArrayOutputStream bo = new ByteArrayOutputStream();
-                    byte[] buf = new byte[16 * 1024];
-                    for (int n; (n = in.read(buf)) > 0; ) {
-                        if (Thread.interrupted()) throw new InterruptedIOException();
-                        bo.write(buf, 0, n);
-                    }
-                    return bo.toByteArray();
-                }
-            } finally {
-                con.disconnect();
-            }
-        }
-    }
-
-    /** Commons thumbnail URL: .../commons/5/51/Name.jpg becomes .../commons/thumb/5/51/Name.jpg/1920px-Name.jpg */
-    private static String thumb(String src, int width) {
-        int at = src.indexOf("/commons/");
-        if (at < 0) return src;
-        String head = src.substring(0, at + 9), tail = src.substring(at + 9);
-        return head + "thumb/" + tail + "/" + width + "px-" + tail.substring(tail.lastIndexOf('/') + 1);
-    }
-
-    /** Center-cropped to the TV's photograph size, filtered. */
-    private static Bitmap cover(Bitmap b) {
-        Bitmap out = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
-        float s = Math.max(W / (float) b.getWidth(), H / (float) b.getHeight());
-        Matrix m = new Matrix();
-        m.setScale(s, s);
-        m.postTranslate((W - b.getWidth() * s) / 2f, (H - b.getHeight() * s) / 2f);
-        new Canvas(out).drawBitmap(b, m, new Paint(Paint.FILTER_BITMAP_FLAG));
-        return out;
     }
 
     /** Which light the photograph belongs to, from its brightness and warmth, for Sky Sync. */
-    private static String mood(Bitmap b) {
+    static String mood(Bitmap b) {
         Bitmap s = Bitmap.createScaledBitmap(b, 48, 27, true);
         float luma = 0, warmth = 0;
         int n = s.getWidth() * s.getHeight();
@@ -312,16 +165,6 @@ final class Daily {
         return t;
     }
 
-    private static String clean(String s) {
-        return s == null ? "" : s.replaceAll("<[^>]*>", " ").replaceAll("\\s+", " ").trim();
-    }
-
-    private static String sentence(String s, int max) {
-        int dot = s.indexOf(". ");
-        if (dot > 20) s = s.substring(0, dot + 1);
-        return cut(s, max);
-    }
-
     private static String cut(String s, int max) {
         if (s.length() <= max) return s;
         int sp = s.lastIndexOf(' ', max - 1);
@@ -332,10 +175,6 @@ final class Daily {
 
     private static File dir(Context c) {
         return new File(c.getFilesDir(), DIR);
-    }
-
-    private static SharedPreferences prefs(Context c) {
-        return c.getSharedPreferences("aura", Context.MODE_PRIVATE);
     }
 
     private static JSONArray readIndex(Context c) {
@@ -349,27 +188,5 @@ final class Daily {
         } catch (IOException | JSONException e) {
             return new JSONArray();
         }
-    }
-
-    /** Newest first, at most {@link #KEEP}; photographs that fall off the end are deleted. */
-    private static JSONArray prune(Context c, JSONArray index) {
-        List<JSONObject> all = new ArrayList<>();
-        for (int i = 0; i < index.length(); i++) all.add(index.optJSONObject(i));
-        java.util.Collections.sort(all, (a, b) -> b.optString("day").compareTo(a.optString("day")));
-        JSONArray out = new JSONArray();
-        for (int i = 0; i < all.size(); i++) {
-            if (i < KEEP) out.put(all.get(i));
-            else //noinspection ResultOfMethodCallIgnored
-                new File(all.get(i).optString("path")).delete();
-        }
-        return out;
-    }
-
-    private static void write(Context c, JSONArray index) throws IOException {
-        File f = new File(dir(c), INDEX), tmp = new File(dir(c), INDEX + ".tmp");
-        try (FileOutputStream fo = new FileOutputStream(tmp)) {
-            fo.write(index.toString().getBytes(StandardCharsets.UTF_8));
-        }
-        if (!tmp.renameTo(f)) throw new IOException("couldn't write the index");
     }
 }

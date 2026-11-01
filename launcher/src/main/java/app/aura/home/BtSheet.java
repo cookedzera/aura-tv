@@ -171,11 +171,12 @@ final class BtSheet extends GlassFrame {
                     String n = d.getName();
                     if (n != null && !n.isEmpty()) return n;
                 }
+                return "Bluetooth";
             }
             Set<BluetoothDevice> bonded = bt.getBondedDevices();
             if (bonded != null) {
                 for (BluetoothDevice d : bonded) {
-                    if (isConnected(d)) {
+                    if (isAudio(d) && isConnected(d)) {
                         String n = d.getName();
                         if (n != null && !n.isEmpty()) return n;
                     }
@@ -184,6 +185,18 @@ final class BtSheet extends GlassFrame {
         } catch (SecurityException ignored) {
         }
         return "Bluetooth";
+    }
+
+    /** Headphones, speakers and receivers; never the TV's own Bluetooth remote, keyboard or gamepad. */
+    private static boolean isAudio(BluetoothDevice b) {
+        if (b.getType() == BluetoothDevice.DEVICE_TYPE_LE) return false;
+        BluetoothClass bc = b.getBluetoothClass();
+        if (bc == null) return false;
+        int major = bc.getMajorDeviceClass();
+        if (major == BluetoothClass.Device.Major.PERIPHERAL) return false;
+        return major == BluetoothClass.Device.Major.AUDIO_VIDEO
+                || bc.hasService(BluetoothClass.Service.RENDER)
+                || bc.hasService(BluetoothClass.Service.AUDIO);
     }
 
     private static final class Dev {
@@ -206,16 +219,17 @@ final class BtSheet extends GlassFrame {
                 Set<BluetoothDevice> bonded = bt.getBondedDevices();
                 if (bonded != null) {
                     for (BluetoothDevice b : bonded) {
+                        int st = a2dp != null ? a2dp.getConnectionState(b) : BluetoothProfile.STATE_DISCONNECTED;
+                        boolean a2dpConn = st == BluetoothProfile.STATE_CONNECTED, a2dpWait = st == BluetoothProfile.STATE_CONNECTING;
+                        if (!a2dpConn && !a2dpWait && !isAudio(b)) continue;
                         Dev d = new Dev();
                         d.raw = b;
                         d.addr = b.getAddress();
                         String n = b.getName();
                         d.name = n != null && !n.isEmpty() ? n : d.addr;
-                        int st = a2dp != null ? a2dp.getConnectionState(b) : BluetoothProfile.STATE_DISCONNECTED;
-                        d.connected = st == BluetoothProfile.STATE_CONNECTED || isConnected(b);
-                        d.connecting = st == BluetoothProfile.STATE_CONNECTING;
-                        BluetoothClass bc = b.getBluetoothClass();
-                        d.audio = d.connected || d.connecting || (bc != null && bc.getMajorDeviceClass() == BluetoothClass.Device.Major.AUDIO_VIDEO);
+                        d.connected = a2dp != null ? a2dpConn : isConnected(b);
+                        d.connecting = a2dpWait;
+                        d.audio = true;
                         d.battery = batteryLevel(b);
                         if (d.connected && active == null) active = d;
                         devs.add(d);

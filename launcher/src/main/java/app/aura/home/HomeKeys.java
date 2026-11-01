@@ -43,11 +43,13 @@ import java.util.Map;
  * or with a controller's Home) Aura is brought straight back over it.
  */
 public class HomeKeys extends AccessibilityService {
-    private static final long TWICE_MS = 200, HOLD_MS = 550, TEACH_MS = 30_000;
+    private static final long TWICE_MS = 150, LATE_TWICE_MS = 340, HOLD_MS = 550, TEACH_MS = 30_000;
     /** A picture of the app in front is refreshed on a press once the last is this old. */
     private static final long REFRESH_MS = 30_000;
     /** Remote buttons given an app: "k<keycode>" (or "s<scancode>" for keys with no code) to a package. */
     static final String KEYS = "remote_keys";
+    /** KeyEvent.KEYCODE_PROFILE_SWITCH, named only from Android 12: Google TV remotes send it on older TVs too. */
+    static final int KEYCODE_PROFILE_SWITCH = 288;
     /** Home goes to Aura even where Android hands it to another launcher (on unless switched off). */
     private static final String TAKEOVER = "home_takeover";
 
@@ -60,7 +62,7 @@ public class HomeKeys extends AccessibilityService {
     private static boolean healTried;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private String front;
+    private String front, firstFront;
     private long firstUpAt;
     /**
      * waiting: a first press is held back; released: it has let go; taken: this press's down was
@@ -228,6 +230,7 @@ public class HomeKeys extends AccessibilityService {
         }
         pad = padConnected();
         refilter();
+        ProfileButton.start(this);
     }
 
     /**
@@ -279,6 +282,15 @@ public class HomeKeys extends AccessibilityService {
         String pkg = e.getPackageName().toString();
         String cls = e.getClassName() != null ? e.getClassName().toString() : null;
         // the TV's own launcher came up (Google TV's, say, which keeps Home): Aura goes back over it
+        // Google TV's "who's watching" picker: this TV's firmware (Realtek's key service) opens it
+        // straight from the remote's profile button, before any app sees the key, and Google TV
+        // raises it by itself on waking. Aura's own picker takes its place
+        if (cls != null && pkg.equals(Safety.GOOGLE_TV_HOME) && cls.endsWith(".ProfileChooserActivity") && takeover()) {
+            front = null;
+            refilter();
+            open("aura_profiles", "");
+            return;
+        }
         if (cls != null && others.contains(pkg + "/" + cls)) {
             // no app is in front now: no picture is taken of the launcher under an app's name
             front = null;
@@ -327,6 +339,11 @@ public class HomeKeys extends AccessibilityService {
     private void refilter() {
         // never between a press and its release: Android would see only half of it
         if (taken || waiting || holding) return;
+        if (firstFront != null && released && SystemClock.uptimeMillis() - firstUpAt < LATE_TWICE_MS) {
+            refilterLater();
+            return;
+        }
+        firstFront = null;
         boolean want = teaching != null || !pad && (front == null ? takeover()
                 : !front.equals(getPackageName()) || !keys(this).isEmpty() || takeover());
         if (want == filtering) return;
@@ -336,6 +353,11 @@ public class HomeKeys extends AccessibilityService {
         else info.flags &= ~AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
         setServiceInfo(info);
         filtering = want;
+    }
+
+    private void refilterLater() {
+        handler.removeCallbacks(refilter);
+        handler.postDelayed(refilter, 220);
     }
 
     private void refilterSoon() {
@@ -408,6 +430,16 @@ public class HomeKeys extends AccessibilityService {
             }
             return true;
         }
+        // Google TV's profile and notification buttons open its own profile picker and side panel over
+        // anything; here they open Aura's profiles and Control Center (over the app in front, if any)
+        if (key == KEYCODE_PROFILE_SWITCH || key == KeyEvent.KEYCODE_NOTIFICATION || key == KeyEvent.KEYCODE_SETTINGS) {
+            if (up && !e.isCanceled()) {
+                String over = front != null && !front.equals(getPackageName()) ? front : "";
+                if (key == KEYCODE_PROFILE_SWITCH) open("aura_profiles", "");
+                else open("aura_cc", over);
+            }
+            return true;
+        }
         if (key == KeyEvent.KEYCODE_APP_SWITCH || key == KeyEvent.KEYCODE_ALL_APPS) {
             // both halves are kept from Android; Aura answers on the release
             if (up && !e.isCanceled()) {
@@ -446,6 +478,18 @@ public class HomeKeys extends AccessibilityService {
             return true;
         }
         if (e.getRepeatCount() > 0) return taken;
+        if (firstFront != null && released && SystemClock.uptimeMillis() - firstUpAt < LATE_TWICE_MS) {
+            // the second press: the switcher, over the app that was in front at the first press
+            handler.removeCallbacks(goHome);
+            handler.removeCallbacks(held);
+            waiting = false;
+            String over = firstFront;
+            firstFront = null;
+            firstUpAt = 0;
+            taken = true;
+            if (!open("aura_switcher", over)) home();
+            return true;
+        }
         // on Aura's own screen, Aura handles Home itself: Android hands it the press, unless Android
         // would open another launcher, in which case the press goes to Aura from here
         if (front == null || front.equals(getPackageName())) {
@@ -464,6 +508,7 @@ public class HomeKeys extends AccessibilityService {
             return true;
         }
         waiting = true;
+        firstFront = front;
         released = false;
         holding = false;
         // the app as you're leaving it, for its card in the switcher: taken while it's still on screen
@@ -527,6 +572,7 @@ public class HomeKeys extends AccessibilityService {
         if (waiting) goHome.run();
         live = false;
         if (running == this) running = null;
+        ProfileButton.stop();
         // switched off in Android's settings (not a crash or a restart): it stays off after a restart too
         if (!on(this)) Prefs.device(this).edit().putBoolean("keys_wanted", false).apply();
         InputManager im = (InputManager) getSystemService(Context.INPUT_SERVICE);
@@ -685,10 +731,18 @@ public class HomeKeys extends AccessibilityService {
     /** The app a button opens, or null. */
     static String mapped(Context c, int code, int scan) {
         Map<String, String> k = keys(c);
-        return k.isEmpty() ? null : k.get(id(code, scan));
+        String pkg = k.isEmpty() ? null : k.get(id(code, scan));
+        // in a kids' profile, a button given an app that profile hides does nothing (and isn't passed on)
+        return pkg != null && !allowed(c, pkg) ? "" : pkg;
+    }
+
+    /** Whether the profile in use may open {@code pkg}: a kids' profile can't open what it hides. */
+    static boolean allowed(Context c, String pkg) {
+        return !Profiles.kids(c) || !Prefs.hidden(c).contains(pkg);
     }
 
     static void launch(Context c, String pkg) {
+        if (pkg == null || pkg.isEmpty()) return;
         Intent i = c.getPackageManager().getLeanbackLaunchIntentForPackage(pkg);
         if (i == null) i = c.getPackageManager().getLaunchIntentForPackage(pkg);
         if (i == null) return;
@@ -720,10 +774,14 @@ public class HomeKeys extends AccessibilityService {
         return new ComponentName(c, HomeKeys.class).flattenToString();
     }
 
+    private static boolean isMe(Context c, String s) {
+        return new ComponentName(c, HomeKeys.class).equals(ComponentName.unflattenFromString(s));
+    }
+
     static boolean on(Context c) {
         String list = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (list == null) return false;
-        for (String s : TextUtils.split(list, ":")) if (s.equalsIgnoreCase(me(c))) return true;
+        for (String s : TextUtils.split(list, ":")) if (isMe(c, s)) return true;
         return false;
     }
 
@@ -731,7 +789,7 @@ public class HomeKeys extends AccessibilityService {
     static String enableCommand(Context c) {
         String list = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         java.util.List<String> keep = new java.util.ArrayList<>();
-        if (list != null) for (String s : TextUtils.split(list, ":")) if (!s.isEmpty() && !s.equalsIgnoreCase(me(c))) keep.add(s);
+        if (list != null) for (String s : TextUtils.split(list, ":")) if (!s.isEmpty() && !isMe(c, s)) keep.add(s);
         keep.add(me(c));
         return "settings put secure enabled_accessibility_services '" + TextUtils.join(":", keep).replace("'", "")
                 + "' && settings put secure accessibility_enabled 1";
@@ -742,7 +800,7 @@ public class HomeKeys extends AccessibilityService {
         if (!Compat.granted(c, android.Manifest.permission.WRITE_SECURE_SETTINGS)) return false;
         String list = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         java.util.List<String> keep = new java.util.ArrayList<>();
-        if (list != null) for (String s : TextUtils.split(list, ":")) if (!s.isEmpty() && !s.equalsIgnoreCase(me(c))) keep.add(s);
+        if (list != null) for (String s : TextUtils.split(list, ":")) if (!s.isEmpty() && !isMe(c, s)) keep.add(s);
         if (on) keep.add(me(c));
         try {
             Settings.Secure.putString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,

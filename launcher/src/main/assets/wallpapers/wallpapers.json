@@ -1,112 +1,13 @@
 [
  {
-  "file": "w00.jpg",
-  "place": "Matterhorn",
-  "region": "Zermatt · Switzerland",
-  "author": "Sam Ferrara",
-  "line": "The mountain wears the last of the light like a veil.",
-  "mood": "golden",
-  "license": "CC0",
-  "source": "https://commons.wikimedia.org/wiki/File:Matterhorn_sunset_2016_(Unsplash).jpg",
-  "accent": "#E57067"
- },
- {
-  "file": "w01.jpg",
-  "place": "Northern Lights",
-  "region": "Lofoten · Norway",
-  "author": "Johannes Groll",
-  "line": "A green river runs quietly across the Arctic sky.",
+  "file": "aurora.webp",
+  "place": "Northern lights",
+  "region": "Aura",
+  "author": "Aura",
+  "line": "Light moving through the night, until the day's photographs arrive.",
   "mood": "night",
-  "license": "CC0",
-  "source": "https://commons.wikimedia.org/wiki/File:Lofoten,_Norway_(Unsplash).jpg",
-  "accent": "#6EE567"
- },
- {
-  "file": "w02.jpg",
-  "place": "Pangong Tso",
-  "region": "Ladakh · India",
-  "author": "KennyOMG",
-  "line": "Four thousand metres up, a lake the colour of deep sky.",
-  "mood": "day",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Pangong_Tso_2.jpg",
-  "accent": "#67B0E5"
- },
- {
-  "file": "w03.jpg",
-  "place": "Seljalandsfoss",
-  "region": "Suðurland · Iceland",
-  "author": "Diego Delso",
-  "line": "Behind the falling water, the evening turns to glass.",
-  "mood": "golden",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Seljalandsfoss,_Su%C3%B0urland,_Islandia,_2014-08-16,_DD_201-203_HDR.JPG",
-  "accent": "#67B7E5"
- },
- {
-  "file": "w04.jpg",
-  "place": "Øksfjorden",
-  "region": "Finnmark · Norway",
-  "author": "Ximonic (Simo Räsänen)",
-  "line": "The low Arctic sun, laid gently across the fjord.",
-  "mood": "golden",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Low_sunlight_at_%C3%98ksfjorden_in_Loppa,_Troms_og_Finnmark,_Norway,_2022_August.jpg",
-  "accent": "#E5B367"
- },
- {
-  "file": "w05.jpg",
-  "place": "Bear Lake",
-  "region": "Alaska · USA",
-  "author": "U.S. Air Force",
-  "line": "Aurora dancing over the frozen interior of Alaska.",
-  "mood": "night",
-  "license": "Public domain",
-  "source": "https://commons.wikimedia.org/wiki/File:Aurora_borealis_over_Eielson_Air_Force_Base,_Alaska.jpg",
-  "accent": "#67BAE5"
- },
- {
-  "file": "w06.jpg",
-  "place": "Reynisfjara",
-  "region": "Vík · Iceland",
-  "author": "Diego Delso",
-  "line": "Black sand, a lone basalt stack and the North Atlantic.",
-  "mood": "day",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Reynisfjara,_Su%C3%B0urland,_Islandia,_2014-08-17,_DD_164.JPG",
-  "accent": "#6798E5"
- },
- {
-  "file": "w07.jpg",
-  "place": "Aurora & Perseids",
-  "region": "Norderney · Germany",
-  "author": "Stephan Sprinz",
-  "line": "Shooting stars falling through a crimson aurora.",
-  "mood": "night",
-  "license": "CC BY 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Aurora_and_perseids.jpg",
-  "accent": "#D367E5"
- },
- {
-  "file": "w08.jpg",
-  "place": "Zanskar Range",
-  "region": "Padum · Ladakh, India",
-  "author": "Timothy A. Gonsalves",
-  "line": "The long road to Padum, beneath walls of snow.",
-  "mood": "day",
-  "license": "CC BY-SA 4.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Road_Padum_Zanskar_Range_Jun24_A7CR_00818.jpg",
-  "accent": "#6777E5"
- },
- {
-  "file": "w09.jpg",
-  "place": "High Fläming",
-  "region": "Brandenburg · Germany",
-  "author": "Karl-Sebastian Schulte",
-  "line": "Sunrise threading through the morning mist.",
-  "mood": "dawn",
-  "license": "CC BY 2.0",
-  "source": "https://commons.wikimedia.org/wiki/File:Foggy_sunrise_in_High_Fl%C3%A4ming_Nature_Park2.jpg",
-  "accent": "#E5AB67"
+  "license": "",
+  "source": "",
+  "accent": "#8BE39A"
  }
 ]

@@ -4,8 +4,8 @@ import android.content.Context;
 import android.view.View;
 
 /**
- * A screensaver scene that draws itself (the sky, the aurora, rain on glass, the photo mosaic,
- * the gradient clock, a festival). Started when the screensaver starts, stopped when it ends or
+ * A screensaver scene that draws itself (the sky, the wind, the museum, the literary clock,
+ * famous quotes, or Earth from space). Started when the screensaver starts, stopped when it ends or
  * moves on to another scene; it may hand the story card a caption now and then.
  */
 abstract class Scene extends View {

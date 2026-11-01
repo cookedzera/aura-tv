@@ -81,27 +81,35 @@ final class FolderPanel extends FrameLayout {
             }
             final AppRepo.App a = apps.get(i);
             final Card card = new Card(act, host.art(a), a.color, 14);
-            if (host.glass()) card.glass = host.backdrop();
-            card.sway = true;
+            if (host.glass() && a.art == null) card.glass = host.backdrop();
+            card.tvos = Prefs.tvos(act) || Prefs.tileStyle(act).equals("tvos");
+            card.sway = !Perf.light(act);
             card.onClick = () -> host.launch(a, card);
             card.onLongClick = () -> host.hold(a, card);
             LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(Ui.dp(W), Ui.dp(H));
             if (i % COLS > 0) cl.leftMargin = Ui.dp(GAP);
             row.addView(card, cl);
+            card.setAlpha(0f);
+            card.setTranslationY(Ui.dp(10));
+            card.animate().alpha(1f).translationY(0f).setStartDelay(i * 25L).setDuration(380).setInterpolator(Ui.EMPHASIZED).start();
             if (first == null) first = card;
         }
         setVisibility(VISIBLE);
         setAlpha(0f);
         animate().alpha(1f).setDuration(260).setStartDelay(0).setInterpolator(Ui.SOFT).start();
-        grid.setScaleX(0.92f);
-        grid.setScaleY(0.92f);
-        grid.animate().scaleX(1f).scaleY(1f).setDuration(460).setInterpolator(Ui.EMPHASIZED).start();
+        title.setAlpha(0f);
+        title.setTranslationY(Ui.dp(12));
+        title.animate().alpha(1f).translationY(0f).setDuration(420).setInterpolator(Ui.EMPHASIZED).start();
+        grid.setScaleX(0.88f);
+        grid.setScaleY(0.88f);
+        grid.animate().scaleX(1f).scaleY(1f).setDuration(520).setInterpolator(Ui.SPRING).start();
         if (first != null) first.requestFocus();
     }
 
     void close() {
         if (!isOpen()) return;
         openId = null;
+        grid.animate().scaleX(0.92f).scaleY(0.92f).setDuration(200).setInterpolator(Ui.SOFT).start();
         animate().alpha(0f).setDuration(200).setStartDelay(0).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     setVisibility(GONE);

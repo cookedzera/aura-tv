@@ -117,9 +117,10 @@ final class Picks {
             {"com.amazon.avod.thirdpartyclient", "9|119"}, {"com.netflix.mediaclient", "8"},
     };
 
-    private static final String DIR = "picks", INDEX = "picks.json";
+    // renamed (with the posters' "q" prefix) when the posters grew from 185 px, so the pool is made again
+    private static final String DIR = "picks", INDEX = "picks2.json";
     private static final String MAZE = "https://api.tvmaze.com/shows?page=", TMDB = "https://api.themoviedb.org/3",
-            POSTER = "https://image.tmdb.org/t/p/w185";
+            POSTER = "https://image.tmdb.org/t/p/w342";
     private static final String UA = "AuraTV/7 (open-source Android TV home screen)";
     private static final long WEEK = 7L * 24 * 3_600_000;
     private static final int POOL = 30;
@@ -233,8 +234,19 @@ final class Picks {
         return out;
     }
 
+    /** The poster, halved only while it stays at least 600 px wide. */
     static Bitmap poster(Pick p) {
-        return BitmapFactory.decodeFile(p.poster);
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(p.poster, o);
+        o.inJustDecodeBounds = false;
+        o.inSampleSize = 1;
+        while (o.outWidth / (o.inSampleSize * 2) >= 600) o.inSampleSize *= 2;
+        try {
+            return BitmapFactory.decodeFile(p.poster, o);
+        } catch (OutOfMemoryError e) {
+            return null;
+        }
     }
 
     /** Its trailer: straight to the video on YouTube when TMDB named one, else a search there, else the TV's own search. */
@@ -274,7 +286,7 @@ final class Picks {
             for (JSONObject s : found) {
                 if (out.length() >= POOL) break;
                 try {
-                    File img = new File(dir, "p" + s.getString("id") + ".jpg");
+                    File img = new File(dir, "q" + s.getString("id") + ".jpg");
                     if (!img.isFile()) {
                         byte[] data = get(s.getString("art"), null);
                         try (FileOutputStream fo = new FileOutputStream(img)) {
@@ -386,7 +398,9 @@ final class Picks {
         e.put("name", s.optString("name"));
         e.put("line", line.toString());
         e.put("about", about(s.optString("summary", "")));
-        e.put("art", s.getJSONObject("image").optString("medium"));
+        // the full poster (about 680 px wide): "medium" is a 210 px thumbnail, a smear on a TV
+        JSONObject image = s.getJSONObject("image");
+        e.put("art", image.optString("original", image.optString("medium")));
         e.put("query", s.optString("name") + " trailer");
         e.put("why", "TOP RATED");
         e.put("src", "TVmaze");

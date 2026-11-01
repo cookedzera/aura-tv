@@ -28,7 +28,12 @@ import java.util.Set;
 final class HomeRole {
     static final int REQUEST = 41;
     /** Launchers that keep Home whatever the role says: Google TV's, then Fire TV's. */
-    private static final String[] STUBBORN = {"com.google.android.apps.tv.launcherx", "com.amazon.tv.launcher"};
+    private static final String[] STUBBORN = {
+            "com.google.android.apps.tv.launcherx",
+            "com.amazon.tv.launcher",
+            "com.amazon.firehomestarter",
+            "com.amazon.tv.leanbacklauncher"
+    };
 
     private HomeRole() { }
 

@@ -25,8 +25,9 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * The first time Aura opens on a TV: a short welcome on frosted glass over the photograph. A look
- * for the tiles, shown with your own apps; then the features, each with a small live preview, on
+ * The first time Aura opens on a TV: a short welcome on frosted glass over the photograph. A style
+ * for the home screen (Aura's own, or tvOS's dock), each drawn small; a look for the tiles, shown
+ * with your own apps; then the features, each with a small live preview, on
  * or off; then three things worth knowing. Every choice applies at once and can be changed later
  * in Settings. Where Android keeps Home for its own launcher (Google TV, Fire TV), two more pages
  * hand it to Aura: set up on the TV itself through USB debugging, or from a computer. Built only
@@ -47,15 +48,14 @@ final class Welcome extends FrameLayout {
 
     /** Pref key, label, what it does, preview, what to refresh. */
     private static final String[][] FEATURES = {
-            {Prefs.TOP_SHELF, "Top Shelf", "Rest on an app and its shows line up above it, ready to play.", "shelf", "shelf"},
+            {Prefs.TOP_SHELF, "App cards", "Rest on an app and its shows line up above it, ready to play. Off for only apps.", "shelf", "shelf"},
             {Prefs.PARALLAX, "Parallax icons", "Tiles tilt toward you and catch the light as you move between them.", "parallax", "parallax"},
             {Prefs.STACK_AUTO, "Smart Stack", "Continue watching, new episodes and tonight's pick, turning on their own.", "stack", "stack"},
-            {Prefs.WEATHER, "Weather", "The temperature and the sky in the corner, and the week ahead in Control Center.", "weather", "weather"},
-            {Prefs.DAILY, "Picture of the Day", "A new photograph from Wikimedia Commons on your wall every morning.", "daily", "daily"},
+            {Prefs.WEATHER, "Weather", "The temperature and the sky in the corner; open the Sky widget for the hours and the week ahead.", "weather", "weather"},
+            {Prefs.DAILY, "Fresh HD photographs", "New 4K photographs on your wall every day, never the same one twice.", "daily", "daily"},
             {Prefs.PICKS, "Tonight's pick", "A film or show worth your evening, chosen fresh each day.", "picks", "picks"},
-            {Prefs.FLYOVERS, "Screensaver flyovers", "Earth from the space station while the TV rests, a new clip each day, over Wi-Fi.", "flyovers", "flyovers"},
     };
-    private static final String[] LOOK_LINES = {"Frosted, over your photo", "Bold colour", "Dark and quiet", "Each app's own banner"};
+    private static final String[] LOOK_LINES = {"Apple TV's icons", "Frosted, over your photo", "Bold colour", "Dark and quiet", "Each app's own banner"};
 
     private final Activity act;
     private final Backdrop backdrop;
@@ -79,7 +79,7 @@ final class Welcome extends FrameLayout {
         act = a;
         backdrop = b;
         host = h;
-        for (String[] f : FEATURES) if (!Prefs.FLYOVERS.equals(f[0]) || Flyovers.supported()) features.add(f);
+        java.util.Collections.addAll(features, FEATURES);
         GlassFrame veil = new GlassFrame(a, b, 0, 0.62f);
         veil.edgeLight = false;
         addView(veil, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -88,7 +88,7 @@ final class Welcome extends FrameLayout {
         addView(stage, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         dots = new LinearLayout(a);
         dots.setGravity(Gravity.CENTER_VERTICAL);
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 5; i++) {
             View d = new View(a);
             d.setBackground(pill(0xFFFFFFFF, 3));
             LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(Ui.dp(6), Ui.dp(6));
@@ -154,8 +154,8 @@ final class Welcome extends FrameLayout {
         if (page < 0) return true;
         if (code == KeyEvent.KEYCODE_BACK) {
             // the two ways of setting Home up lead back to the choice between them
-            if (setupBusy) return true;
-            if (page > 0) show(page == 7 ? 5 : page == 5 || page == 6 ? 4 : page - 1, -1);
+            if (setupBusy || retireBusy) return true;
+            if (page > 0) show(page == 7 || page == 9 ? 5 : page == 5 || page == 6 ? 4 : page == 8 ? 0 : page == 1 ? 8 : page - 1, -1);
             return true;
         }
         if (Pad.isConfirm(code)) {
@@ -205,7 +205,7 @@ final class Welcome extends FrameLayout {
             pairDrop = null;
         }
         View v = p == 0 ? hello() : p == 1 ? look() : p == 2 ? choices() : p == 3 ? ready() : p == 4 ? homeWays() : p == 5 ? onTv()
-                : p == 6 ? fromPc() : wireless();
+                : p == 6 ? fromPc() : p == 8 ? style() : p == 9 ? retireAsk() : wireless();
         if (p == 5 || p == 6) postDelayed(poll, 1200);
         pageView = v;
         stage.addView(v, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -216,12 +216,13 @@ final class Welcome extends FrameLayout {
             View d = dots.getChildAt(i);
             LinearLayout.LayoutParams dl = (LinearLayout.LayoutParams) d.getLayoutParams();
             // the Home setup pages belong to the last step
-            boolean here = i == Math.min(p, 3);
+            boolean here = i == (p == 8 ? 1 : p == 0 ? 0 : Math.min(p, 3) + 1);
             dl.width = Ui.dp(here ? 20 : 6);
             d.setLayoutParams(dl);
             d.setAlpha(here ? 0.95f : 0.35f);
         }
-        int start = p == 1 ? Math.max(0, java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act))) : p == 5 ? setupStart() : 0;
+        int start = p == 1 ? Math.max(0, java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act))) : p == 5 ? setupStart()
+                : p == 8 && Prefs.tvos(act) ? 1 : 0;
         v.post(() -> focus(Math.min(start, targets.size() - 1)));
     }
 
@@ -239,21 +240,72 @@ final class Welcome extends FrameLayout {
         body.setGravity(Gravity.CENTER_HORIZONTAL);
         body.setMaxWidth(Ui.dp(520));
         body.setLineSpacing(Ui.dpf(4), 1f);
-        body.setText("A calm, quick home for your TV. Two choices and you're in, and everything can be changed later in Settings.");
+        body.setText("A calm, quick home for your TV. Three choices and you're in, and everything can be changed later in Settings.");
         col.addView(body, wrap(14));
         LinearLayout buttons = new LinearLayout(act);
-        buttons.addView(button("Get started", true, () -> show(1, 1)), wrap(0));
+        buttons.addView(button("Get started", true, () -> show(8, 1)), wrap(0));
         LinearLayout.LayoutParams sl = wrap(0);
         sl.leftMargin = Ui.dp(14);
-        buttons.addView(button("Keep the defaults", false, this::finish), sl);
+        // keeping the defaults still passes by the Home button, where Android won't hand Home over itself
+        buttons.addView(button("Keep the defaults", false, () -> {
+            if (HomeRole.needsSetup(act)) show(3, 1);
+            else finish();
+        }), sl);
         col.addView(buttons, wrap(40));
+        horizontal = true;
+        return centred(col);
+    }
+
+    /** Aura's own home screen, or Apple TV's: each drawn small, with what it's like. */
+    private View style() {
+        LinearLayout col = column(Gravity.CENTER_HORIZONTAL);
+        col.addView(kicker("STEP 1 OF 3"), wrap(0));
+        col.addView(title("Choose a style"), wrap(6));
+        col.addView(line("Two ways to lay out your home screen. Settings switches between them any time."), wrap(8));
+        LinearLayout row = new LinearLayout(act);
+        row.setClipChildren(false);
+        row.setClipToPadding(false);
+        String[][] styles = {
+                {"aura", "Aura", "The sky outside, what to watch next and today at a glance, a glass sidebar, then your apps."},
+                {"tvos", "tvOS", "Just your apps on a frosted dock under the photograph, their shows rising above."},
+        };
+        boolean tvos = Prefs.tvos(act);
+        for (String[] st : styles) {
+            boolean mine = st[0].equals("tvos") == tvos;
+            LinearLayout item = column(Gravity.CENTER_HORIZONTAL);
+            item.setClipChildren(false);
+            StyleCard card = new StyleCard(act, st[0].equals("tvos"));
+            item.addView(card, new LinearLayout.LayoutParams(Ui.dp(304), Ui.dp(171)));
+            TextView name = Ui.text(act, 17, Ui.semibold, 0xFFFFFFFF);
+            name.setText((mine ? "✓  " : "") + st[1] + " style");
+            item.addView(name, wrap(20));
+            TextView sub = Ui.text(act, 12, Ui.regular, 0x99FFFFFF);
+            sub.setSingleLine(false);
+            sub.setMaxLines(3);
+            sub.setMinLines(2);
+            sub.setGravity(Gravity.CENTER_HORIZONTAL);
+            sub.setLineSpacing(Ui.dpf(2), 1f);
+            sub.setMaxWidth(Ui.dp(300));
+            sub.setText(st[2]);
+            item.addView(sub, wrap(5));
+            LinearLayout.LayoutParams il = wrap(0);
+            il.leftMargin = il.rightMargin = Ui.dp(16);
+            row.addView(item, il);
+            targets.add(card);
+            actions.add(() -> {
+                Prefs.of(act).edit().putString(Prefs.LAYOUT, st[0]).remove(Prefs.TILE_STYLE).apply();
+                host.applied("layout");
+                show(1, 1);
+            });
+        }
+        col.addView(row, wrap(34));
         horizontal = true;
         return centred(col);
     }
 
     private View look() {
         LinearLayout col = column(Gravity.CENTER_HORIZONTAL);
-        col.addView(kicker("STEP 1 OF 2"), wrap(0));
+        col.addView(kicker("STEP 2 OF 3"), wrap(0));
         col.addView(title("Choose a look"), wrap(6));
         col.addView(line("How your apps sit on the glass. OK picks one."), wrap(8));
         LinearLayout row = new LinearLayout(act);
@@ -268,9 +320,9 @@ final class Welcome extends FrameLayout {
             item.setClipChildren(false);
             View tile;
             if (app != null) {
-                Tiles.Painter art = style.equals("glass") ? Tiles.glass(app) : style.equals("vivid") ? Tiles.vivid(app)
-                        : style.equals("midnight") ? Tiles.midnight(app) : Tiles.app(app);
+                Tiles.Painter art = Tiles.forStyle(app, style);
                 Card card = new Card(act, art, app.color, 14);
+                card.tvos = style.equals("tvos");
                 if (style.equals("glass")) card.glass = backdrop;
                 tile = card;
             } else {
@@ -278,7 +330,7 @@ final class Welcome extends FrameLayout {
                 tile.setFocusable(true);
                 tile.setBackground(pill(0x33FFFFFF, 14));
             }
-            item.addView(tile, new LinearLayout.LayoutParams(Ui.dp(176), Ui.dp(99)));
+            item.addView(tile, new LinearLayout.LayoutParams(Ui.dp(152), Ui.dp(86)));
             TextView name = Ui.text(act, 15, Ui.semibold, 0xFFFFFFFF);
             name.setText((style.equals(current) ? "✓  " : "") + Prefs.TILE_NAMES[i].replace(" banners", ""));
             item.addView(name, wrap(20));
@@ -286,7 +338,7 @@ final class Welcome extends FrameLayout {
             sub.setText(LOOK_LINES[i]);
             item.addView(sub, wrap(3));
             LinearLayout.LayoutParams il = wrap(0);
-            il.leftMargin = il.rightMargin = Ui.dp(12);
+            il.leftMargin = il.rightMargin = Ui.dp(9);
             row.addView(item, il);
             targets.add(tile);
             actions.add(() -> {
@@ -303,7 +355,7 @@ final class Welcome extends FrameLayout {
     private View choices() {
         FrameLayout f = new FrameLayout(act);
         LinearLayout left = column(Gravity.START);
-        left.addView(kicker("STEP 2 OF 2"), wrap(0));
+        left.addView(kicker("STEP 3 OF 3"), wrap(0));
         left.addView(title("Make it yours"), wrap(6));
         FrameLayout box = new FrameLayout(act);
         box.setBackground(pill(0x26000000, 18));
@@ -334,10 +386,6 @@ final class Welcome extends FrameLayout {
                 boolean on = !Prefs.on(act, feature[0]);
                 Prefs.set(act, feature[0], on);
                 r.set(on);
-                if (Prefs.FLYOVERS.equals(feature[0])) {
-                    if (on) Flyovers.schedule(act);
-                    else Flyovers.clear(act);
-                }
                 host.applied(feature[4]);
                 preview.show(feature[3]);
             });
@@ -642,6 +690,74 @@ final class Welcome extends FrameLayout {
         setupButton.setText(setupDone ? "Start watching" : "Try again");
         refreshSetup();
         focus(targets.indexOf(setupButton));
+        // Google TV's own home screen is still there, behind Aura: asked once whether to switch it off
+        if (setupDone && Adb.on(act) && Safety.googleTvHomeOn(act) && !retireAsked) {
+            retireAsked = true;
+            postDelayed(() -> {
+                if (page == 5) show(9, 1);
+            }, 1600);
+        }
+    }
+
+    private boolean retireAsked, retireBusy;
+    private TextView retireStatus;
+
+    /**
+     * Whether to switch Google TV's own home screen off: with it on, the remote's profile and
+     * notification buttons still open Google's screens over Aura. A plain yes or no, what each
+     * costs said first; Settings, Set up on this TV undoes it.
+     */
+    private View retireAsk() {
+        LinearLayout col = column(Gravity.CENTER_HORIZONTAL);
+        col.addView(kicker("GOOGLE TV HOME"), wrap(0));
+        col.addView(title("Switch off Google TV's home?"), wrap(6));
+        TextView body = line("Aura is your home now, but Google TV's still runs behind it: the remote's profile and notification "
+                + "buttons open its screens, and it keeps about 150 MB of memory busy. Switched off, those buttons open Aura's instead. "
+                + "Google Assistant voice search, Google's side panel and Google profiles stop with it.");
+        body.setSingleLine(false);
+        body.setGravity(Gravity.CENTER_HORIZONTAL);
+        body.setMaxWidth(Ui.dp(620));
+        body.setLineSpacing(Ui.dpf(3), 1f);
+        col.addView(body, wrap(10));
+        TextView undo = line("Nothing is deleted. Settings, Set up on this TV brings it back any time.");
+        undo.setTextColor(0x80FFFFFF);
+        col.addView(undo, wrap(12));
+        LinearLayout buttons = new LinearLayout(act);
+        buttons.addView(button("Yes, switch it off", true, this::retire), wrap(0));
+        LinearLayout.LayoutParams nl = wrap(0);
+        nl.leftMargin = Ui.dp(14);
+        buttons.addView(button("No, keep it", false, () -> {
+            if (!retireBusy) finish();
+        }), nl);
+        col.addView(buttons, wrap(34));
+        retireStatus = Ui.text(act, 14, Ui.medium, 0xE6FFFFFF);
+        retireStatus.setSingleLine(false);
+        retireStatus.setGravity(Gravity.CENTER_HORIZONTAL);
+        retireStatus.setMaxWidth(Ui.dp(620));
+        col.addView(retireStatus, wrap(18));
+        horizontal = true;
+        return centred(col);
+    }
+
+    private void retire() {
+        if (retireBusy) return;
+        retireBusy = true;
+        retireStatus.setText("Switching it off…");
+        final Context app = act.getApplicationContext();
+        new Thread(() -> {
+            Boolean took = Safety.retireGoogleHome(app, true);
+            act.runOnUiThread(() -> {
+                retireBusy = false;
+                if (page != 9) return;
+                if (took != null && took) {
+                    finish();
+                    host.homeHint("Google TV's home is off · Settings, Set up on this TV brings it back");
+                    return;
+                }
+                retireStatus.setText(took == null ? "Aura lost the connection to debugging. Settings, Set up on this TV can do this later."
+                        : "Android didn't allow it on this TV. Aura still opens on Home.");
+            });
+        }, "welcome-retire").start();
     }
 
     private Drop pairDrop;
@@ -662,8 +778,9 @@ final class Welcome extends FrameLayout {
                 pairWith(code);
             }
         });
-        String url = pairDrop.start();
-        View code = url != null ? new SettingsPanel.Code(act, Qr.encode(url + "/pair")) : new View(act);
+        String url = pairDrop.only("/pair").start();
+        Qr qr = url != null ? Qr.tryEncode(url + "/pair") : null;
+        View code = qr != null ? new SettingsPanel.Code(act, qr) : new View(act);
         row.addView(code, new LinearLayout.LayoutParams(Ui.dp(200), Ui.dp(200)));
         LinearLayout col = column(Gravity.START);
         col.addView(kicker("WIRELESS DEBUGGING"), wrap(0));
@@ -849,6 +966,157 @@ final class Welcome extends FrameLayout {
         g.setColor(color);
         g.setCornerRadius(Ui.dpf(radiusDp));
         return g;
+    }
+
+    /**
+     * A home screen in miniature: a dusk photograph, and over it either Aura's sidebar, widgets and
+     * apps, or tvOS's apps alone on a frosted dock, the shows of the lit app above them. Lifts and
+     * takes a white ring when focused.
+     */
+    private static final class StyleCard extends View {
+        private final boolean tvos;
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG), ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF r = new RectF();
+        private final Path hill = new Path();
+        private Shader sky, glow;
+        private float lit;
+
+        StyleCard(Context c, boolean tvos) {
+            super(c);
+            this.tvos = tvos;
+            setFocusable(true);
+            ring.setStyle(Paint.Style.STROKE);
+            ring.setStrokeWidth(Ui.dpf(2.5f));
+            ring.setColor(0xFFFFFFFF);
+            setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override
+                public void getOutline(View v, android.graphics.Outline o) {
+                    o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(16));
+                }
+            });
+            setClipToOutline(true);
+            setOnFocusChangeListener((v, has) -> {
+                animate().scaleX(has ? 1.07f : 1f).scaleY(has ? 1.07f : 1f).translationZ(has ? Ui.dpf(14) : 0f)
+                        .setDuration(320).setStartDelay(0).setInterpolator(has ? Ui.SPRING : Ui.EMPHASIZED).start();
+                ValueAnimator a = ValueAnimator.ofFloat(lit, has ? 1f : 0f);
+                a.setDuration(240);
+                a.addUpdateListener(x -> {
+                    lit = (float) x.getAnimatedValue();
+                    invalidate();
+                });
+                a.start();
+            });
+        }
+
+        @Override
+        protected void onSizeChanged(int w, int h, int ow, int oh) {
+            sky = new LinearGradient(0, 0, 0, h, new int[]{0xFF27305E, 0xFF7D5A8C, 0xFFF0A27A}, new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP);
+            glow = new RadialGradient(w * 0.68f, h * 0.7f, w * 0.35f, 0x66FFD9A0, 0x00FFD9A0, Shader.TileMode.CLAMP);
+            hill.reset();
+            hill.moveTo(0, h * 0.78f);
+            hill.cubicTo(w * 0.25f, h * 0.66f, w * 0.45f, h * 0.84f, w * 0.7f, h * 0.72f);
+            hill.cubicTo(w * 0.85f, h * 0.66f, w * 0.95f, h * 0.7f, w, h * 0.68f);
+            hill.lineTo(w, h);
+            hill.lineTo(0, h);
+            hill.close();
+        }
+
+        private void box(Canvas c, float l, float t, float rt, float b, float rad, int color) {
+            p.setShader(null);
+            p.setColor(color);
+            r.set(l, t, rt, b);
+            c.drawRoundRect(r, rad, rad, p);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            float w = getWidth(), h = getHeight(), u = w / 304f;
+            if (w == 0) return;
+            // opaque again: the last shape drawn may have left the paint translucent
+            p.setColor(0xFFFFFFFF);
+            p.setShader(sky);
+            c.drawRect(0, 0, w, h, p);
+            p.setShader(glow);
+            c.drawRect(0, 0, w, h, p);
+            p.setShader(null);
+            p.setColor(0xFF2B2240);
+            c.drawPath(hill, p);
+            int[] apps = {0xFFE50914, 0xFF1E88E5, 0xFF0F9D58, 0xFFF4B400, 0xFF7E57C2, 0xFF26A69A};
+            if (tvos) {
+                // the clock and Control Center, top right
+                box(c, w - 70 * u, 10 * u, w - 34 * u, 22 * u, 6 * u, 0x40FFFFFF);
+                box(c, w - 29 * u, 10 * u, w - 17 * u, 22 * u, 6 * u, 0x40FFFFFF);
+                // the lit app's shows, above the dock
+                float sw = 56 * u, sg = 7 * u, top = h - 98 * u;
+                for (int i = 0; i < 4; i++) {
+                    float l = 22 * u + i * (sw + sg);
+                    box(c, l, top, l + sw, top + 32 * u, 5 * u, i == 0 ? 0xD9FFFFFF : 0x59FFFFFF);
+                }
+                // the frosted dock, edge to edge, and the apps on it
+                box(c, -4 * u, h - 56 * u, w + 4 * u, h - 14 * u, 0, 0x33FFFFFF);
+                float tw = 40 * u, tg = 7 * u;
+                for (int i = 0; i < 6; i++) {
+                    float l = 22 * u + i * (tw + tg);
+                    box(c, l, h - 48 * u, l + tw, h - 25 * u, 4 * u, i == 0 ? apps[0] : Ui.alpha(apps[i], 0.85f));
+                }
+                ring(c, 22 * u, h - 48 * u, 22 * u + tw, h - 25 * u, 4 * u);
+                // the next row, just showing at the foot
+                for (int i = 0; i < 6; i++) {
+                    float l = 22 * u + i * (tw + tg);
+                    box(c, l, h - 8 * u, l + tw, h + 16 * u, 4 * u, 0x40FFFFFF);
+                }
+            } else {
+                // the sidebar
+                box(c, 9 * u, h * 0.5f - 42 * u, 22 * u, h * 0.5f + 42 * u, 6.5f * u, 0x40FFFFFF);
+                for (int i = 0; i < 5; i++) box(c, 13 * u, h * 0.5f - 34 * u + i * 15 * u, 18 * u, h * 0.5f - 29 * u + i * 15 * u, 2.5f * u, 0xB3FFFFFF);
+                // the greeting and the clock
+                box(c, 34 * u, 12 * u, 92 * u, 19 * u, 3 * u, 0xCCFFFFFF);
+                box(c, 34 * u, 23 * u, 70 * u, 27 * u, 2 * u, 0x80FFFFFF);
+                box(c, w - 52 * u, 11 * u, w - 12 * u, 23 * u, 6 * u, 0x40FFFFFF);
+                // three widgets: the sky, the stack, today
+                float[] ww = {74, 98, 66};
+                float x = 34 * u;
+                for (int i = 0; i < 3; i++) {
+                    box(c, x, 38 * u, x + ww[i] * u, 82 * u, 7 * u, 0x38FFFFFF);
+                    box(c, x + 7 * u, 46 * u, x + 7 * u + ww[i] * 0.45f * u, 50 * u, 2 * u, 0x99FFFFFF);
+                    box(c, x + 7 * u, 55 * u, x + 7 * u + ww[i] * 0.7f * u, 62 * u, 2 * u, 0xE6FFFFFF);
+                    if (i == 0) {
+                        p.setStyle(Paint.Style.STROKE);
+                        p.setStrokeWidth(1.4f * u);
+                        p.setColor(0xCCFFD58A);
+                        r.set(x + 8 * u, 64 * u, x + ww[0] * u - 8 * u, 96 * u);
+                        c.drawArc(r, 180, 180, false, p);
+                        p.setStyle(Paint.Style.FILL);
+                    }
+                    x += (ww[i] + 7) * u;
+                }
+                // the apps, two rows
+                float tw = 37 * u, tg = 6 * u;
+                for (int row = 0; row < 2; row++) {
+                    for (int i = 0; i < 6; i++) {
+                        float l = 34 * u + i * (tw + tg), t = 96 * u + row * 34 * u;
+                        box(c, l, t, l + tw, t + 23 * u, 4 * u, row == 0 ? Ui.alpha(apps[i], 0.9f) : 0x40FFFFFF);
+                    }
+                }
+                ring(c, 34 * u, 96 * u, 34 * u + tw, 119 * u, 4 * u);
+            }
+            if (lit > 0f) {
+                ring.setAlpha(Math.round(255 * lit));
+                float in = ring.getStrokeWidth() / 2f;
+                r.set(in, in, w - in, h - in);
+                c.drawRoundRect(r, Ui.dpf(16) - in, Ui.dpf(16) - in, ring);
+            }
+        }
+
+        /** The focused app's thin white ring, in miniature. */
+        private void ring(Canvas c, float l, float t, float rt, float b, float rad) {
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(Ui.dpf(1.2f));
+            p.setColor(0xFFFFFFFF);
+            r.set(l - Ui.dpf(1.5f), t - Ui.dpf(1.5f), rt + Ui.dpf(1.5f), b + Ui.dpf(1.5f));
+            c.drawRoundRect(r, rad + Ui.dpf(1.5f), rad + Ui.dpf(1.5f), p);
+            p.setStyle(Paint.Style.FILL);
+        }
     }
 
     /** A feature's row: its name, and a switch that slides; white when focused, like Settings. */

@@ -64,6 +64,9 @@ final class ControlCenter {
 
         /** Recent apps, where apps holding memory are closed. */
         void recents();
+
+        /** What's playing, large. */
+        void nowPlaying();
     }
 
     private static final int U = 84, G = 14;
@@ -82,6 +85,45 @@ final class ControlCenter {
     private final WifiSheet wifiSheet;
     private final BtSheet btSheet;
     private final List<View> modules = new ArrayList<>(), focusables = new ArrayList<>();
+    private FrameLayout sky;
+    private Pad music;
+    private ImageView musicArt;
+    private TextView musicState, musicTitle, musicBy;
+    private android.graphics.Bitmap musicShown;
+
+    /**
+     * What's playing (null: nothing): the Sky gives its place to the song while there is one, and
+     * takes it back when the music stops. Focus on the tile as it goes moves to Wi-Fi.
+     */
+    void music(MediaWatch.Playing p) {
+        if (music == null) return;
+        boolean on = p != null;
+        if (on) {
+            musicTitle.setText(p.title);
+            musicBy.setText(p.by != null ? p.by : "");
+            musicState.setText(p.playing ? "NOW PLAYING" : "PAUSED");
+            if (p.art != null) {
+                if (p.art != musicShown) {
+                    musicShown = p.art;
+                    musicArt.setImageBitmap(p.art);
+                }
+            } else if (musicShown == null) {
+                try {
+                    musicArt.setImageDrawable(act.getPackageManager().getApplicationIcon(p.pkg));
+                } catch (Exception e) {
+                    musicArt.setImageDrawable(null);
+                }
+            }
+        } else {
+            musicShown = null;
+        }
+        if (on == (music.getVisibility() == View.VISIBLE)) return;
+        if (!on && music.hasFocus()) wifi.requestFocus();
+        music.setVisibility(on ? View.VISIBLE : View.GONE);
+        sky.setVisibility(on ? View.GONE : View.VISIBLE);
+        if (on) focusables.add(music);
+        else focusables.remove(music);
+    }
     private final TextView time, date, info, phase, eventName, eventTime, other, todayValue, boostValue;
     private final TextView wifiCap, btCap, sleepCap, photoCap;
     private final Round wifi, bt, sleep, photo;
@@ -260,7 +302,7 @@ final class ControlCenter {
         focusables.add(volume);
 
         // 1x2: the sky
-        FrameLayout sky = place(module(a), 3, 0, 1, 2);
+        sky = place(module(a), 3, 0, 1, 2);
         LinearLayout sc = column(a, 13);
         phase = Ui.caps(a, 7, 0xFFFFC98A, 0.2f);
         sc.addView(phase);
@@ -276,6 +318,37 @@ final class ControlCenter {
         other = Ui.text(a, 9.5f, Ui.medium, 0x99FFFFFF);
         sc.addView(other, lp(0, 8));
         sky.addView(sc);
+
+        // the same place, while music plays: the cover, the song, and OK for Now Playing
+        music = place(new Pad(a, null, 26, 0f), 3, 0, 1, 2);
+        music.plainColor = MODULE;
+        music.focusScale = 1.05f;
+        LinearLayout mc = new LinearLayout(a);
+        mc.setOrientation(LinearLayout.VERTICAL);
+        mc.setPadding(Ui.dp(10), Ui.dp(10), Ui.dp(10), Ui.dp(12));
+        musicArt = new ImageView(a);
+        musicArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        musicArt.setClipToOutline(true);
+        musicArt.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override
+            public void getOutline(View v, android.graphics.Outline o) {
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(14));
+            }
+        });
+        mc.addView(musicArt, new LinearLayout.LayoutParams(Ui.dp(U - 20), Ui.dp(U - 20)));
+        musicState = music.tint(Ui.caps(a, 6.5f, 0xFFFFFFFF, 0.2f), 0.6f);
+        mc.addView(musicState, lp(0, 10));
+        musicTitle = music.tint(Ui.text(a, 11.5f, Ui.semibold, 0xFFFFFFFF), 1f);
+        musicTitle.setSingleLine(false);
+        musicTitle.setMaxLines(2);
+        musicTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        mc.addView(musicTitle, lp(0, 3));
+        musicBy = music.tint(Ui.text(a, 9.5f, Ui.medium, 0xFFFFFFFF), 0.7f);
+        musicBy.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        mc.addView(musicBy, lp(0, 2));
+        music.addView(mc, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        music.onClick = () -> host.nowPlaying();
+        music.setVisibility(View.GONE);
 
         // 2x1: inputs
         FrameLayout inputs = place(module(a), 0, 2, 2, 1);
@@ -335,7 +408,10 @@ final class ControlCenter {
             host.photoMode();
         };
         picture.onClick = () -> launch(new Intent("android.settings.DISPLAY_SETTINGS"), picture);
-        sound.onClick = () -> launch(new Intent("android.settings.SOUND_SETUP"), sound);
+        sound.onClick = () -> {
+            Intent s = new Intent(Settings.ACTION_SOUND_SETTINGS);
+            launch(s.resolveActivity(a.getPackageManager()) != null ? s : new Intent(Settings.ACTION_SETTINGS), sound);
+        };
         settings.onClick = () -> host.guarded(() -> launch(new Intent(Settings.ACTION_SETTINGS), settings));
         standby.onClick = this::standby;
         // what's holding memory is best seen, and closed, in recent apps
@@ -402,6 +478,21 @@ final class ControlCenter {
         return iv;
     }
 
+    /** The tvOS style: the board hangs from the top-right corner, as on Apple TV, without the large clock beside it. */
+    private boolean top;
+
+    void top(boolean on) {
+        top = on;
+        header.setVisibility(on ? View.GONE : View.VISIBLE);
+        for (View v : new View[]{board, wifiSheet, btSheet}) {
+            FrameLayout.LayoutParams l = (FrameLayout.LayoutParams) v.getLayoutParams();
+            l.gravity = Gravity.END | (on ? Gravity.TOP : Gravity.CENTER_VERTICAL);
+            l.topMargin = on ? Ui.dp(84) : 0;
+            l.rightMargin = Ui.dp(on ? 40 : 96);
+            v.setLayoutParams(l);
+        }
+    }
+
     // ---- open / close / keys -----------------------------------------------------------------
 
     void open(boolean inputs) {
@@ -428,7 +519,8 @@ final class ControlCenter {
         for (View m : modules) {
             int order = (Integer) m.getTag();
             m.setAlpha(0f);
-            m.setTranslationY(Ui.dp(16));
+            // from the top-right corner they drop down instead
+            m.setTranslationY(Ui.dp(top ? -16 : 16));
             m.animate().alpha(1f).translationY(0f).setStartDelay(60 + order * 30L).setDuration(460)
                     .setInterpolator(Ui.EMPHASIZED).start();
         }
@@ -580,12 +672,12 @@ final class ControlCenter {
             final String evTime = next > 0 ? tf.format(new Date(next)).toUpperCase(Locale.getDefault()) : "–";
             final String oth = after > 0 ? (up ? "↑ " : "↓ ") + tf.format(new Date(after)).toUpperCase(Locale.getDefault()) : "";
             final String day = today >= 0 ? compact(today) : "–";
-            int fresh = Daily.walls(act).size();
+            int fresh = Gallery.walls(act).size();
             Weather.Now wx = Weather.now(act);
             String outside = wx == null ? "" : wx.temp + "° and " + wx.condition().toLowerCase(Locale.ROOT)
                     + (wx.city.isEmpty() ? "" : " in " + wx.city) + ". ";
             final String line = outside + "Photos follow the " + ph.toLowerCase(Locale.ROOT) + " outside."
-                    + (fresh > 0 ? "\n" + fresh + (fresh == 1 ? " fresh photo" : " fresh photos") + " from Wikimedia's Picture of the Day." : "")
+                    + (fresh > 0 ? "\n" + fresh + (fresh == 1 ? " fresh photo" : " fresh photos") + " on the wall, none shown twice." : "")
                     + (today >= 0 ? "\n" + Habits.duration(today) + " in apps today." : "");
             preparePick();
             act.runOnUiThread(() -> {

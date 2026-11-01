@@ -4,7 +4,7 @@
 # Compat.java and version checks keep newer calls off older TVs; features with no 5.1 counterpart switch off.
 # -TestPackage builds a copy under another package name (app.aura.home.test), installed beside the
 # real Aura: a first install to test from scratch without wiping anyone's settings
-param([int]$VersionCode = 1, [string]$VersionName = "1.0", [switch]$TestPackage)
+param([int]$VersionCode = 110, [string]$VersionName = "7.6", [switch]$TestPackage)
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -51,7 +51,9 @@ $zip = [System.IO.Compression.ZipFile]::Open("$out\unsigned.apk", "Update")
 $assets = Join-Path $src "assets"
 Get-ChildItem $assets -Recurse -File | ForEach-Object {
     $name = "assets/" + $_.FullName.Substring($assets.Length + 1).Replace('\', '/')
-    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $name, [System.IO.Compression.CompressionLevel]::NoCompression) | Out-Null
+    # photographs and video are compressed already; fonts, data and pages shrink by about half
+    $level = if ($_.Extension -match '^\.(jpe?g|webp|png|gif|webm|mp4)$') { "NoCompression" } else { "Optimal" }
+    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $name, [System.IO.Compression.CompressionLevel]::$level) | Out-Null
 }
 $zip.Dispose()
 

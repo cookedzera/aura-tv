@@ -172,6 +172,11 @@ final class Find extends FrameLayout {
         field.post(() -> Compat.svc(getContext(), InputMethodManager.class).showSoftInput(field, InputMethodManager.SHOW_IMPLICIT));
     }
 
+    /** The list of apps changed (one installed or removed): the matches made again. */
+    void refresh() {
+        if (shown) fill(field.getText().toString());
+    }
+
     void close() {
         if (!shown) return;
         shown = false;
@@ -211,7 +216,8 @@ final class Find extends FrameLayout {
             item.setClipChildren(false);
             Card card = new Card(getContext(), host.art(a), a.color, 14);
             if (host.glass() && a.art == null) card.glass = host.backdrop();
-            card.sway = true;
+            card.tvos = Prefs.tvos(getContext()) || Prefs.tileStyle(getContext()).equals("tvos");
+            card.sway = !Perf.light(getContext());
             card.onClick = () -> host.open(a, card);
             item.addView(card, new LinearLayout.LayoutParams(Ui.dp(W), Ui.dp(H)));
             TextView name = Ui.text(getContext(), 12, Ui.medium, 0xD9FFFFFF);

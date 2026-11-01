@@ -6,7 +6,7 @@ import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/** Grid entry: the card, with its name surfacing beneath only while it has focus, as on tvOS. */
+/** Grid entry: the card, with its name surfacing beneath according to the chosen name mode. */
 final class Cell extends LinearLayout {
     final Card card;
     final TextView label;
@@ -35,17 +35,26 @@ final class Cell extends LinearLayout {
         ll.topMargin = Ui.dp(12);
         addView(label, ll);
 
-        card.focusListener = (card, gained) -> label.animate().alpha(gained ? 1f : namesAlways ? 0.75f : 0f)
+        card.focusListener = (card, gained) -> label.animate().alpha(targetAlpha(gained))
                 .translationY(gained ? Ui.dpf(6) : 0f).setDuration(gained ? 380 : 160)
                 .setInterpolator(Ui.EMPHASIZED).setStartDelay(gained ? 60 : 0).start();
     }
 
-    private boolean namesAlways;
+    private String nameMode = "focus";
+    private boolean inDock;
 
-    /** Show the name under every tile, not just the focused one (a choice in Settings). */
-    void setNamesAlways(boolean always) {
-        namesAlways = always;
-        label.setAlpha(always ? 0.75f : 0f);
+    private float targetAlpha(boolean focused) {
+        if ("hidden".equals(nameMode)) return 0f;
+        if ("always".equals(nameMode)) return focused ? 1f : 0.75f;
+        if ("tvos".equals(nameMode) && inDock) return 0f;
+        return focused ? 1f : 0f;
+    }
+
+    /** Show the name under every tile, on focus, hidden on the Apple TV dock tray, or hidden everywhere. */
+    void setNameMode(String mode, boolean dockRow) {
+        nameMode = mode;
+        inDock = dockRow;
+        label.setAlpha(targetAlpha(card.isFocused()));
     }
 
     /** Fades (the intro cascade) apply straight to the card and label: no offscreen layer per tile. */

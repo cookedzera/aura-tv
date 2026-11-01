@@ -17,6 +17,15 @@ final class Qr {
     final int size;
     private final boolean[][] dark, fixed;
 
+    /** The code for {@code text}, or null when it's too long for one (the page then shows the address alone). */
+    static Qr tryEncode(String text) {
+        try {
+            return encode(text);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     static Qr encode(String text) {
         byte[] data = text.getBytes(StandardCharsets.UTF_8);
         for (int ver = 1; ver <= 10; ver++) {

@@ -4,37 +4,31 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.media.MediaPlayer;
 import android.os.Handler;
 import android.os.Looper;
 import android.service.dreams.DreamService;
-import android.view.Gravity;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
-import java.io.File;
-import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 
 /**
- * The screensaver: one scene at a time under the same quiet clock and caption. Masterpieces from
- * an open museum collection; the real wind over the country, right now; tonight's real sky; Earth
- * from the space station (on the hardware video layer); a mosaic of your photos; the drifting
- * photographs. Auto chooses by the light and the weather, and moves on every quarter of an hour
- * through a soft fade, so a long rest never sits on one picture. Anything amiss falls back to the
- * photographs.
+ * The screensaver: the drifting photographs, each with its place, a few lines about it and who took
+ * it, a hairline filling until the next; or famous quotes over them, set as Apple Music sets lyrics.
+ * Auto moves between the two every quarter of an hour through a soft fade.
  */
 public class Ambient extends DreamService implements Backdrop.Listener {
-    private static final long FADE = 1200, SCENE_MS = 15 * 60_000L;
+    private static final long SCENE_MS = 15 * 60_000L;
     private final Handler main = new Handler(Looper.getMainLooper());
     private FrameLayout root, stage;
     private View veil;
     private Backdrop backdrop;
     private Story story;
+    /** The hairline that fills until the next photograph, and its fill. */
+    private FrameLayout progress;
+    private View progressFill;
     private Scene scene;
     private boolean ticking, photos, dreaming, firstCaption = true;
     private int turn;
@@ -52,17 +46,6 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         }
     };
 
-    // flyovers
-    private SurfaceView video;
-    private View curtain;
-    private MediaPlayer player;
-    private List<File> clips;
-    private int clipAt;
-    private boolean surfaceReady;
-    private final Runnable fadeOut = () -> {
-        if (curtain != null) curtain.animate().alpha(1f).setDuration(FADE).setInterpolator(Ui.SOFT).start();
-    };
-
     @Override
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
@@ -77,9 +60,25 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         backdrop = new Backdrop(this);
         backdrop.setIntro(true);
         backdrop.setListener(this);
+        // resting, the eye wants change sooner than on the home screen
+        backdrop.setShowMs(40_000);
         story = new Story(this, backdrop);
         story.setAlpha(0f);
         root.addView(story, full());
+        // a hairline across the foot, filling until the next photograph: one animation per photograph, run by the view itself
+        progress = new FrameLayout(this);
+        View track = new View(this);
+        track.setBackgroundColor(0x1FFFFFFF);
+        progress.addView(track, full());
+        progressFill = new View(this);
+        progressFill.setBackgroundColor(0x99FFF4E6);
+        progressFill.setPivotX(0f);
+        progressFill.setScaleX(0f);
+        progress.addView(progressFill, full());
+        FrameLayout.LayoutParams pl = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(2, Ui.dp(1.5f)), android.view.Gravity.BOTTOM);
+        pl.setMargins(Ui.dp(64), 0, Ui.dp(64), Ui.dp(26));
+        progress.setVisibility(View.GONE);
+        root.addView(progress, pl);
         veil = new View(this);
         veil.setBackgroundColor(0xFF000000);
         veil.setAlpha(0f);
@@ -226,6 +225,7 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         story.tick(Calendar.getInstance());
         story.reveal(1400);
         if (Prefs.saver(this).equals("auto")) main.postDelayed(rotate, SCENE_MS);
+        listen();
         // while the TV rests, the apps you use get compiled (set up on this TV only)
         Warm.start(this);
     }
@@ -233,9 +233,16 @@ public class Ambient extends DreamService implements Backdrop.Listener {
     @Override
     public void onDreamingStopped() {
         dreaming = false;
+        if (music != null) {
+            MusicStrip m = music;
+            music = null;
+            m.stop();
+            root.removeView(m);
+        }
         Warm.stop();
         main.removeCallbacks(rotate);
         stopScene();
+        if (backdrop != null) backdrop.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE);
         if (ticking) {
             unregisterReceiver(tick);
             ticking = false;
@@ -244,48 +251,73 @@ public class Ambient extends DreamService implements Backdrop.Listener {
     }
 
     @Override
+    public void onDetachedFromWindow() {
+        main.removeCallbacksAndMessages(null);
+        stopScene();
+        if (backdrop != null) {
+            backdrop.release();
+            backdrop = null;
+        }
+        if (stage != null) stage.removeAllViews();
+        if (root != null) root.removeAllViews();
+        scene = null;
+        story = null;
+        super.onDetachedFromWindow();
+    }
+
+    @Override
     public void onWallpaperChanged(Backdrop.Wallpaper w, float lumaTop, float lumaBottom, boolean first) {
         if (photos) story.set(w, !first);
+        if (!photos) return;
+        // the line fills again, over exactly the time until the next photograph
+        progressFill.animate().cancel();
+        progressFill.setScaleX(0f);
+        progressFill.animate().scaleX(1f).setDuration(backdrop.cycleMs()).setStartDelay(0)
+                .setInterpolator(new android.view.animation.LinearInterpolator()).start();
+        // with the quotes, a new photograph brings a new quote
+        if (!first && scene instanceof Sayings) ((Sayings) scene).turnNow();
+    }
+
+    // ---- music ------------------------------------------------------------------------------------
+
+    /** The song under the quote, while one plays; gone when it stops or the screensaver ends. */
+    private MusicStrip music;
+
+    /**
+     * Music left playing when the TV goes to rest: the quotes over the photographs, the quote a
+     * little higher, and the song in a quiet player beneath it, lined up with the words.
+     */
+    private void listen() {
+        MediaWatch.Playing p = MediaWatch.now(this);
+        if (p == null || !p.playing || p.controller == null || root == null || backdrop == null) return;
+        main.removeCallbacks(rotate);
+        if (!(scene instanceof Sayings)) build("sayings");
+        if (scene instanceof Sayings) ((Sayings) scene).setCentre(0.38f);
+        music = new MusicStrip(this);
+        FrameLayout.LayoutParams ml = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.BOTTOM | android.view.Gravity.START);
+        // the quote's own left edge (150 of 1080 lines), and clear of the hairline at the foot
+        ml.leftMargin = Math.round(getResources().getDisplayMetrics().heightPixels * 150f / 1080f);
+        ml.bottomMargin = Ui.dp(64);
+        root.addView(music, root.indexOfChild(veil), ml);
+        final MusicStrip mine = music;
+        music.start(p.controller, () -> {
+            // the music stopped: the quote settles back to the middle, the photographs carry on
+            if (music != mine) return;
+            root.removeView(mine);
+            music = null;
+            if (scene instanceof Sayings) ((Sayings) scene).setCentre(0.46f);
+            if (Prefs.saver(this).equals("auto")) main.postDelayed(rotate, SCENE_MS);
+        });
     }
 
     // ---- choosing and switching scenes --------------------------------------------------------
 
-    private List<File> flyoverClips() {
-        if (!Prefs.on(this, Prefs.FLYOVERS) || !Flyovers.supported()) return new ArrayList<>();
-        return Flyovers.ready(this);
-    }
-
-    /**
-     * The scene for this turn. A chosen one is kept (if it can show here); Auto picks by the light
-     * and the weather: the museum and the live wind at any hour, the real sky on clear nights,
-     * and by day Earth from space, the mosaic or the photographs.
-     */
+    /** The scene for this turn: the one chosen in Settings, or in Auto the photographs and the quotes by turns. */
     private String choose(int n) {
         String mode = Prefs.saver(this);
-        boolean space = !flyoverClips().isEmpty();
-        if (!mode.equals("auto")) {
-            if (mode.equals("space") && !space) return "photos";
-            if (mode.equals("sky") && !Sky.available(this)) return "photos";
-            if (mode.equals("museum") && !Museum.available(this)) return "photos";
-            if (mode.equals("wind") && !Wind.available(this)) return "photos";
-            return mode;
-        }
-        long t = System.currentTimeMillis();
-        boolean dark = Sun.elevation(t) < -6;
-        Weather.Now w = Weather.now(this);
-        boolean cloudy = w != null && w.code >= 2;
-        List<String> pick = new ArrayList<>();
-        if (Museum.available(this)) pick.add("museum");
-        if (Wind.available(this)) pick.add("wind");
-        if (dark) {
-            if (!cloudy && Sky.available(this)) pick.add("sky");
-            pick.add("mosaic");
-        } else {
-            if (space) pick.add("space");
-            pick.add("mosaic");
-            pick.add("photos");
-        }
-        return pick.get(Compat.mod(n, pick.size()));
+        if (!mode.equals("auto")) return mode;
+        return Compat.mod(n, 2) == 0 ? "photos" : "sayings";
     }
 
     /** Moves to {@code kind}; with {@code fade}, through a soft dip to black. */
@@ -304,152 +336,27 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         stopScene();
         stage.removeAllViews();
         scene = null;
-        photos = false;
-        video = null;
-        curtain = null;
-        switch (kind) {
-            case "space":
-                clips = flyoverClips();
-                if (clips.isEmpty()) {
-                    photos();
-                    break;
-                }
-                video();
-                break;
-            case "sky":
-                scene = new Sky(this);
-                break;
-            case "museum":
-                scene = new Museum(this);
-                break;
-            case "wind":
-                scene = new Wind(this);
-                break;
-            case "mosaic":
-                scene = new Mosaic(this);
-                break;
-            default:
-                photos();
-        }
-        if (scene != null) {
+        // both are the drifting photographs; the quotes lie over them
+        photos = true;
+        stage.addView(backdrop, full());
+        if (kind.equals("sayings")) {
+            scene = new Sayings(this);
             stage.addView(scene, full());
-            scene.setListener((context, title, line, credit, ms) -> {
-                story.set(context, title, line, credit, ms, !firstCaption);
-                firstCaption = false;
-            });
         }
+        // the quotes carry their own words and clock: the photograph's caption steps aside
+        story.setVisibility(scene != null ? View.GONE : View.VISIBLE);
+        progress.setVisibility(View.VISIBLE);
         story.setClockShown(scene == null || !scene.ownClock());
         if (dreaming) startScene();
     }
 
-    private void photos() {
-        photos = true;
-        stage.addView(backdrop, full());
-    }
-
     private void startScene() {
         if (scene != null) scene.start();
-        else if (photos) backdrop.start();
-        else if (video != null && surfaceReady) play();
+        backdrop.start();
     }
 
     private void stopScene() {
         if (scene != null) scene.stop();
-        if (photos) backdrop.stop();
-        release();
-    }
-
-    // ---- flyovers ----------------------------------------------------------------------------
-
-    private void video() {
-        clipAt = Flyovers.nextStart(this, clips.size());
-        surfaceReady = false;
-        video = new SurfaceView(this);
-        final SurfaceView mine = video;
-        video.getHolder().addCallback(new SurfaceHolder.Callback() {
-            @Override
-            public void surfaceCreated(SurfaceHolder h) {
-                if (video != mine) return;
-                surfaceReady = true;
-                if (dreaming) play();
-            }
-
-            @Override
-            public void surfaceChanged(SurfaceHolder h, int format, int w, int ht) { }
-
-            @Override
-            public void surfaceDestroyed(SurfaceHolder h) {
-                if (video != mine) return;
-                surfaceReady = false;
-                release();
-            }
-        });
-        stage.addView(video, new FrameLayout.LayoutParams(full().width, full().height, Gravity.CENTER));
-        curtain = new View(this);
-        curtain.setBackgroundColor(0xFF000000);
-        stage.addView(curtain, full());
-    }
-
-    /** The current clip, from black; a fade back to black just before it ends, then the next. */
-    private void play() {
-        release();
-        if (video == null || clips == null || clips.isEmpty()) return;
-        File f = clips.get(Compat.mod(clipAt, clips.size()));
-        int i = Flyovers.index(f);
-        MediaPlayer mp = new MediaPlayer();
-        player = mp;
-        try {
-            mp.setDataSource(f.getPath());
-            mp.setDisplay(video.getHolder());
-            mp.setVolume(0f, 0f);
-            mp.setOnVideoSizeChangedListener((m, w, h) -> cover(w, h));
-            mp.setOnPreparedListener(m -> {
-                if (m != player || curtain == null) return;
-                m.start();
-                long ms = m.getDuration();
-                curtain.animate().alpha(0f).setDuration(FADE).setStartDelay(150).setInterpolator(Ui.SOFT).start();
-                curtain.removeCallbacks(fadeOut);
-                if (ms > FADE * 3) curtain.postDelayed(fadeOut, ms - FADE - 200);
-                String[] clip = Flyovers.CLIPS[i];
-                story.set("From the International Space Station", clip[1], clip[2], "NASA  ·  Public domain", ms, !firstCaption);
-                firstCaption = false;
-            });
-            mp.setOnCompletionListener(m -> {
-                clipAt++;
-                play();
-            });
-            mp.setOnErrorListener((m, what, extra) -> {
-                main.post(() -> show("photos", false));
-                return true;
-            });
-            mp.prepareAsync();
-        } catch (Exception e) {
-            main.post(() -> show("photos", false));
-        }
-    }
-
-    /** Fills the screen edge to edge, centred: the space station's 3:2 frames lose a little top and bottom. */
-    private void cover(int w, int h) {
-        if (video == null || w <= 0 || h <= 0 || root.getWidth() == 0) return;
-        float s = Math.max(root.getWidth() / (float) w, root.getHeight() / (float) h);
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) video.getLayoutParams();
-        int vw = Math.round(w * s), vh = Math.round(h * s);
-        if (lp.width == vw && lp.height == vh) return;
-        lp.width = vw;
-        lp.height = vh;
-        video.setLayoutParams(lp);
-    }
-
-    private void release() {
-        if (curtain != null) curtain.removeCallbacks(fadeOut);
-        MediaPlayer mp = player;
-        player = null;
-        if (mp != null) {
-            try {
-                mp.reset();
-            } catch (IllegalStateException ignored) {
-            }
-            mp.release();
-        }
+        backdrop.stop();
     }
 }

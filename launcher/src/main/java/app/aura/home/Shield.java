@@ -87,6 +87,9 @@ final class Shield {
                 Prefs.device(c).edit().putString("shield_prev_mode", String.valueOf(Settings.Global.getString(r, MODE)))
                         .putString("shield_prev_host", String.valueOf(Settings.Global.getString(r, SPECIFIER))).apply();
             }
+            if ("hostname".equals(Settings.Global.getString(r, MODE))) {
+                Settings.Global.putString(r, MODE, "opportunistic");
+            }
             Settings.Global.putString(r, SPECIFIER, host(c));
             Settings.Global.putString(r, MODE, "hostname");
         } else {
@@ -119,17 +122,47 @@ final class Shield {
         if (android.os.Build.VERSION.SDK_INT < 28) return false;
         ConnectivityManager cm = Compat.svc(c, ConnectivityManager.class);
         String want = host(c);
-        long until = SystemClock.uptimeMillis() + 15_000;
+        long start = SystemClock.uptimeMillis(), until = start + 15_000;
+        SystemClock.sleep(300);
         while (SystemClock.uptimeMillis() < until) {
             Network n = cm.getActiveNetwork();
             LinkProperties lp = n != null ? cm.getLinkProperties(n) : null;
             NetworkCapabilities nc = n != null ? cm.getNetworkCapabilities(n) : null;
-            boolean dnsUp = lp != null && lp.isPrivateDnsActive() && want.equals(lp.getPrivateDnsServerName());
-            boolean online = nc != null && nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+            boolean dnsUp = lp != null && lp.isPrivateDnsActive() && want.equalsIgnoreCase(lp.getPrivateDnsServerName());
+            // some TV ROMs disable captive-portal validation, so a real lookup on the network also counts as online
+            boolean online = nc != null && (nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                    || dnsUp && resolves(n, "www.google.com"));
             if (dnsUp && online) return true;
+            // TV firmwares that don't fill LinkProperties.isPrivateDnsActive() still route system DNS through netd
+            if (n != null && SystemClock.uptimeMillis() - start >= 2_000
+                    && resolves(n, "www.google.com") && blockedBySystem(n, "pubads.g.doubleclick.net")) {
+                return true;
+            }
             SystemClock.sleep(1_000);
         }
         return false;
+    }
+
+    private static boolean resolves(Network n, String host) {
+        try {
+            java.net.InetAddress[] a = n.getAllByName(host);
+            return a != null && a.length > 0 && !a[0].isAnyLocalAddress();
+        } catch (IOException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static boolean blockedBySystem(Network n, String host) {
+        try {
+            java.net.InetAddress[] a = n.getAllByName(host);
+            if (a == null || a.length == 0) return true;
+            for (java.net.InetAddress ip : a) if (!ip.isAnyLocalAddress() && !ip.isLoopbackAddress()) return false;
+            return true;
+        } catch (java.net.UnknownHostException e) {
+            return true;
+        } catch (IOException | RuntimeException e) {
+            return false;
+        }
     }
 
     /**

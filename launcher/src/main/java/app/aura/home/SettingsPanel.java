@@ -43,14 +43,17 @@ final class SettingsPanel {
         boolean type(String text);
 
         void hud(int icon, String text);
+
+        /** Who's watching, in place of Settings. */
+        void whoIsWatching();
     }
 
     final FrameLayout panel;
     private final Activity act;
     private final Host host;
-    private final LinearLayout rows;
+    private final LinearLayout head, rows;
     private final ScrollView scroll;
-    private final TextView title, note;
+    private final TextView title, note, help;
     private final EditText city;
     /** The page on show: "" for the main list, else "apps", "widgets", "wallpaper", "drop" or "updates". */
     private String page = "";
@@ -83,6 +86,7 @@ final class SettingsPanel {
     private TextView dropTitle, dropSub;
     private HomeActivity.Meter dropMeter;
     private LinearLayout dropThumbs;
+    private final java.util.Map<String, android.graphics.Bitmap> thumbs = new java.util.HashMap<>();
 
     SettingsPanel(Activity a, Host h) {
         act = a;
@@ -92,7 +96,12 @@ final class SettingsPanel {
         veil.edgeLight = false;
         panel.addView(veil, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        LinearLayout head = new LinearLayout(a);
+        head = new LinearLayout(a) {
+            @Override
+            public boolean hasOverlappingRendering() {
+                return false;
+            }
+        };
         head.setOrientation(LinearLayout.VERTICAL);
         TextView kicker = Ui.caps(a, 8, 0x99FFFFFF, 0.3f);
         kicker.setText("AURA");
@@ -107,6 +116,14 @@ final class SettingsPanel {
         note.setMaxWidth(Ui.dp(280));
         note.setLineSpacing(Ui.dpf(3), 1f);
         head.addView(note, lp(0, 12));
+        // what the row in focus does, in a sentence: tvOS Settings' way of explaining itself
+        help = Ui.text(a, 14, Ui.medium, 0xF2FFFFFF);
+        help.setSingleLine(false);
+        help.setMaxLines(5);
+        help.setMaxWidth(Ui.dp(280));
+        help.setLineSpacing(Ui.dpf(4), 1f);
+        help.setMinLines(4);
+        head.addView(help, lp(0, 26));
         FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(Ui.dp(300), ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.START | Gravity.CENTER_VERTICAL);
         hl.leftMargin = Ui.dp(112);
@@ -148,7 +165,12 @@ final class SettingsPanel {
         // room on every side for a focused row to grow into, so it's never clipped
         scroll.setPadding(Ui.dp(14), Ui.dp(8), Ui.dp(14), Ui.dp(8));
         scroll.setClipChildren(false);
-        rows = new LinearLayout(a);
+        rows = new LinearLayout(a) {
+            @Override
+            public boolean hasOverlappingRendering() {
+                return false;
+            }
+        };
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setClipChildren(false);
         scroll.addView(rows, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -176,17 +198,39 @@ final class SettingsPanel {
 
     void open() {
         page = "";
+        entry = null;
         build();
         panel.setVisibility(View.VISIBLE);
         panel.setAlpha(0f);
         panel.animate().alpha(1f).setStartDelay(0).setDuration(260).setInterpolator(Ui.SOFT).start();
-        if (rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
+        head.setAlpha(0f);
+        head.setTranslationX(-Ui.dp(20));
+        head.animate().alpha(1f).translationX(0f).setStartDelay(40).setDuration(460).setInterpolator(Ui.EMPHASIZED).start();
+        rows.setAlpha(0f);
+        rows.setTranslationX(0f);
+        rows.setTranslationY(Ui.dp(14));
+        rows.animate().alpha(1f).translationY(0f).setStartDelay(40).setDuration(380).setInterpolator(Ui.EMPHASIZED).start();
+        focusFirst();
     }
 
-    /** Every few seconds while the Wallpaper page is open and flyovers are arriving: "3 of 5 ready". */
-    private final Runnable flyoverTick = () -> {
-        if (isOpen() && page.equals("wallpaper")) build();
-    };
+    /** The first row that takes focus: section labels don't. */
+    private void focusFirst() {
+        for (int i = 0; i < rows.getChildCount(); i++) if (rows.getChildAt(i).isFocusable() && rows.getChildAt(i).requestFocus()) return;
+    }
+
+    /**
+     * Opened straight on {@code at} (a widget's "Choose cards" opens Widgets, the remote's profile
+     * button Profiles): Back from that page leaves Settings, back to where you were, rather than
+     * up to a main list you never saw. Pages further in still lead back to it first.
+     */
+    void open(String at) {
+        open();
+        go(at);
+        entry = at;
+    }
+
+    /** The page Settings was opened straight on, or null. */
+    private String entry;
 
     /** Straight to one page, as when Android's screensaver settings hand over to Aura. */
     void show(String p) {
@@ -199,6 +243,7 @@ final class SettingsPanel {
     }
 
     void close() {
+        thumbs.clear();
         stopDrop();
         // closed while waiting for a remote button: the next press stays an ordinary one
         if (teachingKey || newKey != null) {
@@ -219,6 +264,7 @@ final class SettingsPanel {
             build();
             return true;
         }
+        if (page.equals(entry) && !(page.equals("keys") && (newKey != null || teachingKey))) return false;
         if (page.equals("photos")) {
             // the photo list sits under From your phone, whose code stays on
             confirmPhoto = null;
@@ -230,6 +276,17 @@ final class SettingsPanel {
         if (page.equals("widgets")) {
             go("home");
             focusTag("widgets");
+            return true;
+        }
+        if (page.equals("sources")) {
+            go("wallpaper");
+            focusTag("sources");
+            return true;
+        }
+        if (page.equals("unsplashphone")) {
+            stopDrop();
+            go("sources");
+            focusTag("src:unsplash");
             return true;
         }
         if (page.equals("art")) {
@@ -270,6 +327,7 @@ final class SettingsPanel {
             page = "";
             build();
             // back on the main list, on the row that led to the page
+            slidePage(true);
             focusTag(was.equals("apps") ? "hidden" : was);
             return true;
         }
@@ -277,8 +335,14 @@ final class SettingsPanel {
     }
 
     private void go(String p) {
+        confirmRetire = false;
+        boolean back = p.isEmpty() || page.equals("photos") && p.equals("drop")
+                || (page.equals("widgets") || page.equals("keys")) && p.equals("home")
+                || page.equals("pair") && p.equals("tv")
+                || (page.equals("genres") || page.equals("tmdbphone") || page.equals("tmdbauth")) && p.equals("picks");
         page = p;
         build();
+        slidePage(back);
         for (int i = 0; i < rows.getChildCount(); i++) {
             if (rows.getChildAt(i).isFocusable()) {
                 rows.getChildAt(i).requestFocus();
@@ -289,10 +353,21 @@ final class SettingsPanel {
 
     // ---- pages -------------------------------------------------------------------------------
 
+    private void slidePage(boolean back) {
+        if (!isOpen()) return;
+        rows.setAlpha(0f);
+        rows.setTranslationY(0f);
+        rows.setTranslationX(Ui.dp(back ? -18 : 18));
+        rows.animate().alpha(1f).translationX(0f).setStartDelay(0).setDuration(300).setInterpolator(Ui.EMPHASIZED).start();
+    }
+
     private void build() {
         String keep = focusedTag();
         rows.removeAllViews();
-        note.setMaxLines(page.equals("updates") ? 10 : 4);
+        note.setMaxLines(page.equals("updates") ? 18 : 4);
+        // the release notes have the whole column to themselves
+        help.setVisibility(page.equals("updates") ? View.GONE : View.VISIBLE);
+        help.setText("");
         if (page.equals("apps")) {
             Ui.fit(title, "Apps", Ui.dp(300), 52, 30);
             note.setText("Hidden apps leave your grid. They stay installed, and you can bring them back here.");
@@ -319,6 +394,21 @@ final class SettingsPanel {
         } else if (page.equals("home")) {
             Ui.fit(title, "Home screen", Ui.dp(300), 52, 30);
             note.setText("How your apps look and what moves on the home screen.");
+            boolean tvos = Prefs.tvos(act);
+            section("LOOK");
+            // the two styles: Aura's own (sidebar, widgets, apps) or Apple TV's (apps alone on a dock)
+            add("Style", tvos ? "tvOS · apps on a dock" : "Aura · widgets and sidebar", "layout", () -> {
+                Prefs.of(act).edit().putString(Prefs.LAYOUT, Prefs.tvos(act) ? "aura" : "tvos").remove(Prefs.TILE_STYLE).remove(Prefs.NAME_MODE).apply();
+                host.applied("layout");
+                build();
+                focusTag("layout");
+            });
+            if (tvos) add("Sidebar", Prefs.dockSidebar(act) ? "Slides in from the left" : "Hidden · Up for the top buttons", "dockside", () -> {
+                Prefs.of(act).edit().putBoolean(Prefs.DOCK_SIDEBAR, !Prefs.dockSidebar(act)).apply();
+                host.applied("layout");
+                build();
+                focusTag("dockside");
+            });
             int si = java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act));
             add("Tiles", Prefs.TILE_NAMES[Math.max(0, si)], "tiles", () -> {
                 // OK steps through the styles; the grid changes straight away behind the panel
@@ -328,11 +418,51 @@ final class SettingsPanel {
                 build();
                 focusTag("tiles");
             });
-            toggle("App names", Prefs.NAMES_ALWAYS, "Always", "On focus", "names");
-            int hiddenW = Prefs.hiddenWidgets(act).size();
-            add("Widgets", hiddenW == 0 ? "All shown" : (3 - hiddenW) + " of 3 shown", "widgets", () -> go("widgets"));
-            toggle("Top Shelf", Prefs.TOP_SHELF, "On", "Off", "shelf");
+            int gi = Math.max(0, Prefs.gridCols(act) - 5);
+            add("App size", Prefs.GRID_NAMES[gi], "grid", () -> {
+                // OK steps through the sizes; the grid is laid out again behind the panel
+                Prefs.of(act).edit().putInt(Prefs.GRID, Prefs.GRID_COLS[(gi + 1) % Prefs.GRID_COLS.length]).apply();
+                host.applied("apps");
+                build();
+                focusTag("grid");
+            });
+            toggle("Apps beyond two rows", Prefs.GRID_PAGES, "Pages to the side", "Scroll down", "apps");
+            int ni = Math.max(0, java.util.Arrays.asList(Prefs.NAME_MODES).indexOf(Prefs.nameMode(act)));
+            add("App names", Prefs.NAME_LABELS[ni], "names", () -> {
+                String next = Prefs.NAME_MODES[(ni + 1) % Prefs.NAME_MODES.length];
+                Prefs.of(act).edit().putString(Prefs.NAME_MODE, next).putBoolean(Prefs.NAMES_ALWAYS, "always".equals(next)).apply();
+                host.applied("names");
+                build();
+                focusTag("names");
+            });
             toggle("Parallax icons", Prefs.PARALLAX, "On", "Off", "parallax");
+            section("WHAT SHOWS");
+            int hiddenW = Prefs.hiddenWidgets(act).size();
+            boolean wShown = (!tvos || Prefs.dockWidgets(act)) && hiddenW < 3;
+            // the plainest home: your apps and the wall, no widgets and no app cards (continue
+            // watching, an app's rows); the two rows below still change each on its own
+            boolean only = !wShown && !Prefs.on(act, Prefs.TOP_SHELF);
+            add("Only apps", only ? "On · nothing but your apps" : "Off", "onlyapps", () -> {
+                boolean on = !only;
+                android.content.SharedPreferences.Editor e = Prefs.of(act).edit().putBoolean(Prefs.TOP_SHELF, !on);
+                if (tvos) e.putBoolean(Prefs.DOCK_WIDGETS, !on);
+                if (!tvos || !on) {
+                    java.util.Set<String> s = new java.util.HashSet<>();
+                    if (on) java.util.Collections.addAll(s, HomeActivity.WIDGET_IDS);
+                    e.putStringSet(Prefs.WIDGETS_HIDDEN, s);
+                }
+                e.apply();
+                host.applied("shelf");
+                host.applied("widgets");
+                build();
+                focusTag("onlyapps");
+            });
+            add("Widgets", !wShown ? "Hidden · clean" : hiddenW == 0 ? "All shown" : (3 - hiddenW) + " of 3 shown", "widgets", () -> go("widgets"));
+            // an app's own cards above it when it has focus (JioHotstar's rows, YouTube's videos); off for only apps
+            toggle(tvos ? "App cards" : "Top Shelf", Prefs.TOP_SHELF, "On", "Hidden · clean", "shelf");
+            toggle("Tonight's pick", Prefs.PICKS, "Shown", "Hidden · clean", "picks");
+            toggle("Live picture on input tiles", Prefs.INPUT_PREVIEW, "On", "Off", "inputs");
+            section("SPEED");
             // stillness for slow TVs; Auto decides from the TV's memory and chip
             String lm = Perf.mode(act);
             add("Light mode", lm.equals("auto") ? "Auto · " + (Perf.lowEnd(act) ? "on for this TV" : "off for this TV") : lm.equals("on") ? "On" : "Off", "light", () -> {
@@ -342,7 +472,7 @@ final class SettingsPanel {
                 build();
                 focusTag("light");
             });
-            toggle("Live picture on input tiles", Prefs.INPUT_PREVIEW, "On", "Off", "inputs");
+            section("REMOTE");
             // switched by Aura where setup allowed it; elsewhere, Android's own Accessibility screen does it
             // how late the TV hands over remote releases while Aura watches the keys: some firmware adds a lot
             int lag = Prefs.device(act).getInt("keys_lag", 0);
@@ -428,23 +558,46 @@ final class SettingsPanel {
             }
         } else if (page.equals("widgets")) {
             Ui.fit(title, "Widgets", Ui.dp(300), 52, 30);
-            note.setText("Hide the ones you don't use and the rest widen to fill the row. Holding OK on a widget moves or hides it too.");
+            note.setText("Hide the ones you don't use and the rest widen to fill the row. Holding OK on a widget moves or hides it too. "
+                    + "The Smart Stack always deals what you're watching first; the cards below are extras.");
+            boolean tvos = Prefs.tvos(act);
             java.util.Set<String> hidden = Prefs.hiddenWidgets(act);
+            boolean anyOn = (!tvos || Prefs.dockWidgets(act)) && hidden.size() < HomeActivity.WIDGET_IDS.length;
+            add("Show widgets", anyOn ? "On" : "Hidden · clean", "w:all", () -> {
+                if (tvos) {
+                    boolean turnOn = !anyOn;
+                    Prefs.of(act).edit().putBoolean(Prefs.DOCK_WIDGETS, turnOn).apply();
+                    if (turnOn && hidden.size() >= HomeActivity.WIDGET_IDS.length) {
+                        Prefs.of(act).edit().putStringSet(Prefs.WIDGETS_HIDDEN, new java.util.HashSet<>()).apply();
+                    }
+                } else {
+                    java.util.Set<String> s = new java.util.HashSet<>();
+                    if (anyOn) java.util.Collections.addAll(s, HomeActivity.WIDGET_IDS);
+                    Prefs.of(act).edit().putStringSet(Prefs.WIDGETS_HIDDEN, s).apply();
+                }
+                host.applied("widgets");
+                build();
+                focusTag("w:all");
+            });
             for (int i : Prefs.widgetOrder(act)) {
                 String id = HomeActivity.WIDGET_IDS[i];
-                add(HomeActivity.WIDGET_NAMES[i], hidden.contains(id) ? "Hidden" : "Shown", "w:" + id, () -> {
-                    boolean hide = !Prefs.hiddenWidgets(act).contains(id);
-                    // one always stays: an empty row would leave a hole above your apps
-                    if (hide && Prefs.hiddenWidgets(act).size() >= HomeActivity.WIDGET_IDS.length - 1) {
-                        host.hud(R.drawable.ic_info, "Keep at least one widget");
-                        return;
+                boolean shown = (!tvos || Prefs.dockWidgets(act)) && !hidden.contains(id);
+                add(HomeActivity.WIDGET_NAMES[i], shown ? "Shown" : "Hidden", "w:" + id, () -> {
+                    if (tvos && !Prefs.dockWidgets(act)) {
+                        Prefs.of(act).edit().putBoolean(Prefs.DOCK_WIDGETS, true).apply();
+                        Prefs.hideWidget(act, id, false);
+                    } else {
+                        Prefs.hideWidget(act, id, !Prefs.hiddenWidgets(act).contains(id));
                     }
-                    Prefs.hideWidget(act, id, hide);
                     host.applied("widgets");
                     build();
+                    focusTag("w:" + id);
                 });
             }
             toggle("Stack pages", Prefs.STACK_AUTO, "Turn on their own", "Stay put", "stack");
+            // the stack's extras: today's releases come from the country's schedule, not your account
+            toggle("New today on your apps", Prefs.STACK_NEW, "In the stack", "Left out", "cards");
+            toggle("Suggested apps", Prefs.STACK_APPS, "In the stack", "Left out", "cards");
             add("Original order", "", "w:reset", () -> {
                 Prefs.setWidgetOrder(act, java.util.Arrays.asList(0, 1, 2));
                 host.applied("widgets");
@@ -452,7 +605,7 @@ final class SettingsPanel {
             });
         } else if (page.equals("shield")) {
             Ui.fit(title, "Block ads", Ui.dp(300), 52, 30);
-            note.setText("Ad and tracker servers get no answer, in every app at once. Pick a filter, or find the fastest one from this TV.");
+            note.setText("Ad and tracker servers get no answer across apps and menus (YouTube's own video stream ads come from the video server itself). Pick a filter, or find the fastest one from this TV.");
             add("Block ads", shieldNote != null ? shieldNote : Shield.on(act) ? "On" : "Off", "shield:on", this::toggleShield);
             String current = Shield.host(act);
             boolean custom = true;
@@ -462,29 +615,27 @@ final class SettingsPanel {
             }
             add("Your own DNS", custom ? filterValue(current, current, current) : "Type a hostname", "dns:custom", this::askDns);
             add("Find the fastest", probing ? "Measuring…" : "", "dns:probe", this::findFastest);
+            add("Wi-Fi DNS settings", "If this TV ignores Private DNS · use 94.140.14.14", "dns:wifi",
+                    () -> host.open(new Intent(Settings.ACTION_WIFI_SETTINGS), panel));
         } else if (page.equals("wallpaper")) {
             Ui.fit(title, "Wallpaper", Ui.dp(300), 52, 30);
-            note.setText(Flyovers.supported()
-                    ? "Photographs that follow the sky, or pure black for OLED. The screensaver can hang masterpieces from an open museum collection, show the real wind over the country right now, tonight's real sky, or Earth from the space station. Auto moves between them."
-                    : "Photographs that follow the sky, or pure black for OLED. The screensaver can hang masterpieces from an open museum collection, show the real wind over the country right now, or tonight's real sky. Auto moves between them.");
+            note.setText("Photographs that follow the sky, or pure black for OLED. The screensaver shows the photographs with a few lines about each, or famous quotes over them. Auto moves between the two.");
             toggle("Wallpaper", Prefs.BLACK, "Pure black", "Photographs", "photos");
             if (!Prefs.on(act, Prefs.BLACK)) {
-                toggle("Picture of the Day", Prefs.DAILY, "On", "Off", "daily");
+                toggle("Fresh HD photographs", Prefs.DAILY, "On", "Off", "daily");
+                if (Prefs.on(act, Prefs.DAILY)) {
+                    List<String> on = Gallery.sources(act);
+                    add("Photo sources", on.isEmpty() ? "None · Northern lights only" : on.size() + " on", "sources", () -> go("sources"));
+                }
                 toggle("Sky moments", Prefs.MOMENTS, "On", "Off", "moments");
             }
-            // the screensaver's scene; Earth from space only where flyovers can play
-            final List<String> modes = new java.util.ArrayList<>(java.util.Arrays.asList(Prefs.SAVERS));
-            if (!Flyovers.supported()) modes.remove("space");
+            // the screensaver's scene: the photographs, the quotes, or both by turns
+            final List<String> modes = java.util.Arrays.asList(Prefs.SAVERS);
             String mode = Prefs.saver(act);
-            add("Screensaver", Prefs.SAVER_NAMES[java.util.Arrays.asList(Prefs.SAVERS).indexOf(mode)]
-                    + (mode.equals("auto") ? " · by the light and weather" : ""), Prefs.SAVER, () -> {
+            add("Screensaver", Prefs.SAVER_NAMES[modes.indexOf(mode)]
+                    + (mode.equals("auto") ? " · photographs and quotes by turns" : ""), Prefs.SAVER, () -> {
                 String next = modes.get((modes.indexOf(Prefs.saver(act)) + 1) % modes.size());
                 Prefs.of(act).edit().putString(Prefs.SAVER, next).apply();
-                if (next.equals("space") && !Prefs.on(act, Prefs.FLYOVERS)) {
-                    Prefs.set(act, Prefs.FLYOVERS, true);
-                    Flyovers.schedule(act);
-                    host.hud(R.drawable.ic_check, "Earth from space · arriving over Wi-Fi");
-                }
                 build();
                 focusTag(Prefs.SAVER);
             });
@@ -526,24 +677,6 @@ final class SettingsPanel {
                     host.hud(R.drawable.ic_info, "This TV can't preview it; it starts after a while of rest");
                 }
             });
-            // a hardware VP9 decoder plays them for almost nothing; without one, no row
-            if (Flyovers.supported()) {
-                add("Screensaver flyovers", Flyovers.status(act), Prefs.FLYOVERS, () -> {
-                    boolean on = !Prefs.on(act, Prefs.FLYOVERS);
-                    Prefs.set(act, Prefs.FLYOVERS, on);
-                    if (on) {
-                        Flyovers.schedule(act);
-                        host.hud(R.drawable.ic_check, "Earth from space · arriving over Wi-Fi");
-                    } else {
-                        Flyovers.clear(act);
-                    }
-                    build();
-                    focusTag(Prefs.FLYOVERS);
-                });
-                // still downloading: the count keeps up while the page is open
-                rows.removeCallbacks(flyoverTick);
-                if (Prefs.on(act, Prefs.FLYOVERS) && !Flyovers.status(act).equals("On")) rows.postDelayed(flyoverTick, 3000);
-            }
         } else if (page.equals("updates")) {
             Ui.fit(title, "Updates", Ui.dp(300), 52, 30);
             String mine = Updater.installed(act);
@@ -588,13 +721,14 @@ final class SettingsPanel {
                 org.json.JSONObject o = list.optJSONObject(i);
                 final String id = o.optString("id");
                 add(o.optString("title") + (o.optBoolean("gif") ? "  ·  GIF" : ""), id.equals(confirmPhoto) ? "Press OK again" : "Remove",
-                        "p:" + id, android.graphics.BitmapFactory.decodeFile(Mine.thumb(act, id).getPath()), () -> {
+                        "p:" + id, photoThumb(id), () -> {
                             if (!id.equals(confirmPhoto)) {
                                 confirmPhoto = id;
                                 build();
                                 return;
                             }
                             confirmPhoto = null;
+                            thumbs.remove(id);
                             Mine.remove(act, id);
                             host.applied("photos");
                             build();
@@ -609,6 +743,7 @@ final class SettingsPanel {
                     return;
                 }
                 confirmClear = false;
+                thumbs.clear();
                 Mine.clear(act);
                 host.applied("photos");
                 back();
@@ -650,6 +785,23 @@ final class SettingsPanel {
                 host.applied("art");
                 build();
             });
+        } else if (page.equals("sources")) {
+            Ui.fit(title, "Photo sources", Ui.dp(300), 52, 30);
+            note.setText("Where the wall's photographs come from. Each one on takes its turn, and no photograph is shown twice. Unsplash needs your own free key: send it from your phone.");
+            toggle("Windows Spotlight", Prefs.SRC_SPOTLIGHT, "On", "Off", "sources");
+            toggle("Bing", Prefs.SRC_BING, "On", "Off", "sources");
+            toggle("Wikimedia Commons", Prefs.SRC_WIKIMEDIA, "On", "Off", "sources");
+            toggle("Wallhaven · nature", Prefs.SRC_WALLHAVEN, "On", "Off", "sources");
+            if (Gallery.unsplashKey(act).isEmpty()) {
+                add("Unsplash", "Needs a key · send it from your phone", "src:unsplash", this::openUnsplashDrop);
+            } else {
+                toggle("Unsplash", Prefs.SRC_UNSPLASH, "On", "Off", "sources");
+                add("Unsplash key", "Saved · send a new one", "src:key", this::openUnsplashDrop);
+            }
+        } else if (page.equals("unsplashphone")) {
+            Ui.fit(title, "Unsplash key", Ui.dp(300), 52, 30);
+            note.setText("Scan the code, then paste the Access Key of an app you create at unsplash.com (Your apps). It's free with an Unsplash account.");
+            if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
         } else if (page.equals("tmdbphone")) {
             Ui.fit(title, "TMDB key", Ui.dp(300), 52, 30);
             note.setText("Scan the code, then paste your key from themoviedb.org (Settings, API) into the page that opens. It's free with a TMDB account.");
@@ -682,15 +834,15 @@ final class SettingsPanel {
                     focusTag("role");
                 });
             }
-            add("Home screen", Prefs.TILE_NAMES[Math.max(0, java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act)))]
-                    + " tiles", "home", () -> go("home"));
-            add("Profile", Profiles.name(act), "profiles", () -> go("profiles"));
+            section("YOU");
+            add("Profile", Profiles.name(act), "profiles", host::whoIsWatching);
             add("Wallpaper", Prefs.on(act, Prefs.BLACK) ? "Pure black" : "Photographs", "wallpaper", () -> go("wallpaper"));
             int mine = Mine.count(act);
             add("From your phone", mine > 0 ? mine + (mine == 1 ? " photo" : " photos") : "Photos, GIFs, apps", "drop", this::openDrop);
-            // Private DNS arrived with Android 9: older TVs don't get the row at all
-            if (android.os.Build.VERSION.SDK_INT >= 28) add("Block ads", Shield.on(act) ? "On · " + Shield.name(act) : "Off", "shield", () -> go("shield"));
-            add("Animations", animLabel(), "anim", this::cycleAnim);
+            section("HOME SCREEN");
+            add("Home screen", Prefs.TILE_NAMES[Math.max(0, java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act)))]
+                    + " tiles", "home", () -> go("home"));
+            add("Hidden apps", String.valueOf(Prefs.hidden(act).size()), "hidden", () -> go("apps"));
             add("Tonight's pick", !Prefs.on(act, Prefs.PICKS) ? "Off" : Picks.tmdb(act) ? picksSummary() : "Shows · " + Picks.genreSummary(act),
                     "picks", () -> go("picks"));
             toggle("Weather", Prefs.WEATHER, "On", "Off", "weather");
@@ -702,7 +854,13 @@ final class SettingsPanel {
                 host.applied("weather");
                 build();
             });
-            add("Hidden apps", String.valueOf(Prefs.hidden(act).size()), "hidden", () -> go("apps"));
+            section("THIS TV");
+            // Private DNS arrived with Android 9: older TVs don't get the row at all
+            if (android.os.Build.VERSION.SDK_INT >= 28) add("Block ads", Shield.on(act) ? "On · " + Shield.name(act) : "Off", "shield", () -> go("shield"));
+            add("Animations", animLabel(), "anim", this::cycleAnim);
+            add("Set up on this TV", Adb.on(act) ? Adb.unguarded(act) ? "Connected · open to your Wi-Fi" : "Connected" : "No computer needed", "tv", () -> go("tv"));
+            add("Android settings", "", "android", () -> host.open(new Intent(Settings.ACTION_SETTINGS), panel));
+            section("AURA");
             add("Your setup", "Save to your phone, or bring it back", "backup", this::openBackup);
             String waiting = Updater.pending(act);
             add("Updates", waiting != null ? "Aura " + waiting + " is ready" : "Version " + Updater.installed(act), "updates", () -> {
@@ -719,14 +877,12 @@ final class SettingsPanel {
                 dl.leftMargin = Ui.dp(5);
                 ((FrameLayout) rows.getChildAt(rows.getChildCount() - 1)).addView(dot, dl);
             }
-            add("Set up on this TV", Adb.on(act) ? Adb.unguarded(act) ? "Connected · open to your Wi-Fi" : "Connected" : "No computer needed", "tv", () -> go("tv"));
-            add("Android settings", "", "android", () -> host.open(new Intent(Settings.ACTION_SETTINGS), panel));
             add("Remove Aura", confirmRemove ? "Press OK again" : "Puts the TV back first", "remove", this::removeAura);
         }
         if (keep != null) {
             boolean kept = false;
             for (int i = 0; i < rows.getChildCount(); i++) if (keep.equals(rows.getChildAt(i).getTag())) kept = rows.getChildAt(i).requestFocus();
-            if (!kept && isOpen() && rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
+            if (!kept && isOpen()) focusFirst();
         }
     }
 
@@ -910,6 +1066,48 @@ final class SettingsPanel {
         }, "tmdb-check").start();
     }
 
+    /** The phone's page for an Unsplash key, behind a QR code: the key goes straight to the TV, no typing. */
+    private void openUnsplashDrop() {
+        keepDrop = false;
+        stopDrop();
+        drop = new Drop(act, new Drop.Quiet() {
+            @Override
+            public void onKey(String text) {
+                if (!text.isEmpty()) setUnsplashKey(text.trim());
+            }
+        });
+        drop.unsplashKey = true;
+        drop.only("/key");
+        String url = drop.start();
+        keyCard = qrCard(url == null ? null : url + "/key", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
+                url != null ? "Paste your Unsplash key" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
+        go("unsplashphone");
+    }
+
+    /** Checks the key with Unsplash, then keeps it on this TV and switches Unsplash on. */
+    private void setUnsplashKey(String k) {
+        host.hud(R.drawable.ic_info, "Checking the key with Unsplash…");
+        final android.content.Context app = act.getApplicationContext();
+        new Thread(() -> {
+            boolean ok = Gallery.checkUnsplash(k);
+            act.runOnUiThread(() -> {
+                if (!ok) {
+                    host.hud(R.drawable.ic_info, "Unsplash didn't accept that key · copy the Access Key again");
+                    return;
+                }
+                Prefs.device(app).edit().putString(Prefs.UNSPLASH_KEY, k).apply();
+                Prefs.set(act, Prefs.SRC_UNSPLASH, true);
+                host.hud(R.drawable.ic_check, "Unsplash key works · its photographs join the wall");
+                host.applied("sources");
+                if (page.equals("unsplashphone")) {
+                    stopDrop();
+                    go("sources");
+                }
+                focusTag(Prefs.SRC_UNSPLASH);
+            });
+        }, "unsplash-check").start();
+    }
+
     /** The phone's page for the key, behind a QR code, open while this page is. */
     private void openKeyDrop() {
         keepDrop = false;
@@ -920,6 +1118,7 @@ final class SettingsPanel {
                 if (!text.isEmpty()) setTmdbKey(text);
             }
         });
+        drop.only("/key");
         String url = drop.start();
         keyCard = qrCard(url == null ? null : url + "/key", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
                 url != null ? "Paste your TMDB key" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
@@ -950,6 +1149,7 @@ final class SettingsPanel {
                 }, "pair").start();
             }
         });
+        drop.only("/pair");
         String url = drop.start();
         keyCard = qrCard(url == null ? null : url + "/pair", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
                 url != null ? "Type the pairing code" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
@@ -970,6 +1170,7 @@ final class SettingsPanel {
                 if (isOpen()) go("");
             }
         });
+        drop.only("/backup", "/backup.json", "/restore");
         String url = drop.start();
         keyCard = qrCard(url == null ? null : url + "/backup", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
                 url != null ? "Save or bring back" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
@@ -993,6 +1194,7 @@ final class SettingsPanel {
             }
         });
         drop.artFor = pkg;
+        drop.only("/art");
         String url = drop.start();
         keyCard = qrCard(url == null ? null : url + "/art", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
                 url != null ? "Choose a picture" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
@@ -1062,7 +1264,8 @@ final class SettingsPanel {
         LinearLayout card = new LinearLayout(act);
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(Ui.dp(2), 0, 0, 0);
-        View code = url != null ? new Code(act, Qr.encode(url)) : new View(act);
+        Qr qr = url != null ? Qr.tryEncode(url) : null;
+        View code = qr != null ? new Code(act, qr) : new View(act);
         card.addView(code, new LinearLayout.LayoutParams(Ui.dp(184), Ui.dp(184)));
         LinearLayout col = new LinearLayout(act);
         col.setOrientation(LinearLayout.VERTICAL);
@@ -1092,6 +1295,12 @@ final class SettingsPanel {
      * admin can't be uninstalled at all: Android's settings refuse.
      */
     private void removeAura() {
+        if (Safety.originalDisabled(act) && !Adb.on(act)) {
+            confirmRemove = false;
+            host.hud(R.drawable.ic_info, "Connect in Set up on this TV first so the TV's own home screen can be turned back on");
+            go("tv");
+            return;
+        }
         if (!confirmRemove) {
             confirmRemove = true;
             build();
@@ -1109,7 +1318,7 @@ final class SettingsPanel {
         host.hud(R.drawable.ic_info, "Handing the TV back…");
         final String home = Safety.original(app);
         new Thread(() -> {
-            if (home != null && Adb.on(app)) Adb.run(app, "cmd package set-home-activity " + home);
+            if (Adb.on(app)) Safety.restoreHome(app);
             // a moment for Android to let go of the admin before it's asked to uninstall
             android.os.SystemClock.sleep(800);
             act.runOnUiThread(() -> {
@@ -1194,6 +1403,14 @@ final class SettingsPanel {
         add("Connect", adbState.equals("asking") ? "Waiting for you…" : Adb.on(act) ? "Connected" : "Not connected", "adb:connect", this::adbConnect);
         if (setupNote.isEmpty()) setupNote = Prefs.device(act).getString("setup_note", "");
         if (Adb.on(act)) add("Switch everything on", setupNote.isEmpty() ? Adb.setup(act).length + " extras" : setupNote, "adb:setup", this::adbSetup);
+        if (Adb.on(act) && Safety.hasGoogleTvHome(act)) {
+            if (Safety.googleTvHomeOn(act)) {
+                add("Retire Google TV Home", confirmRetire ? "Press OK again · voice search & side panel stop" : "Voice search, side panel & accounts stop",
+                        "adb:gtv", () -> retireGoogleHome(true));
+            } else {
+                add("Bring back Google TV Home", "Restores voice search, side panel & accounts", "adb:gtv", () -> retireGoogleHome(false));
+            }
+        }
         // newer TVs without plain network debugging: wireless debugging, paired with a code typed on the phone
         if (!Adb.on(act) && Adb.wireless()) add("Use wireless debugging", "Pair with a code", "adb:pair", this::openPair);
         // the open door shuts with a setting Aura may change once setup has granted it
@@ -1247,7 +1464,8 @@ final class SettingsPanel {
      */
     private void cycleAnim() {
         if (!Shield.allowed(act)) {
-            host.hud(R.drawable.ic_info, "Run setup-aura.ps1 once to let Aura change this");
+            host.hud(R.drawable.ic_info, "Connect in Set up on this TV once to let Aura change this");
+            go("tv");
             return;
         }
         float s = animScale(), next = s > 0.75f ? 0.5f : s > 0f ? 0f : 1f;
@@ -1263,7 +1481,42 @@ final class SettingsPanel {
 
     // ---- set up on this TV ----------------------------------------------------------------------
 
+    private boolean confirmRetire;
+
+    /** Switches Google TV's own launcher (and its setup recovery home) off or back on over ADB. */
+    private void retireGoogleHome(boolean retire) {
+        if (retire && !confirmRetire) {
+            confirmRetire = true;
+            build();
+            focusTag("adb:gtv");
+            return;
+        }
+        confirmRetire = false;
+        final android.content.Context app = act.getApplicationContext();
+        new Thread(() -> {
+            Boolean took = Safety.retireGoogleHome(app, retire);
+            act.runOnUiThread(() -> {
+                if (took == null) {
+                    host.hud(R.drawable.ic_info, "Couldn't reach the TV's debugging service · Connect first");
+                } else if (!took) {
+                    host.hud(R.drawable.ic_info, "Android didn't allow that change");
+                } else if (retire) {
+                    host.hud(R.drawable.ic_check, "Google TV Home retired · Bring back Google TV Home restores voice search & accounts");
+                } else {
+                    host.hud(R.drawable.ic_check, "Google TV Home is back · Voice search restored");
+                }
+                if (page.equals("tv")) {
+                    build();
+                    focusTag("adb:gtv");
+                }
+            });
+        }, "gtv-home").start();
+    }
+
     private String adbNote() {
+        if (confirmRetire) {
+            return "Voice search (Google Assistant in YouTube & apps), Google TV's side panel, profiles and some account screens stop working while Google TV Home is retired. Press OK again to retire it, or bring it back here any time.";
+        }
         String s = adbState.isEmpty() && Adb.on(act) ? Adb.unguarded(act) ? Adb.OPEN_DOOR : Adb.OK : adbState;
         switch (s) {
             case "asking":
@@ -1453,7 +1706,8 @@ final class SettingsPanel {
     private void toggleShield() {
         if (shieldNote != null) return;
         if (!Shield.allowed(act)) {
-            host.hud(R.drawable.ic_info, "Run setup-aura.ps1 once to let Aura block ads");
+            host.hud(R.drawable.ic_info, "Connect in Set up on this TV once to let Aura block ads");
+            go("tv");
             return;
         }
         if (Shield.on(act)) {
@@ -1466,18 +1720,40 @@ final class SettingsPanel {
         checkShield(Shield.name(act));
     }
 
-    /** Confirms the TV is online through the filter; if not, blocking goes off again at once. */
+    /** Confirms the TV is online through the filter; if not, tries another reachable filter or switches back. */
     private void checkShield(String name) {
         shieldNote = "Checking…";
         build();
         new Thread(() -> {
-            boolean ok = Shield.verify(act);
-            // never leave the TV without internet: switch straight back if the filter can't be reached
-            if (!ok) Shield.set(act, false);
+            String used = name;
+            String tried = Shield.host(act);
+            boolean ok = Shield.verify(act), port853 = ok;
+            if (!ok) {
+                for (String[] f : Shield.FILTERS) {
+                    if (f[0].equals(tried)) continue;
+                    Shield.Probe p = Shield.probe(f[0]);
+                    if (p != null && p.blocks) {
+                        port853 = true;
+                        Shield.choose(act, f[0]);
+                        Shield.set(act, true);
+                        used = f[1];
+                        if (Shield.verify(act)) ok = true;
+                        break;
+                    }
+                }
+            }
+            // never leave the TV without internet: switch straight back if no filter works
+            if (!ok) {
+                Shield.choose(act, tried);
+                Shield.set(act, false);
+            }
+            final boolean done = ok, dot = port853;
+            final String who = used;
             act.runOnUiThread(() -> {
                 shieldNote = null;
-                host.hud(ok ? R.drawable.ic_check : R.drawable.ic_info,
-                        ok ? "Blocking ads with " + name : "Couldn't reach " + name + ", so blocking is off again");
+                host.hud(done ? R.drawable.ic_check : R.drawable.ic_info, done ? "Blocking ads with " + who
+                        : dot ? "This TV ignores Private DNS · set 94.140.14.14 in Wi-Fi settings instead"
+                        : "Couldn't reach " + name + " (port 853 blocked), so blocking is off again");
                 build();
             });
         }, "shield").start();
@@ -1641,6 +1917,11 @@ final class SettingsPanel {
         stopDropNow();
     }
 
+    /** Settings is going away for good (a profile switch, Aura closing): no phone page stays open. */
+    void shutDrop() {
+        stopDropNow();
+    }
+
     private void stopDropNow() {
         keepDrop = false;
         rows.removeCallbacks(stopDropIdle);
@@ -1654,7 +1935,8 @@ final class SettingsPanel {
         LinearLayout card = new LinearLayout(act);
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(Ui.dp(2), 0, 0, 0);
-        View code = url != null ? new Code(act, Qr.encode(url)) : new View(act);
+        Qr qr = url != null ? Qr.tryEncode(url) : null;
+        View code = qr != null ? new Code(act, qr) : new View(act);
         card.addView(code, new LinearLayout.LayoutParams(Ui.dp(184), Ui.dp(184)));
 
         LinearLayout col = new LinearLayout(act);
@@ -1769,6 +2051,12 @@ final class SettingsPanel {
     }
 
     /** The same, led by a small picture (a photo's thumbnail). */
+    private android.graphics.Bitmap photoThumb(String id) {
+        android.graphics.Bitmap b = thumbs.get(id);
+        if (b == null && (b = android.graphics.BitmapFactory.decodeFile(Mine.thumb(act, id).getPath())) != null) thumbs.put(id, b);
+        return b;
+    }
+
     private void add(String label, String value, String tag, android.graphics.Bitmap thumb, Runnable run) {
         Pad p = new Pad(act, null, 16, 0f);
         p.plainColor = 0x1AFFFFFF;
@@ -1805,9 +2093,77 @@ final class SettingsPanel {
         }
         p.addView(r, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         p.onClick = run;
+        p.setOnFocusChangeListener((v, has) -> {
+            if (has) explain(tag);
+        });
         LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(35));
         l.topMargin = Ui.dp(4);
         rows.addView(p, l);
+    }
+
+    /** A quiet label over a group of rows; never focused, so the remote moves straight past it. */
+    private void section(String name) {
+        TextView t = Ui.caps(act, 7.5f, 0x8CFFFFFF, 0.3f);
+        t.setText(name);
+        t.setPadding(Ui.dp(16), 0, 0, 0);
+        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        l.topMargin = Ui.dp(rows.getChildCount() == 0 ? 2 : 16);
+        l.bottomMargin = Ui.dp(2);
+        rows.addView(t, l);
+    }
+
+    /** The focused row's sentence beside the list, faded across; rows that need none leave it empty. */
+    private void explain(String tag) {
+        String text = HELP.get(tag);
+        if (text == null) text = "";
+        if (text.contentEquals(help.getText())) return;
+        final String next = text;
+        help.animate().cancel();
+        help.animate().alpha(0f).setDuration(90).setStartDelay(0).withEndAction(() -> {
+            help.setText(next);
+            help.animate().alpha(1f).setDuration(180).setStartDelay(0).setInterpolator(Ui.SOFT).start();
+        }).start();
+    }
+
+    private static final java.util.Map<String, String> HELP = new java.util.HashMap<>();
+
+    static {
+        // Settings
+        HELP.put("role", "Which home screen the remote's Home button opens. Aura can take it over from the TV's own.");
+        HELP.put("profiles", "Everyone gets their own app order, wallpaper and widgets. Opens Who's watching, to switch.");
+        HELP.put("wallpaper", "The picture behind your apps: fresh photographs every day, your own photos, or pure black.");
+        HELP.put("drop", "Scan a code with your phone to send photos, GIFs or apps to the TV. No cable, no account.");
+        HELP.put("home", "How your apps look, and what else is on the home screen: style, tiles, widgets, app cards.");
+        HELP.put("hidden", "Apps you've hidden from the home screen. Bring any of them back from here.");
+        HELP.put("picks", "A film or show worth your evening, chosen fresh each day. Pick genres, or use your TMDB watchlist.");
+        HELP.put(Prefs.WEATHER, "The temperature and the sky in the corner of the home screen.");
+        HELP.put("city", "Where the weather is for. Found from your internet connection, unless you type a city.");
+        HELP.put("auto", "Go back to finding your city from your internet connection.");
+        HELP.put("shield", "Blocks ads and trackers for the whole TV, in every app, through a private DNS filter.");
+        HELP.put("anim", "How fast every menu and app on the TV moves. Fast makes the whole TV feel quicker.");
+        HELP.put("tv", "Lets Aura switch on its extras itself (ad blocking, the Home button, a faster TV) through the TV's own debugging. Once, no computer.");
+        HELP.put("android", "The TV's own settings: network, picture, sound, accounts.");
+        HELP.put("backup", "Save your app order, folders and settings to your phone, and bring them back on any TV.");
+        HELP.put("updates", "Aura's version, and the new one when it's out. Updating keeps every setting.");
+        HELP.put("remove", "Hands the TV back to its own home screen first, then uninstalls Aura.");
+        // Home screen
+        HELP.put("layout", "tvOS: your apps alone on a dock over the wallpaper. Aura: a sidebar and widgets beside your apps.");
+        HELP.put("dockside", "Whether a sidebar slides in from the left, or Up on the remote reaches the buttons at the top.");
+        HELP.put("tiles", "How each app's tile is drawn: Apple TV icons, frosted glass, bold colour, dark, or the app's own banner.");
+        HELP.put("grid", "How many apps fit across the screen: bigger tiles, or more of them.");
+        HELP.put(Prefs.GRID_PAGES, "Past two rows of apps: scroll down, or slide sideways a page at a time.");
+        HELP.put("names", "App names under the tiles: always, only on the one in focus, or never.");
+        HELP.put(Prefs.PARALLAX, "Tiles tilt toward you and catch the light as you move. Off is stiller, and lighter on older TVs.");
+        HELP.put("onlyapps", "The simplest home: your apps on the wallpaper, nothing else. Turns widgets and app cards off together.");
+        HELP.put("widgets", "The cards above your apps: the Smart Stack (continue watching, new episodes), Today, and the Sky.");
+        HELP.put(Prefs.TOP_SHELF, "Rest on an app and what you were watching in it, and its own picks, line up above it.");
+        HELP.put(Prefs.PICKS, "Whether Tonight's pick appears on the home screen at all.");
+        HELP.put(Prefs.INPUT_PREVIEW, "HDMI input tiles show a live picture of what's on. Some TVs draw it over the whole screen: switch it off there.");
+        HELP.put("light", "Keeps motion and blur to a minimum for slower TVs. Auto decides from this TV's memory and chip.");
+        HELP.put("homekeys", "From inside any app: Home twice opens your recent apps, Home held opens Control Center.");
+        HELP.put("takeover", "Where Home goes from inside apps: Aura, or the TV's own home screen.");
+        HELP.put("previews", "Recent apps show each app as you left it. The pictures stay on this TV, two days at most.");
+        HELP.put("keys", "Give a spare button on the remote an app to open: a colour button, or one you never use.");
     }
 
     // ---- weather city ------------------------------------------------------------------------
@@ -1914,6 +2270,8 @@ final class SettingsPanel {
                 host.hud(R.drawable.ic_place, f != null ? "Weather and the sun now follow " + f : "Couldn't find " + name);
                 if (f != null) host.applied("weather");
                 build();
+                // back on the row it was typed from, not the top of the list
+                focusTag("city");
             });
         }, "geocode").start();
     }

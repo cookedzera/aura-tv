@@ -179,13 +179,40 @@ final class Updater {
     }
 
     /** The installer's answer: show its confirmation screen, or say why it failed. */
+    /** Android's "Install?" for an app that arrived while Aura was behind another app. */
+    private static volatile Intent pending;
+
+    /** Shows a waiting "Install?" now that Aura is on screen again. */
+    static void confirmPending(Context c) {
+        Intent i = pending;
+        pending = null;
+        if (i == null) return;
+        try {
+            c.startActivity(i);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
     public static final class Done extends BroadcastReceiver {
         @Override
         public void onReceive(Context c, Intent i) {
             int status = i.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
             if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
                 Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);
-                if (confirm != null) c.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                if (confirm == null) return;
+                confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                // Android won't show it while Aura is behind another app: kept for when Aura is back
+                android.app.ActivityManager.RunningAppProcessInfo me = new android.app.ActivityManager.RunningAppProcessInfo();
+                android.app.ActivityManager.getMyMemoryState(me);
+                if (me.importance > android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+                    pending = confirm;
+                    return;
+                }
+                try {
+                    c.startActivity(confirm);
+                } catch (RuntimeException e) {
+                    pending = confirm;
+                }
             } else if (status != PackageInstaller.STATUS_SUCCESS) {
                 String why = i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
                 // a build signed with someone else's key can't replace this one
@@ -206,9 +233,17 @@ final class Updater {
         return con;
     }
 
-    /** Release notes as plain lines: Markdown's markers taken off. */
+    /**
+     * Release notes as plain lines: Markdown's markers taken off. Only what comes before a "---"
+     * line is for the TV; the rest (how to install, the fine print) stays on GitHub.
+     */
     private static String plain(String md) {
-        return md.replaceAll("(?m)^#+\\s*", "").replaceAll("\\*\\*|__|`", "").replaceAll("(?m)^\\s*[-*]\\s+", "·  ")
+        int cut = md.indexOf("\n---");
+        if (cut >= 0) md = md.substring(0, cut);
+        return md.replaceAll("(?m)^#+\\s*", "").replaceAll("\\*\\*|__|`", "")
+                // *italic*, but never a "* " bullet
+                .replaceAll("(?<!\\w)\\*(?!\\s)([^*\\n]+?)\\*", "$1")
+                .replaceAll("(?m)^\\s*[-*]\\s+", "·  ")
                 .replaceAll("\\[([^]]+)]\\([^)]+\\)", "$1").replaceAll("\\r", "").replaceAll("\\n{3,}", "\n\n").trim();
     }
 

@@ -17,6 +17,12 @@ public class Boot extends BroadcastReceiver {
     public void onReceive(Context c, Intent i) {
         if (!Intent.ACTION_BOOT_COMPLETED.equals(i.getAction())) return;
         final Context app = c.getApplicationContext();
+        // the TV went off in the moment the service was being switched off and on again: back on
+        if (Prefs.device(app).getBoolean("keys_healing", false)) {
+            HomeKeys.set(app, true);
+            Prefs.device(app).edit().putBoolean("keys_healing", false).apply();
+            return;
+        }
         if (!HomeKeys.wanted(app) || HomeRole.held(app) || !HomeKeys.takeover(app)) return;
         if (!HomeKeys.on(app)) {
             HomeKeys.set(app, true);

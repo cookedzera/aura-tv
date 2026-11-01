@@ -90,7 +90,7 @@ final class Power {
     static void setSleep(Context c, int minutes) {
         prefs(c).edit().remove("sleepEnd").apply();
         AlarmManager am = Compat.svc(c, AlarmManager.class);
-        for (String a : new String[]{FADE, SLEEP}) {
+        for (String a : new String[]{FADE, SLEEP, RESTORE}) {
             PendingIntent pi = intent(c, a, 0);
             am.cancel(pi);
             pi.cancel();
@@ -119,11 +119,29 @@ final class Power {
                 return;
             }
         }
+        if (am.isVolumeFixed()) {
+            long at = p.getLong("sleepAt", 0);
+            if (at > System.currentTimeMillis() + 1_000) schedule(c, SLEEP, 0, at);
+            else sleepNow(c);
+            return;
+        }
         if (step == 0) p.edit().putInt("sleepVol", am.getStreamVolume(AudioManager.STREAM_MUSIC)).apply();
+        // turned up during the fade: someone's still watching, so the timer stops and the sound stays
+        int set = p.getInt("sleepSet", -1);
+        if (step > 0 && set >= 0 && am.getStreamVolume(AudioManager.STREAM_MUSIC) > set) {
+            p.edit().remove("sleepVol").remove("sleepSet").apply();
+            setSleep(c, 0);
+            return;
+        }
         int start = p.getInt("sleepVol", am.getStreamVolume(AudioManager.STREAM_MUSIC));
         float left = 1f - (step + 1) / (float) FADE_STEPS;
         // ease-out: most of the drop happens early, the last steps are barely audible changes
-        am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(start * left * left), 0);
+        int to = Math.round(start * left * left);
+        try {
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, to, 0);
+        } catch (SecurityException ignored) {
+        }
+        p.edit().putInt("sleepSet", to).apply();
         long next = System.currentTimeMillis() + FADE_MS / FADE_STEPS;
         if (step + 1 < FADE_STEPS) schedule(c, FADE, step + 1, next);
         else schedule(c, SLEEP, 0, next);
@@ -146,7 +164,10 @@ final class Power {
     static void restoreVolume(Context c) {
         SharedPreferences p = prefs(c);
         if (!p.contains("sleepVol")) return;
-        Compat.svc(c, AudioManager.class).setStreamVolume(AudioManager.STREAM_MUSIC, p.getInt("sleepVol", 0), 0);
+        try {
+            Compat.svc(c, AudioManager.class).setStreamVolume(AudioManager.STREAM_MUSIC, p.getInt("sleepVol", 0), 0);
+        } catch (SecurityException ignored) {
+        }
         p.edit().remove("sleepVol").apply();
     }
 

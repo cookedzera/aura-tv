@@ -78,26 +78,33 @@ final class AppMenu extends FrameLayout {
         float aw = anchor.getWidth() * anchor.getScaleX(), ah = anchor.getHeight() * anchor.getScaleY();
         float ax = at[0] - me[0], ay = at[1] - me[1];
         float gap = Ui.dpf(18), edge = Ui.dpf(24);
-        float x = ax + aw + gap;
-        boolean right = x + w <= sw - edge;
-        if (!right) x = ax - w - gap;
-        float y = Math.max(edge, Math.min(ay + ah / 2f - h / 2f, sh - h - edge));
+        float x = ax + aw + gap, y;
+        boolean right = x + w <= sw - edge, beside = right || ax - w - gap >= edge, below = false;
+        if (beside) {
+            if (!right) x = ax - w - gap;
+            y = Math.max(edge, Math.min(ay + ah / 2f - h / 2f, sh - h - edge));
+        } else {
+            // no room on either side (a lone widget stretched across the row): just below it, else above
+            x = Math.max(edge, Math.min(ax + Ui.dpf(24), sw - w - edge));
+            below = ay + ah + gap + h <= sh - edge;
+            y = below ? ay + ah + gap : Math.max(edge, ay - h - gap);
+        }
         // placed by margins, so the slide-in below can use the translation freely
         FrameLayout.LayoutParams l = (FrameLayout.LayoutParams) panel.getLayoutParams();
         l.leftMargin = Math.round(x);
         l.topMargin = Math.round(y);
         panel.setLayoutParams(l);
-        panel.setTranslationY(0f);
-        // it slides out from the app's side; text is never scaled mid-animation
+        // it slides out from the tile's side, or from under or over it; text is never scaled mid-animation
         panel.setAlpha(0f);
-        panel.setTranslationX(Ui.dpf(right ? -12 : 12));
-        panel.animate().alpha(1f).translationX(0f).setDuration(320).setStartDelay(0).setInterpolator(Ui.EMPHASIZED).start();
+        panel.setTranslationX(beside ? Ui.dpf(right ? -16 : 16) : 0f);
+        panel.setTranslationY(beside ? 0f : Ui.dpf(below ? -16 : 16));
+        panel.animate().alpha(1f).translationX(0f).translationY(0f).setDuration(380).setStartDelay(0).setInterpolator(Ui.SPRING).start();
         if (list.getChildCount() > 0) list.getChildAt(0).requestFocus();
     }
 
     void hide() {
         if (!isOpen()) return;
-        panel.animate().alpha(0f).setDuration(160).setStartDelay(0).setInterpolator(Ui.SOFT)
+        panel.animate().alpha(0f).setDuration(150).setStartDelay(0).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> setVisibility(GONE)).start();
     }
 

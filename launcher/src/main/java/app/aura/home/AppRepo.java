@@ -11,6 +11,8 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.text.TextUtils;
+import android.util.DisplayMetrics;
+import android.util.TypedValue;
 
 import java.text.Collator;
 import java.util.ArrayList;
@@ -40,9 +42,10 @@ final class AppRepo {
 
     static List<App> load(Context c) {
         PackageManager pm = c.getPackageManager();
+        int maxDensity = bannerDensity(c);
         Map<String, App> apps = new LinkedHashMap<>();
-        collect(pm, apps, Intent.CATEGORY_LEANBACK_LAUNCHER, c.getPackageName());
-        collect(pm, apps, Intent.CATEGORY_LAUNCHER, c.getPackageName());
+        collect(pm, apps, Intent.CATEGORY_LEANBACK_LAUNCHER, c.getPackageName(), maxDensity);
+        collect(pm, apps, Intent.CATEGORY_LAUNCHER, c.getPackageName(), maxDensity);
         List<App> list = new ArrayList<>(apps.values());
         for (App a : list) a.art = Art.load(c, a.pkg);
         NewApps.mark(c, list);
@@ -51,7 +54,16 @@ final class AppRepo {
         return list;
     }
 
-    private static void collect(PackageManager pm, Map<String, App> out, String category, String self) {
+    private static int bannerDensity(Context c) {
+        // focused tile is 148dp * 1.1 wide; an xhdpi (320dpi) banner is 320px wide, so pick
+        // the smallest of 320 / 480 / 640 whose banner width (density px) is at least that wide
+        float w = 148f * 1.1f * c.getResources().getDisplayMetrics().density;
+        if (w <= DisplayMetrics.DENSITY_XHIGH) return DisplayMetrics.DENSITY_XHIGH;
+        if (w <= DisplayMetrics.DENSITY_XXHIGH) return DisplayMetrics.DENSITY_XXHIGH;
+        return DisplayMetrics.DENSITY_XXXHIGH;
+    }
+
+    private static void collect(PackageManager pm, Map<String, App> out, String category, String self, int maxDensity) {
         Intent q = new Intent(Intent.ACTION_MAIN).addCategory(category);
         for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
             ActivityInfo ai = ri.activityInfo;
@@ -59,15 +71,63 @@ final class AppRepo {
             App a = new App();
             a.pkg = ai.packageName;
             a.label = String.valueOf(ri.loadLabel(pm)).trim();
-            a.banner = ai.loadBanner(pm);
-            if (a.banner == null) a.banner = ai.applicationInfo.loadBanner(pm);
-            a.icon = ri.loadIcon(pm);
+            a.banner = loadBannerHighRes(pm, ai, maxDensity);
+            a.icon = loadIconHighRes(pm, ri, ai);
             a.color = colorOf(a.banner != null ? a.banner : a.icon);
             a.launch = new Intent(Intent.ACTION_MAIN).addCategory(category)
                     .setClassName(ai.packageName, ai.name)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
             out.put(a.pkg, a);
         }
+    }
+
+    /** Loads the highest-density banner the screen needs, without enlarging lower-density assets. */
+    private static Drawable loadBannerHighRes(PackageManager pm, ActivityInfo ai, int maxDensity) {
+        int resId = ai.banner != 0 ? ai.banner : ai.applicationInfo.banner;
+        if (resId != 0) {
+            Drawable d = forDensity(pm, ai.applicationInfo, resId, maxDensity);
+            if (d != null) return d;
+        }
+        Drawable b = ai.loadBanner(pm);
+        return b != null ? b : ai.applicationInfo.loadBanner(pm);
+    }
+
+    /** Loads the highest-density icon (640dpi xxxhdpi) available in the package's resources. */
+    private static Drawable loadIconHighRes(PackageManager pm, ResolveInfo ri, ActivityInfo ai) {
+        int resId = ri.getIconResource();
+        if (resId == 0) resId = ai.getIconResource();
+        if (resId != 0) {
+            Drawable d = forDensity(pm, ai.applicationInfo, resId, DisplayMetrics.DENSITY_XXXHIGH);
+            if (d != null) return d;
+        }
+        return ri.loadIcon(pm);
+    }
+
+    private static Drawable forDensity(PackageManager pm, android.content.pm.ApplicationInfo app, int resId, int maxDensity) {
+        try {
+            android.content.res.Resources r = pm.getResourcesForApplication(app);
+            int[] densities = {
+                    DisplayMetrics.DENSITY_XXXHIGH,
+                    DisplayMetrics.DENSITY_XXHIGH,
+                    DisplayMetrics.DENSITY_XHIGH
+            };
+            TypedValue v = new TypedValue();
+            for (int density : densities) {
+                if (density > maxDensity) continue;
+                try {
+                    // ResourcesImpl scales a lower-density bitmap up to the requested density in RAM;
+                    // if the package only has a lower density, ask for its own density to keep it 1:1.
+                    r.getValueForDensity(resId, density, v, true);
+                    int d = v.density > 0 && v.density != TypedValue.DENSITY_NONE && v.density < density
+                            ? v.density : density;
+                    Drawable dr = r.getDrawableForDensity(resId, d, null);
+                    if (dr != null) return dr;
+                } catch (Exception ignored) {
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     /** A vivid representative colour for the focus glow (saturation-weighted mean hue). */

@@ -10,6 +10,8 @@ import java.util.Set;
 
 /** Aura's own choices, all in one place with their defaults. */
 final class Prefs {
+    /** The Smart Stack's optional cards: new releases from TVmaze's schedule, and suggested apps. */
+    static final String STACK_NEW = "set_stack_new", STACK_APPS = "set_stack_apps";
     static final String GLASS_TILES = "set_glass_tiles", NAMES_ALWAYS = "set_names_always", STACK_AUTO = "set_stack_auto",
             MOMENTS = "set_moments", PICKS = "set_picks", WEATHER = "set_weather", DAILY = "set_daily", HIDDEN = "set_hidden",
             MINE_ONLY = "set_mine_only", BLACK = "set_black", TOP_SHELF = "set_top_shelf", PARALLAX = "set_parallax",
@@ -27,7 +29,15 @@ final class Prefs {
         return c.getSharedPreferences("aura", Context.MODE_PRIVATE);
     }
 
+    /**
+     * Where the wall's photographs come from, each on or off (Settings → Wallpaper → Photo sources).
+     * Spotlight and Bing need nothing; Unsplash needs your own free key, sent from your phone.
+     */
+    static final String SRC_SPOTLIGHT = "src_spotlight", SRC_BING = "src_bing", SRC_WIKIMEDIA = "src_wikimedia",
+            SRC_WALLHAVEN = "src_wallhaven", SRC_UNSPLASH = "src_unsplash", UNSPLASH_KEY = "unsplash_key";
+
     static boolean on(Context c, String key) {
+        if (SRC_WIKIMEDIA.equals(key) || SRC_WALLHAVEN.equals(key) || SRC_UNSPLASH.equals(key)) return of(c).getBoolean(key, false);
         // everything starts on, except always-visible app names, only your own photos and pure black;
         // flyovers download video, so they wait until asked for; and live pictures of inputs, which
         // some TVs draw over the whole screen (a soundbar on HDMI: black, with sound)
@@ -40,24 +50,65 @@ final class Prefs {
     }
 
     static final String TILE_STYLE = "set_tile_style";
-    static final String[] TILE_STYLES = {"glass", "vivid", "midnight", "original"};
-    static final String[] TILE_NAMES = {"Glass", "Vivid", "Midnight", "Original banners"};
+    static final String[] TILE_STYLES = {"tvos", "glass", "vivid", "midnight", "original"};
+    static final String[] TILE_NAMES = {"Apple TV", "Glass", "Vivid", "Midnight", "Original banners"};
+
+    /** Apps a row holds: large tiles, or more of your apps on screen at once, as on tvOS. */
+    static final String GRID = "set_grid";
+    /** Two rows of apps with the rest on pages to the side (on), or one long grid scrolling down. */
+    static final String GRID_PAGES = "set_grid_pages";
+    static final int[] GRID_COLS = {5, 6, 7};
+    static final String[] GRID_NAMES = {"Large · 5 a row", "Compact · 6 a row", "Dense · 7 a row"};
+
+    static int gridCols(Context c) {
+        int n = of(c).getInt(GRID, 5);
+        return n >= 5 && n <= 7 ? n : 5;
+    }
 
     /** How app tiles look; from before there were four, the old glass switch decides. */
     static String tileStyle(Context c) {
         String s = of(c).getString(TILE_STYLE, null);
-        return s != null ? s : on(c, GLASS_TILES) ? "glass" : "original";
+        return s != null ? s : tvos(c) ? "tvos" : on(c, GLASS_TILES) ? "glass" : "original";
     }
 
-    /** The screensaver's scene; Auto chooses by the light and the weather (see Ambient). */
+    /** The screensaver's scene: the photographs, famous quotes over them, or Auto, the two by turns (see Ambient). */
     static final String SAVER = "set_saver";
-    static final String[] SAVERS = {"auto", "museum", "wind", "sky", "space", "mosaic", "photos"};
-    static final String[] SAVER_NAMES = {"Auto", "Museum", "Live wind", "Tonight's sky", "Earth from space", "Photo mosaic",
-            "Photographs"};
+    static final String[] SAVERS = {"auto", "photos", "sayings"};
+    static final String[] SAVER_NAMES = {"Auto", "Photographs", "Famous quotes"};
 
     static String saver(Context c) {
         String s = of(c).getString(SAVER, "auto");
         return java.util.Arrays.asList(SAVERS).contains(s) ? s : "auto";
+    }
+
+    /**
+     * The home screen's style: "aura" (the sidebar, widgets, then apps) or "tvos" (apps alone on a
+     * frosted dock low on the screen, the photograph above, as on Apple TV). With the tvOS style the
+     * sidebar is hidden unless {@link #DOCK_SIDEBAR} brings it back, sliding in from the left.
+     */
+    static final String LAYOUT = "set_layout", DOCK_SIDEBAR = "set_dock_sidebar", DOCK_WIDGETS = "set_dock_widgets";
+
+    static boolean tvos(Context c) {
+        return "tvos".equals(of(c).getString(LAYOUT, "aura"));
+    }
+
+    static boolean dockSidebar(Context c) {
+        return of(c).getBoolean(DOCK_SIDEBAR, false);
+    }
+
+    static boolean dockWidgets(Context c) {
+        return of(c).getBoolean(DOCK_WIDGETS, false);
+    }
+
+    static final String NAME_MODE = "set_name_mode";
+    static final String[] NAME_MODES = {"tvos", "focus", "always", "hidden"};
+    static final String[] NAME_LABELS = {"Hidden on dock · tvOS", "On focus", "Always", "Hidden"};
+
+    static String nameMode(Context c) {
+        String m = of(c).getString(NAME_MODE, null);
+        if (m != null && java.util.Arrays.asList(NAME_MODES).contains(m)) return m;
+        if (on(c, NAMES_ALWAYS)) return "always";
+        return tvos(c) ? "tvos" : "focus";
     }
 
     static final String WIDGET_ORDER = "set_widget_order", WIDGETS_HIDDEN = "set_widgets_hidden";

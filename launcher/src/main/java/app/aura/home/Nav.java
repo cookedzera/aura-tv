@@ -15,6 +15,7 @@ final class Nav {
     private Nav() { }
 
     static View next(List<View> items, View from, int direction) {
+        if (from == null) return null;
         Rect f = rect(from, A);
         View best = null;
         float bestScore = Float.MAX_VALUE;

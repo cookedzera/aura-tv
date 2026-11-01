@@ -4,8 +4,8 @@ param(
     [string]$Tv = $env:AURA_TV,
     [switch]$DisableGoogleHome,  # also retire the Google TV home + its setup fallback (reversible)
     [switch]$NearbyWifi          # turn on location services so Control Center can list nearby Wi-Fi
-if (-not $Tv) { throw "Pass the TV's address, e.g. -Tv 192.168.1.50:5555, or set `$env:AURA_TV." }
 )
+if (-not $Tv) { throw "Pass the TV's address, e.g. -Tv 192.168.1.50:5555, or set `$env:AURA_TV." }
 $ErrorActionPreference = "Stop"
 $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 if (-not (Test-Path $adb)) { $adb = "adb" }
