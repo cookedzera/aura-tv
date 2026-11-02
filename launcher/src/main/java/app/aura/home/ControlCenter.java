@@ -679,13 +679,17 @@ final class ControlCenter {
     private void refreshVpn() {
         List<String> apps = Vpn.apps(act);
         boolean on = Vpn.on(act);
-        if (!on && apps.isEmpty()) {
+        String mine = Vpn.chosen(act, apps);
+        showVpn(apps.isEmpty(), on, mine != null ? Vpn.label(act, mine) : null);
+    }
+
+    private void showVpn(boolean noApps, boolean on, String name) {
+        if (!on && noApps) {
             if (vpnPill.hasFocus()) wifi.requestFocus();
             vpnPill.setVisibility(View.GONE);
             return;
         }
-        String mine = Vpn.chosen(act, apps);
-        vpnText.setText("VPN  ·  " + (on ? "Connected" : "Off") + (mine != null ? "  ·  " + Vpn.label(act, mine) : ""));
+        vpnText.setText("VPN  ·  " + (on ? "Connected" : "Off") + (name != null ? "  ·  " + name : ""));
         vpnText.setAlpha(on ? 1f : 0.75f);
         vpnPill.setVisibility(View.VISIBLE);
     }
@@ -752,7 +756,10 @@ final class ControlCenter {
     }
 
     private void refreshNotes() {
-        List<MediaWatch.Note> list = MediaWatch.notes(act, noteRows.length);
+        showNotes(MediaWatch.notes(act, noteRows.length));
+    }
+
+    private void showNotes(List<MediaWatch.Note> list) {
         notesShown.clear();
         notesShown.addAll(list);
         long now = System.currentTimeMillis();
@@ -1017,23 +1024,56 @@ final class ControlCenter {
 
     // ---- live state --------------------------------------------------------------------------
 
+    /** Each refresh's readings, so an older one arriving late doesn't paint over a newer one. */
+    private int readGen;
+
     void refresh() {
         buildSegments();
         volume.sync();
-        // what the picture and the sound are doing now, under their buttons
-        caption(picture, pictureLine());
-        caption(sound, soundLine());
-        refreshVpn();
-        refreshNotes();
-        boolean online = Compat.onWifi(Compat.svc(act, ConnectivityManager.class), true);
-        wifi.setOn(online);
-        wifiCap.setText(online ? "Wi-Fi" : "Offline");
-        BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
-        boolean btOn = ba != null && ba.isEnabled();
-        bt.setOn(btOn);
-        btCap.setText(btOn ? btSheet.connectedName() : "Bluetooth off");
         refreshSleep();
-        refreshMemory();
+        // the rest are calls into Android (the picture and sound, VPN apps, notifications and their
+        // apps, Wi-Fi, Bluetooth, memory): read off the main thread, then shown. Just after a restart
+        // Android answers them slowly, and on the main thread they held the remote for seconds
+        final int gen = ++readGen;
+        final int noteMax = noteRows.length;
+        new SafeThread(() -> {
+            final String pic = pictureLine(), snd = soundLine();
+            List<String> apps = Vpn.apps(act);
+            final boolean vpnOn = Vpn.on(act), noVpnApps = apps.isEmpty();
+            String mine = Vpn.chosen(act, apps);
+            final String vpnName = mine != null ? Vpn.label(act, mine) : null;
+            final List<MediaWatch.Note> notes = MediaWatch.notes(act, noteMax);
+            final java.util.Map<String, Object[]> faces = new java.util.HashMap<>();
+            PackageManager pm = act.getPackageManager();
+            for (MediaWatch.Note n : notes) {
+                if (faces.containsKey(n.pkg)) continue;
+                try {
+                    faces.put(n.pkg, new Object[]{String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(n.pkg, 0))), pm.getApplicationIcon(n.pkg)});
+                } catch (Exception e) {
+                    faces.put(n.pkg, new Object[]{n.pkg, null});
+                }
+            }
+            final boolean online = Compat.onWifi(Compat.svc(act, ConnectivityManager.class), true);
+            BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
+            final boolean btOn = ba != null && ba.isEnabled();
+            final String btName = btOn ? btSheet.connectedName() : "Bluetooth off";
+            final ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+            Compat.svc(act, ActivityManager.class).getMemoryInfo(mi);
+            act.runOnUiThread(() -> {
+                if (gen != readGen || act.isDestroyed()) return;
+                // what the picture and the sound are doing now, under their buttons
+                caption(picture, pic);
+                caption(sound, snd);
+                showVpn(noVpnApps, vpnOn, vpnName);
+                for (java.util.Map.Entry<String, Object[]> e : faces.entrySet()) if (!appFaces.containsKey(e.getKey())) appFaces.put(e.getKey(), e.getValue());
+                showNotes(notes);
+                wifi.setOn(online);
+                wifiCap.setText(online ? "Wi-Fi" : "Offline");
+                bt.setOn(btOn);
+                btCap.setText(btName);
+                showMemory(mi);
+            });
+        }, "cc-read").start();
         refreshDay();
     }
 
@@ -1054,6 +1094,10 @@ final class ControlCenter {
     private void refreshMemory() {
         ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
         Compat.svc(act, ActivityManager.class).getMemoryInfo(mi);
+        showMemory(mi);
+    }
+
+    private void showMemory(ActivityManager.MemoryInfo mi) {
         ring.set(mi.totalMem > 0 ? mi.availMem / (float) mi.totalMem : 0f);
         boostValue.setText(mi.availMem / (1024 * 1024) + " MB free");
     }

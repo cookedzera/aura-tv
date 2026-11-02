@@ -82,11 +82,15 @@ final class Trouble {
         write(kind, null, text);
     }
 
-    private static synchronized void write(String kind, String where, String body) {
-        Context c = app;
+    /** Entries noted on the main thread, not yet on disk: readers see them all the same. */
+    private static final List<String> pending = new ArrayList<>();
+    private static java.util.concurrent.ExecutorService saver;
+
+    private static void write(String kind, String where, String body) {
+        final Context c = app;
         if (c == null) return;
+        final String entry;
         try {
-            List<String> entries = entries(c);
             StringBuilder b = new StringBuilder();
             b.append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date()))
                     .append("  ").append(kind);
@@ -95,7 +99,38 @@ final class Trouble {
             if (body != null && !body.isEmpty()) b.append('\n').append(body);
             // also in Android's own log, for tools/diagnose.ps1 (adb logcat -s Aura)
             android.util.Log.w("Aura", b.toString());
-            entries.add(b.toString());
+            entry = b.toString();
+        } catch (Throwable ignored) {
+            return;
+        }
+        // on the main thread (a key press, an app that wouldn't open) the file is written behind
+        // the screen: reading, rewriting and syncing it there held the remote. A crash is written
+        // at once: the process is on its way out
+        if (!"CRASH".equals(kind) && Looper.myLooper() == Looper.getMainLooper()) {
+            java.util.concurrent.ExecutorService s;
+            synchronized (Trouble.class) {
+                pending.add(entry);
+                if (saver == null) saver = Compat.background("trouble", android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                s = saver;
+            }
+            s.execute(() -> save(c, entry, true));
+        } else {
+            save(c, entry, false);
+        }
+    }
+
+    private static synchronized void save(Context c, String entry, boolean queued) {
+        // cleared (Settings → Problem reports) while it waited: it goes with the rest
+        if (queued && !pending.remove(entry)) return;
+        try {
+            List<String> entries = saved(c);
+            // written at once (a crash, or off the main thread): any still waiting go first, in order,
+            // so a crash just after a noted error doesn't take that note with it
+            if (!queued) {
+                entries.addAll(pending);
+                pending.clear();
+            }
+            entries.add(entry);
             while (entries.size() > MAX_ENTRIES) entries.remove(0);
             StringBuilder all = new StringBuilder();
             for (String e : entries) all.append(all.length() > 0 ? SEP : "").append(e);
@@ -143,7 +178,15 @@ final class Trouble {
         return new File(c.getFilesDir(), FILE);
     }
 
-    private static List<String> entries(Context c) {
+    /** Every entry: those on disk, then any still on their way there. */
+    private static synchronized List<String> entries(Context c) {
+        List<String> out = saved(c);
+        out.addAll(pending);
+        while (out.size() > MAX_ENTRIES) out.remove(0);
+        return out;
+    }
+
+    private static List<String> saved(Context c) {
         List<String> out = new ArrayList<>();
         File f = file(c);
         if (!f.isFile()) return out;
@@ -159,13 +202,14 @@ final class Trouble {
 
     /** How many entries are kept: Settings shows it. */
     static synchronized int count(Context c) {
-        if (known < 0) known = entries(c).size();
-        return known;
+        if (known < 0) known = saved(c).size();
+        return Math.min(MAX_ENTRIES, known + pending.size());
     }
 
     static synchronized void clear(Context c) {
         //noinspection ResultOfMethodCallIgnored
         file(c).delete();
+        pending.clear();
         known = 0;
         Prefs.device(c).edit().putInt("trouble_bg_kills", 0).apply();
     }

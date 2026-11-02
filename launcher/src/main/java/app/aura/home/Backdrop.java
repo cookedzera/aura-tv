@@ -406,8 +406,13 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
                 }
             }
         }
-        if (incoming == null && !loading && now >= nextAt && (walls.size() > 1 || wanted != null || stale) && current != null) {
-            load(index + 1, false);
+        if (incoming == null && !loading && now >= nextAt && current != null) {
+            // the list looked at again each turn (a file date or two): with a single photograph on
+            // the wall nothing loaded, so nothing ever re-read it, and a source switched off (its
+            // photographs removed) or new ones imported went unseen until Aura started again
+            refreshWalls();
+            if (!walls.isEmpty() && (walls.size() > 1 || wanted != null || stale || !onWall(current.wall))) load(index + 1, false);
+            else nextAt = now + showMs;
         }
         Choreographer ch = Choreographer.getInstance();
         if (fade || parallax || incoming != null) ch.postFrameCallback(this);
@@ -626,6 +631,14 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         return w.onDisk() ? w.path : w.black ? "black" : w.file;
     }
 
+    /** {@code w} is still among the photographs (not removed with its source, or by hand). */
+    private boolean onWall(Wallpaper w) {
+        if (w == null) return true;
+        String k = key(w);
+        for (Wallpaper x : walls) if (k.equals(key(x))) return true;
+        return false;
+    }
+
     /**
      * The next photograph, from a shuffled deck the home screen and the screensaver share. Each kept
      * its own place in the rotation before, and the home screen wrote its (older) place back over
@@ -659,10 +672,13 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             deck.clear();
             for (String k : at.keySet()) if (!recent.contains(k)) deck.add(k);
             java.util.Collections.shuffle(deck, rnd);
+            int unseen = deck.size();
             deck.addAll(recent);
             known.clear();
             known.addAll(at.keySet());
-            pick = suiting(deck, at, phase);
+            // the light's own cards first, but never one just shown: with a single night photograph
+            // in the collection, every reshuffle dealt it again and it stayed on all evening
+            pick = suiting(deck.subList(0, unseen), at, phase);
             if (pick < 0) pick = 0;
         }
         String k = deck.remove(pick);
