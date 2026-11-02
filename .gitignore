@@ -19,3 +19,7 @@
 /mockups/
 __pycache__/
 *.pyc
+
+# Test output
+/tests/target/
+/tests/hs_err_pid*.log

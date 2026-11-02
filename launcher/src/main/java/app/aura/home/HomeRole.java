@@ -105,6 +105,7 @@ final class HomeRole {
             }
         }
         try {
+            HomeKeys.letTvHomePass();
             a.startActivity(new Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             return true;
         } catch (RuntimeException e) {
@@ -198,6 +199,7 @@ final class HomeRole {
         Intent i = accessibilityPage(a);
         if (i == null) return false;
         try {
+            HomeKeys.letTvHomePass();
             a.startActivity(i);
             return true;
         } catch (RuntimeException e) {

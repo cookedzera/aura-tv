@@ -256,7 +256,7 @@ final class Switcher extends FrameLayout {
     private final TextView zoomName;
     private final GradientDrawable zoomBg;
     private final RectF zoomFrom = new RectF();
-    private ValueAnimator zoomAnim, breathe;
+    private ValueAnimator zoomAnim;
     private boolean launching;
 
     /**
@@ -357,8 +357,8 @@ final class Switcher extends FrameLayout {
     }
 
     /**
-     * Opening {@code a}: its card grows to fill the screen and becomes a launch screen, breathing
-     * gently, while the other cards fall away. {@code start} opens the app at once, so however long
+     * Opening {@code a}: its card grows to fill the screen and becomes a launch screen, held
+     * still, while the other cards fall away. {@code start} opens the app at once, so however long
      * it takes to appear is spent behind the launch screen rather than on a frozen switcher.
      */
     void launchInto(AppRepo.App a, Runnable start) {
@@ -393,8 +393,11 @@ final class Switcher extends FrameLayout {
 
     /** The app is in front now (or never came): everything put back, out of sight, ready for next time. */
     void reset() {
+        removeCallbacks(closeDone);
+        removeCallbacks(clearedLater);
+        closeDone = null;
+        clearedLater = null;
         if (zoomAnim != null) zoomAnim.cancel();
-        if (breathe != null) breathe.cancel();
         zoom.setVisibility(GONE);
         zoomShot.setImageBitmap(null);
         zoomMid.setAlpha(1f);
@@ -437,6 +440,13 @@ final class Switcher extends FrameLayout {
      * once: the cards do the moving.
      */
     void open(Map<String, Long> recent, String current) {
+        // opened again while the last one was still dropping away (or clearing): its end mustn't
+        // tear down this one, nor a stale fold move this one's zoom
+        removeCallbacks(closeDone);
+        removeCallbacks(clearedLater);
+        closeDone = null;
+        clearedLater = null;
+        if (zoomAnim != null) zoomAnim.cancel();
         deck.removeAllViews();
         apps.clear();
         items.clear();
@@ -573,15 +583,21 @@ final class Switcher extends FrameLayout {
         }
         shadow.animate().translationY(Ui.dp(RISE)).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT).start();
         away(200);
-        postDelayed(() -> {
+        removeCallbacks(closeDone);
+        closeDone = () -> {
+            closeDone = null;
             if (after != null) after.run();
             setVisibility(GONE);
             closing = false;
             deck.removeAllViews();
             items.clear();
             apps.clear();
-        }, 210);
+        };
+        postDelayed(closeDone, 210);
     }
+
+    /** The end of a close, and Close all's word that it's done: dropped should the deck open again first. */
+    private Runnable closeDone, clearedLater;
 
     /** Every key while it's open; false only for the ones HomeActivity handles (Back, Home). */
     boolean key(int code) {
@@ -666,7 +682,11 @@ final class Switcher extends FrameLayout {
             items.get(k).animate().translationY(-Ui.dp(420)).setStartDelay(40L * Math.abs(k - at)).setDuration(340).setInterpolator(Ui.SOFT).start();
         }
         shadow.animate().translationY(-Ui.dp(420)).setStartDelay(0).setDuration(340).setInterpolator(Ui.SOFT).start();
-        postDelayed(() -> host.cleared(n), 380 + 40L * items.size());
+        clearedLater = () -> {
+            clearedLater = null;
+            host.cleared(n);
+        };
+        postDelayed(clearedLater, 380 + 40L * items.size());
     }
 
     private Card card(int i) {
@@ -776,6 +796,10 @@ final class Switcher extends FrameLayout {
         }
         if (kept != null) {
             ((TextView) kept.getTag()).setText(when);
+            // a card hidden for a zoom that was cut short (the deck shut and opened again inside
+            // half a second) would otherwise stay blank in every later opening
+            kept.animate().cancel();
+            kept.getChildAt(1).setVisibility(VISIBLE);
             return kept;
         }
         LinearLayout col = new LinearLayout(act);

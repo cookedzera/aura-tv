@@ -78,8 +78,21 @@ final class Shield {
         return "hostname".equals(Settings.Global.getString(r, MODE)) && host(c).equals(Settings.Global.getString(r, SPECIFIER));
     }
 
-    /** Turns blocking on, remembering what was set before, or puts that back. */
-    static void set(Context c, boolean on) {
+    /**
+     * Turns blocking on, remembering what was set before, or puts that back. False when the TV
+     * refused the change (a firmware that guards Private DNS even from apps allowed at setup).
+     */
+    static boolean set(Context c, boolean on) {
+        try {
+            write(c, on);
+            return true;
+        } catch (RuntimeException e) {
+            Trouble.caught("Block ads", e);
+            return false;
+        }
+    }
+
+    private static void write(Context c, boolean on) {
         ContentResolver r = c.getContentResolver();
         if (on) {
             // remember the TV's own setting the first time only, not one of ours

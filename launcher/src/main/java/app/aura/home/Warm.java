@@ -28,11 +28,23 @@ final class Warm {
         final Context c = ctx.getApplicationContext();
         resting = true;
         if (running != null || !Adb.on(c)) return;
-        if (System.currentTimeMillis() - Prefs.device(c).getLong("warm_at", 0) < DAY - 60 * 60_000L) return;
-        running = new Thread(() -> {
+        final boolean self = selfDue(c);
+        if (!self && System.currentTimeMillis() - Prefs.device(c).getLong("warm_at", 0) < DAY - 60 * 60_000L) return;
+        running = new SafeThread(() -> {
             try {
                 // a screensaver that ends at once costs nothing
                 Thread.sleep(START_MS);
+                // Aura itself first, once for each version: Android only checks a sideloaded app's
+                // code when it's installed, and leaves compiling it for an idle night a TV switched
+                // off at the wall never has, so after every update Aura ran partly interpreted:
+                // slower to start, slower to open its pages, more dropped frames
+                if (self && resting) {
+                    List<String> out = Adb.run(c, "cmd package compile -m speed -f " + c.getPackageName());
+                    if (out != null && !out.isEmpty() && out.get(0).contains("Success")) {
+                        Prefs.device(c).edit().putInt("warm_self", version(c)).apply();
+                    }
+                }
+                if (System.currentTimeMillis() - Prefs.device(c).getLong("warm_at", 0) < DAY - 60 * 60_000L) return;
                 List<String> top = new ArrayList<>(Habits.recentList(c, openable(c), APPS).keySet());
                 int done = 0;
                 for (String p : top) {
@@ -41,7 +53,7 @@ final class Warm {
                     // already compiled this way: Android answers at once
                     List<String> out = Adb.run(c, "cmd package compile -m speed-profile " + p);
                     if (out == null) return;
-                    if (out.get(0).contains("Success")) done++;
+                    if (!out.isEmpty() && out.get(0).contains("Success")) done++;
                 }
                 Prefs.device(c).edit().putLong("warm_at", System.currentTimeMillis()).putInt("warm_n", done).apply();
             } catch (InterruptedException ignored) {
@@ -53,6 +65,20 @@ final class Warm {
         }, "warm");
         running.setPriority(Thread.MIN_PRIORITY);
         running.start();
+    }
+
+    /** Aura hasn't been compiled ahead of time since this version was installed. */
+    private static boolean selfDue(Context c) {
+        return Prefs.device(c).getInt("warm_self", 0) != version(c);
+    }
+
+    @SuppressWarnings("deprecation")
+    private static int version(Context c) {
+        try {
+            return c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionCode;
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     /** Back from the screensaver: the app being compiled finishes, the rest wait for next time. */

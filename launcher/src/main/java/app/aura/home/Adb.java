@@ -416,7 +416,10 @@ final class Adb {
         s.add(new String[]{"Smart Stack, Today", "appops set " + p + " GET_USAGE_STATS allow"});
         if (Build.VERSION.SDK_INT >= 23) s.add(new String[]{"Wi-Fi sheet", "pm grant " + p + " android.permission.ACCESS_FINE_LOCATION"});
         if (Build.VERSION.SDK_INT >= 23) s.add(new String[]{"Continue watching", "pm grant " + p + " android.permission.READ_TV_LISTINGS"});
-        if (Build.VERSION.SDK_INT >= 24) s.add(new String[]{"Now playing", "cmd notification allow_listener " + p + "/" + MediaWatch.class.getName()});
+        // "cmd notification allow_listener" arrived in Android 8.1: before it (Fire OS 6 is 7.1) this
+        // step always failed and Now playing never came on. There, Aura joins the list itself
+        if (Build.VERSION.SDK_INT >= 27) s.add(new String[]{"Now playing", "cmd notification allow_listener " + p + "/" + MediaWatch.class.getName()});
+        else s.add(new String[]{"Now playing", MediaWatch.enableCommand(c)});
         s.add(new String[]{"Standby", "dpm set-active-admin --user 0 " + p + "/" + SleepAdmin.class.getName()});
         s.add(new String[]{"Screensaver", "settings put secure screensaver_components " + p + "/" + Ambient.class.getName()});
         // the slowest: Aura compiled ahead of time opens and scrolls quicker
@@ -446,7 +449,7 @@ final class Adb {
     static void runSetup(Context c, Progress p) {
         final Context app = c.getApplicationContext();
         final String[][] steps = setup(app);
-        new Thread(() -> {
+        new SafeThread(() -> {
             int ok = 0;
             List<String> failed = new ArrayList<>();
             for (int i = 0; i < steps.length; i++) {

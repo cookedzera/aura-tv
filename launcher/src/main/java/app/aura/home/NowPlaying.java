@@ -217,20 +217,9 @@ final class NowPlaying extends FrameLayout {
         controller = null;
         lastArt = null;
         lastArtUri = null;
+        artFor = null;
         animate().alpha(0f).setDuration(260).setStartDelay(0).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> setVisibility(GONE)).start();
-    }
-
-    /**
-     * Opened as a screensaver (music left playing, nobody pressing anything): just the cover and the
-     * song from the start, the controls already away.
-     */
-    void restNow() {
-        handler.removeCallbacks(rest);
-        controls.animate().cancel();
-        controls.setAlpha(0f);
-        controls.setTranslationY(Ui.dp(10));
-        app.setAlpha(0.45f);
     }
 
     /** A button was pressed: the controls come back, and rest again after a while. */
@@ -245,6 +234,8 @@ final class NowPlaying extends FrameLayout {
 
     private Bitmap lastArt;
     private String lastArtUri, fetching;
+    /** The song the cover on show belongs to. */
+    private String artFor;
 
     private interface Action {
         void run(MediaController.TransportControls t);
@@ -280,19 +271,38 @@ final class NowPlaying extends FrameLayout {
             Bitmap cached = MediaWatch.cachedArt(uri);
             // the app's own picture is often a thumbnail: the full-size one from its link, when there is one
             if (cached != null && (b == null || cached.getWidth() > b.getWidth())) b = cached;
-            if (b != null) setArt(b);
-            else if (lastArt == null) appIcon();
+            if (b != null) {
+                setArt(b);
+                artFor = t;
+            } else if (lastArt == null || uri == null && !java.util.Objects.equals(t, artFor)) {
+                // a new song with no cover at all: the last song's cover and colours don't stay behind
+                lastArt = null;
+                artFor = t;
+                appIcon();
+            }
             if (uri != null && (b == null || b.getWidth() < SHARP_PX) && !uri.equals(fetching) && !uri.equals(lastArtUri)) {
                 fetching = uri;
                 final String want = uri;
-                new Thread(() -> {
+                new SafeThread(() -> {
                     Bitmap loaded = Continue.load(act, want);
                     handler.post(() -> {
                         if (want.equals(fetching)) fetching = null;
-                        if (loaded == null) return;
+                        boolean current = isOpen() && want.equals(MediaWatch.extractArtUri(controller != null ? controller.getMetadata() : null));
+                        if (loaded == null) {
+                            // its cover couldn't be had: the last song's isn't left standing in for it
+                            if (current && lastArt != null && !java.util.Objects.equals(shownTitle, artFor)) {
+                                lastArt = null;
+                                artFor = shownTitle;
+                                appIcon();
+                            }
+                            return;
+                        }
                         lastArtUri = want;
                         MediaWatch.cacheArt(want, loaded);
-                        if (isOpen() && want.equals(MediaWatch.extractArtUri(controller != null ? controller.getMetadata() : null))) setArt(loaded);
+                        if (current) {
+                            setArt(loaded);
+                            artFor = shownTitle;
+                        }
                     });
                 }, "np-art").start();
             }

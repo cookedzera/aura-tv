@@ -53,6 +53,29 @@ final class TopShelf extends FrameLayout {
         shown = null;
     }
 
+    /** Cards for {@code pkg} were found a moment ago: they can show almost at once. */
+    static boolean cached(String pkg) {
+        synchronized (CACHE) {
+            Object[] hit = CACHE.get(pkg);
+            return hit != null && SystemClock.elapsedRealtime() - (Long) hit[0] < 120_000;
+        }
+    }
+
+    /** On screen (or fading), whatever app it's for. */
+    boolean up() {
+        return getVisibility() == VISIBLE;
+    }
+
+    /**
+     * Focus moved to another app: these cards are no longer its, so they fade at once rather than
+     * stand over the new app (in its colour) until the new app's cards arrive.
+     */
+    void fade() {
+        if (getVisibility() != VISIBLE) return;
+        shown = null;
+        animate().alpha(0f).translationY(0f).setDuration(140).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(null).start();
+    }
+
     static void clearCache() {
         synchronized (CACHE) {
             CACHE.clear();
@@ -94,6 +117,17 @@ final class TopShelf extends FrameLayout {
                     base.add(it);
                 }
             }
+            // an app with no rows of its own for Android (SonyLIV, and others like it): what you were
+            // watching in it, as its own player told Android while it played
+            if (base.size() < MAX) {
+                java.util.Set<String> have = new java.util.HashSet<>();
+                for (Continue.Item it : base) have.add(Continue.key(it.title));
+                for (Continue.Item it : Watched.recent(c, have, MAX - base.size(), pkg)) {
+                    if (it.art == null) continue;
+                    it.kicker = "▶  CONTINUE WATCHING";
+                    base.add(it);
+                }
+            }
             if (base.size() < MAX) {
                 for (Fresh.Show s : Fresh.load(c)) {
                     if (!pkg.equals(s.pkg) || base.size() >= MAX) continue;
@@ -117,9 +151,9 @@ final class TopShelf extends FrameLayout {
         if (mp != null) {
             List<Continue.Item> out = new ArrayList<>();
             Continue.Item live = new Continue.Item();
-            live.title = mp.title;
-            live.sub = (mp.playing ? "Playing now" : "Continue playing")
-                    + (mp.by != null && !mp.by.isEmpty() ? "  ·  " + mp.by : "");
+            // the label already says playing or paused: under the song, only who it's by
+            live.title = Ui.songTitle(mp.title);
+            live.sub = mp.by != null && !mp.by.isEmpty() ? mp.by : mp.playing ? "Playing now" : "Paused";
             live.kicker = mp.playing ? "●  NOW PLAYING" : "▶  CONTINUE PLAYING";
             live.pkg = pkg;
             live.art = MediaWatch.resolveArt(c, mp);
@@ -184,6 +218,8 @@ final class TopShelf extends FrameLayout {
     private static void fillTvosUpNext(Context c, List<Continue.Item> out) {
         for (Continue.Item it : Continue.all(c, MAX)) {
             if (out.size() >= MAX) return;
+            // a kids' profile isn't offered what it hides, as the Smart Stack already does
+            if (it.pkg != null && !HomeKeys.allowed(c, it.pkg)) continue;
             if (it.art != null && !containsTitle(out, it.title)) {
                 it.kicker = "▶  CONTINUE WATCHING";
                 out.add(it);
@@ -237,6 +273,7 @@ final class TopShelf extends FrameLayout {
     void hide() {
         shown = null;
         if (getVisibility() != VISIBLE) return;
+        animate().cancel();
         animate().alpha(0f).translationY(Ui.dp(6)).setDuration(240).setStartDelay(0).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     setVisibility(GONE);
@@ -275,7 +312,8 @@ final class TopShelf extends FrameLayout {
                         Ui.withAlpha(color, 0x58), 0x00000000, Shader.TileMode.CLAMP));
                 c.drawRect(0, 0, w, h, p);
                 p.setShader(null);
-                float ah = h * 0.72f, aw = it.posterCard ? ah * 0.68f : ah, ax = w * 0.052f, ay = (h - ah) / 2f, rad = aw * 0.18f;
+                // a song's square cover a little smaller than a poster is tall, leaving the words room
+                float ah = h * (it.posterCard ? 0.72f : 0.62f), aw = it.posterCard ? ah * 0.68f : ah, ax = w * 0.052f, ay = (h - ah) / 2f, rad = aw * 0.18f;
                 RectF cover = new RectF(ax, ay, ax + aw, ay + ah);
                 if (b != null && b.getWidth() > 0 && b.getHeight() > 0) {
                     android.graphics.BitmapShader bs = new android.graphics.BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
@@ -312,27 +350,53 @@ final class TopShelf extends FrameLayout {
                 c.drawRoundRect(cover, rad, rad, rim);
 
                 float tx = ax + aw + w * 0.045f, room = w - tx - w * 0.05f;
-                Paint t = new Paint(Paint.ANTI_ALIAS_FLAG);
-                if (it.kicker != null) {
-                    t.setTypeface(Ui.bold);
-                    t.setTextSize(h * 0.070f);
-                    t.setLetterSpacing(0.14f);
-                    t.setColor(Ui.mix(0xE6FFFFFF, color, 0.32f));
-                    c.drawText(it.kicker, tx, h * 0.35f, t);
-                }
-                t.setLetterSpacing(0f);
+                // the words as a block, centred beside the cover: the label, the name (on two lines,
+                // a little smaller, before anything is cut short), the line under it, how far in
+                android.text.TextPaint k = new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
+                k.setTypeface(Ui.bold);
+                k.setTextSize(h * 0.066f);
+                k.setLetterSpacing(0.14f);
+                k.setColor(Ui.mix(0xE6FFFFFF, color, 0.32f));
+                android.text.TextPaint t = new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
                 t.setTypeface(Ui.heavy);
                 t.setColor(0xFFFFFFFF);
-                t.setTextSize(h * 0.132f);
-                c.drawText(TextUtils.ellipsize(it.title != null ? it.title : "", new android.text.TextPaint(t), room, TextUtils.TruncateAt.END).toString(), tx, h * 0.55f, t);
-                if (it.sub != null && !it.sub.isEmpty()) {
-                    t.setTypeface(Ui.medium);
-                    t.setTextSize(h * 0.086f);
-                    t.setColor(0xCCFFFFFF);
-                    c.drawText(TextUtils.ellipsize(it.sub, new android.text.TextPaint(t), room, TextUtils.TruncateAt.END).toString(), tx, h * 0.69f, t);
+                String[] name = lines(it.title, t, room, h * 0.13f, h * 0.112f, h * 0.088f);
+                android.text.TextPaint u = new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
+                u.setTypeface(Ui.medium);
+                u.setColor(0xCCFFFFFF);
+                u.setTextSize(h * 0.084f);
+                boolean hasSub = it.sub != null && !it.sub.isEmpty();
+                // the line under the name: two lines of its own when there's the height (the name on
+                // one line, or no progress bar below)
+                String[] subLines = !hasSub ? new String[0] : name.length == 1 || it.progress <= 0f
+                        ? lines(it.sub, u, room, h * 0.084f, h * 0.074f, h * 0.066f) : null;
+                if (hasSub && subLines == null) {
+                    shrink(u, it.sub, room, h * 0.064f);
+                    subLines = new String[]{TextUtils.ellipsize(it.sub, u, room, TextUtils.TruncateAt.END).toString()};
+                }
+                if (it.kicker != null) shrink(k, it.kicker, room, h * 0.054f);
+                float bh = Math.max(Ui.dpf(3.5f), h * 0.030f);
+                float kh = it.kicker != null ? h * 0.066f + h * 0.05f : 0, lh = t.getTextSize() * 1.12f;
+                float block = kh + lh * name.length + (hasSub ? h * 0.03f + u.getTextSize() * 1.1f * subLines.length : 0) + (it.progress > 0f ? h * 0.07f + bh : 0);
+                float y = ay + (ah - block) / 2f;
+                if (it.kicker != null) {
+                    y += h * 0.066f;
+                    c.drawText(TextUtils.ellipsize(it.kicker, k, room, TextUtils.TruncateAt.END).toString(), tx, y, k);
+                    y += h * 0.05f;
+                }
+                for (String line : name) {
+                    y += lh;
+                    c.drawText(line, tx, y - lh * 0.2f, t);
+                }
+                if (hasSub) {
+                    y += h * 0.03f;
+                    for (String line : subLines) {
+                        y += u.getTextSize() * 1.1f;
+                        c.drawText(line, tx, y - u.getTextSize() * 0.1f, u);
+                    }
                 }
                 if (it.progress > 0f) {
-                    float py = h * 0.81f, bh = Math.max(Ui.dpf(3.5f), h * 0.030f);
+                    float py = y + h * 0.07f;
                     p.setColor(0x33FFFFFF);
                     c.drawRoundRect(new RectF(tx, py, tx + room, py + bh), bh / 2f, bh / 2f, p);
                     p.setColor(0xF5FFFFFF);
@@ -351,38 +415,79 @@ final class TopShelf extends FrameLayout {
             p.setShader(new LinearGradient(0, h * 0.28f, 0, h, 0x00000000, 0xE0000000, Shader.TileMode.CLAMP));
             c.drawRect(0, 0, w, h, p);
             p.setShader(null);
-            Paint t = new Paint(Paint.ANTI_ALIAS_FLAG);
+            // laid out from the bottom up: how far in, the line under the name, the name (two lines
+            // if it needs them, a little smaller, before anything is cut short), the label above
             float x = w * 0.07f, room = w * 0.86f;
             String kicker = it.kicker != null ? it.kicker : it.progress > 0f ? "▶  CONTINUE WATCHING" : null;
             boolean hasSub = it.sub != null && !it.sub.isEmpty();
-            float base = hasSub ? (it.progress > 0f ? h * 0.75f : h * 0.80f) : (it.progress > 0f ? h * 0.83f : h * 0.88f);
-            if (kicker != null) {
-                t.setTypeface(Ui.bold);
-                t.setTextSize(h * 0.068f);
-                t.setLetterSpacing(0.14f);
-                t.setColor(0xCCFFFFFF);
-                c.drawText(kicker, x, base - h * 0.16f, t);
-            }
-            t.setLetterSpacing(0f);
+            android.text.TextPaint t = new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
             t.setTypeface(Ui.heavy);
             t.setColor(0xFFFFFFFF);
-            t.setTextSize(h * 0.135f);
-            c.drawText(TextUtils.ellipsize(it.title != null ? it.title : "", new android.text.TextPaint(t), room, TextUtils.TruncateAt.END).toString(), x, base, t);
-            if (hasSub) {
-                t.setTypeface(Ui.medium);
-                t.setTextSize(h * 0.085f);
-                t.setColor(0xCCFFFFFF);
-                c.drawText(TextUtils.ellipsize(it.sub, new android.text.TextPaint(t), room, TextUtils.TruncateAt.END).toString(),
-                        x, it.progress > 0f ? h * 0.86f : h * 0.91f, t);
-            }
+            String[] name = lines(it.title, t, room, h * 0.135f, h * 0.115f, h * 0.092f);
+            android.text.TextPaint u = new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
+            u.setTypeface(Ui.medium);
+            u.setColor(0xCCFFFFFF);
+            u.setTextSize(h * 0.085f);
+            if (hasSub) shrink(u, it.sub, room, h * 0.066f);
+            float y = h * (it.progress > 0f ? 0.925f : 0.95f);
             if (it.progress > 0f) {
-                float y = h * 0.925f, bh = Math.max(Ui.dpf(3), h * 0.026f);
+                float bh = Math.max(Ui.dpf(3), h * 0.026f);
                 p.setColor(0x40FFFFFF);
                 c.drawRoundRect(new RectF(x, y, x + room, y + bh), bh / 2f, bh / 2f, p);
                 p.setColor(0xF2FFFFFF);
-                c.drawRoundRect(new RectF(x, y, x + room * it.progress, y + bh), bh / 2f, bh / 2f, p);
+                c.drawRoundRect(new RectF(x, y, x + room * Math.min(1f, it.progress), y + bh), bh / 2f, bh / 2f, p);
+                y -= h * 0.05f;
+            }
+            if (hasSub) {
+                c.drawText(TextUtils.ellipsize(it.sub, u, room, TextUtils.TruncateAt.END).toString(), x, y, u);
+                y -= u.getTextSize() + h * 0.04f;
+            }
+            float lh = t.getTextSize() * 1.1f;
+            for (int i = name.length - 1; i >= 0; i--) {
+                c.drawText(name[i], x, y, t);
+                y -= lh;
+            }
+            if (kicker != null) {
+                android.text.TextPaint k = new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
+                k.setTypeface(Ui.bold);
+                k.setTextSize(h * 0.068f);
+                k.setLetterSpacing(0.14f);
+                k.setColor(0xCCFFFFFF);
+                c.drawText(TextUtils.ellipsize(kicker, k, room, TextUtils.TruncateAt.END).toString(), x, y + lh - t.getTextSize() - h * 0.035f, k);
             }
         };
+    }
+
+    /**
+     * {@code text} in {@code t} within {@code room}: one line from {@code big} down to {@code one};
+     * failing that two lines, from {@code one} down to {@code small}, broken between words; only
+     * what still doesn't fit is shortened at its end. Leaves {@code t} at the size chosen.
+     */
+    static String[] lines(String text, android.text.TextPaint t, float room, float big, float one, float small) {
+        String s = text == null ? "" : text.trim();
+        for (float size = big; size >= one; size -= big * 0.04f) {
+            t.setTextSize(size);
+            if (t.measureText(s) <= room) return new String[]{s};
+        }
+        for (float size = one; ; size -= one * 0.04f) {
+            if (size < small) size = small;
+            t.setTextSize(size);
+            int n = t.breakText(s, true, room, null);
+            int cut = n;
+            if (n < s.length()) {
+                int space = s.lastIndexOf(' ', n);
+                if (space > 0) cut = space;
+            }
+            String first = s.substring(0, cut).trim(), rest = s.substring(cut).trim();
+            if (t.measureText(rest) <= room || size <= small) {
+                return new String[]{first, TextUtils.ellipsize(rest, t, room, TextUtils.TruncateAt.END).toString()};
+            }
+        }
+    }
+
+    /** One line: smaller, down to {@code min}, until {@code text} fits. */
+    static void shrink(android.text.TextPaint t, String text, float room, float min) {
+        while (t.getTextSize() > min && t.measureText(text) > room) t.setTextSize(Math.max(min, t.getTextSize() * 0.95f));
     }
 
     static Intent launchFor(Continue.Item it, AppRepo.App app) {

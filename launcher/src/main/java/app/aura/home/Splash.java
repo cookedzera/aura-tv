@@ -24,7 +24,8 @@ import android.view.animation.LinearInterpolator;
 final class Splash extends View {
     private static final String WORD = "Aura", CREDIT = "cookedzera";
     /** How long the credit holds once loading has landed, before the dissolve. */
-    private static final long CREDIT_MS = 1500;
+    /** How long "welcome home" shows once the sun has landed, before the home screen comes through. */
+    private static final long CREDIT_MS = 600;
 
     private final Paint word = new Paint(Paint.ANTI_ALIAS_FLAG), caps = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint credit = new Paint(Paint.ANTI_ALIAS_FLAG), track = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -110,9 +111,20 @@ final class Splash extends View {
         if (s != null && !s.equals(status) && !s.equals(next)) next = s;
     }
 
+    /**
+     * Back after Android closed Aura to make room (long after the TV started): no credit and a short
+     * dissolve, the moment home is ready. The full sunrise is for a TV that has just been switched on.
+     */
+    boolean quick;
+
     /** Carry the sun home; once it lands and the credit has shown, {@code exit} runs as the dissolve begins, {@code gone} when it ends. */
+    /** Dissolving into home: home is on show beneath it, and the remote may move about it already. */
+    boolean exiting() {
+        return exiting;
+    }
+
     void finish(String s, Runnable exit, Runnable gone) {
-        setProgress(1f, s);
+        setProgress(1f, quick ? null : s);
         onExit = exit;
         onGone = gone;
         finishing = true;
@@ -124,7 +136,8 @@ final class Splash extends View {
         last = now;
         // ease toward the target, with a slow creep so the sun never looks stalled
         float gap = target - shown;
-        shown += Math.max(gap * Math.min(1f, dt * 4f), Math.min(gap, dt * 0.05f));
+        // once home is ready the sun hurries home: the wait was the TV's, not the animation's
+        shown += Math.max(gap * Math.min(1f, dt * (finishing ? (quick ? 16f : 9f) : 4f)), Math.min(gap, dt * 0.05f));
         if (next != null) {
             statusAlpha -= dt * 6f;
             if (statusAlpha <= 0f) {
@@ -137,8 +150,8 @@ final class Splash extends View {
         }
         if (finishing && landedAt == 0 && shown > 0.996f && next == null) landedAt = now;
         if (landedAt > 0) {
-            creditAlpha = Math.min(1f, (now - landedAt) / 500f);
-            if (!exiting && now - landedAt >= CREDIT_MS) {
+            creditAlpha = Math.min(1f, (now - landedAt) / 250f);
+            if (!exiting && now - landedAt >= (quick ? 0 : CREDIT_MS)) {
                 exiting = true;
                 dissolve();
             }
@@ -148,11 +161,12 @@ final class Splash extends View {
     private void dissolve() {
         if (onExit != null) onExit.run();
         ValueAnimator f = ValueAnimator.ofFloat(0f, 1f);
-        f.setDuration(900);
+        long fade = quick ? 400 : 600;
+        f.setDuration(fade);
         f.setInterpolator(Ui.SOFT);
         f.addUpdateListener(a -> flare = (float) a.getAnimatedValue());
         f.start();
-        animate().alpha(0f).scaleX(1.04f).scaleY(1.04f).setStartDelay(120).setDuration(900).setInterpolator(Ui.SOFT)
+        animate().alpha(0f).scaleX(1.04f).scaleY(1.04f).setStartDelay(0).setDuration(fade).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     loop.cancel();
                     if (onGone != null) onGone.run();

@@ -323,7 +323,7 @@ final class SettingsPanel {
         }
         if (!page.isEmpty()) {
             String was = page;
-            if (was.equals("drop") || was.equals("backup")) stopDrop();
+            if (was.equals("drop") || was.equals("backup") || was.equals("trouble")) stopDrop();
             page = "";
             build();
             // back on the main list, on the row that led to the page
@@ -375,7 +375,12 @@ final class SettingsPanel {
             android.media.tv.TvInputManager tim = (android.media.tv.TvInputManager) act.getSystemService(android.content.Context.TV_INPUT_SERVICE);
             for (String h : Prefs.hidden(act)) {
                 if (!h.startsWith("input:")) continue;
-                android.media.tv.TvInputInfo info = tim == null ? null : tim.getTvInputInfo(h.substring(6));
+                android.media.tv.TvInputInfo info;
+                try {
+                    info = tim == null ? null : tim.getTvInputInfo(h.substring(6));
+                } catch (RuntimeException e) {
+                    info = null;
+                }
                 String name = info != null ? String.valueOf(info.loadLabel(act)) : "An input";
                 add(name, "Hidden · OK shows it", h, () -> {
                     Prefs.hide(act, h, false);
@@ -598,6 +603,14 @@ final class SettingsPanel {
             // the stack's extras: today's releases come from the country's schedule, not your account
             toggle("New today on your apps", Prefs.STACK_NEW, "In the stack", "Left out", "cards");
             toggle("Suggested apps", Prefs.STACK_APPS, "In the stack", "Left out", "cards");
+            // cards turned down from the stack (hold OK on a card): all back at once
+            int declined = Taste.declinedCount(act);
+            if (declined > 0) add("Cards you turned down", declined + " · OK brings them back", "w:forgive", () -> {
+                Taste.forgive(act);
+                host.applied("widgets");
+                host.hud(R.drawable.ic_check, "They're back in the stack");
+                build();
+            });
             add("Original order", "", "w:reset", () -> {
                 Prefs.setWidgetOrder(act, java.util.Arrays.asList(0, 1, 2));
                 host.applied("widgets");
@@ -686,7 +699,8 @@ final class SettingsPanel {
                     break;
                 case "available":
                 case "downloading":
-                    note.setText("Aura " + release.version + " is out.\n\n" + release.notes);
+                    note.setText((installHint != null && !Updater.allowed(act) ? installHint + "\n\n" : "")
+                            + "Aura " + release.version + " is out.\n\n" + release.notes);
                     break;
                 case "error":
                     note.setText(updateNote);
@@ -700,6 +714,11 @@ final class SettingsPanel {
                         : String.format(java.util.Locale.ROOT, "%.1f MB", release.size / 1048576f), "u:install", this::installUpdate);
             }
             if (!updateState.equals("checking") && !updateState.equals("downloading")) add("Check again", "", "u:check", this::checkUpdate);
+            // the way round a TV whose installer won't take Aura's own updates (seen on Fire TV)
+            final Intent downloader = updateState.equals("error")
+                    ? act.getPackageManager().getLaunchIntentForPackage("com.esaba.downloader") : null;
+            if (downloader != null) add("Open Downloader", "Type the code 4172997", "u:downloader",
+                    () -> host.open(downloader.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), panel));
         } else if (page.equals("drop")) {
             Ui.fit(title, "From your phone", Ui.dp(300), 52, 30);
             note.setText("Point your phone's camera at the code to type on the TV, or send photos, GIFs and apps. Photos land on your wall; an app asks here before it installs.");
@@ -775,6 +794,22 @@ final class SettingsPanel {
             Ui.fit(title, "Your setup", Ui.dp(300), 52, 30);
             note.setText("Save your profiles, app order, folders, tiles and choices to your phone, and bring them back after a reinstall or on another TV. Photos stay on your phone.");
             if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
+        } else if (page.equals("trouble")) {
+            Ui.fit(title, "Problem reports", Ui.dp(300), 52, 30);
+            note.setText("When something goes wrong, Aura keeps a note: the error, and what TV this is. Nothing is sent by itself. Scan the code to read it on your phone, then copy it into a GitHub issue or a message.");
+            if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
+            if (Trouble.count(act) > 0) add("Clear them", confirmClearTrouble ? "Press OK again" : "", "trouble:clear", () -> {
+                if (!confirmClearTrouble) {
+                    confirmClearTrouble = true;
+                    build();
+                    focusTag("trouble:clear");
+                    return;
+                }
+                confirmClearTrouble = false;
+                Trouble.clear(act);
+                host.hud(R.drawable.ic_check, "Problem reports cleared");
+                build();
+            });
         } else if (page.equals("art")) {
             Ui.fit(title, artLabel, Ui.dp(300), 52, 30);
             note.setText("Your own picture for its tile: a photo, a poster, a banner. Scan the code and choose one on your phone; it's cropped to fit.");
@@ -849,6 +884,17 @@ final class SettingsPanel {
             boolean manual = Prefs.device(act).getBoolean("geo_manual", false);
             String place = w != null && !w.city.isEmpty() ? w.city : "Not found yet";
             add("Weather city", (manual ? "" : "Auto · ") + place, "city", this::askCity);
+            // Auto by the TV's country, or set: OK goes round the three
+            String u = Weather.unit(act);
+            add("Temperature", u.equals("c") ? "Celsius · °C" : u.equals("f") ? "Fahrenheit · °F"
+                    : "Auto · " + (Weather.fahrenheit(act) ? "°F" : "°C"), "wx:unit", () -> {
+                String next = Weather.UNITS[(java.util.Arrays.asList(Weather.UNITS).indexOf(Weather.unit(act)) + 1) % Weather.UNITS.length];
+                Prefs.device(act).edit().putString(Weather.UNIT, next).apply();
+                // fetched again in the new unit straight away (temperatures and wind alike)
+                host.applied("weather");
+                build();
+                focusTag("wx:unit");
+            });
             if (manual) add("Use my connection's city", "", "auto", () -> {
                 Prefs.device(act).edit().putBoolean("geo_manual", false).putLong("geo_at", 0).putLong("wx_at", 0).apply();
                 host.applied("weather");
@@ -862,6 +908,9 @@ final class SettingsPanel {
             add("Android settings", "", "android", () -> host.open(new Intent(Settings.ACTION_SETTINGS), panel));
             section("AURA");
             add("Your setup", "Save to your phone, or bring it back", "backup", this::openBackup);
+            int problems = Trouble.count(act);
+            add("Problem reports", problems == 0 ? "None lately" : problems + (problems == 1 ? " note" : " notes") + " · read on your phone",
+                    "trouble", this::openTrouble);
             String waiting = Updater.pending(act);
             add("Updates", waiting != null ? "Aura " + waiting + " is ready" : "Version " + Updater.installed(act), "updates", () -> {
                 // opening it counts as seen: the red dots go
@@ -995,7 +1044,7 @@ final class SettingsPanel {
         picksBusy = true;
         if (isOpen()) build();
         final android.content.Context app = act.getApplicationContext();
-        new Thread(() -> {
+        new SafeThread(() -> {
             boolean ok;
             try {
                 ok = Picks.refresh(app, true);
@@ -1046,7 +1095,7 @@ final class SettingsPanel {
             return;
         }
         host.hud(R.drawable.ic_info, "Checking the key with TMDB…");
-        new Thread(() -> {
+        new SafeThread(() -> {
             boolean ok = Picks.check(k);
             act.runOnUiThread(() -> {
                 if (!ok) {
@@ -1088,7 +1137,7 @@ final class SettingsPanel {
     private void setUnsplashKey(String k) {
         host.hud(R.drawable.ic_info, "Checking the key with Unsplash…");
         final android.content.Context app = act.getApplicationContext();
-        new Thread(() -> {
+        new SafeThread(() -> {
             boolean ok = Gallery.checkUnsplash(k);
             act.runOnUiThread(() -> {
                 if (!ok) {
@@ -1133,7 +1182,7 @@ final class SettingsPanel {
             @Override
             public void onPairCode(String code) {
                 host.hud(R.drawable.ic_info, "Pairing with the TV…");
-                new Thread(() -> {
+                new SafeThread(() -> {
                     String r = Adb.pair(act, code);
                     act.runOnUiThread(() -> {
                         adbState = r;
@@ -1177,6 +1226,21 @@ final class SettingsPanel {
         go("backup");
     }
 
+    private boolean confirmClearTrouble;
+
+    /** What went wrong lately, read on the phone behind a QR code (see {@link Trouble}). */
+    private void openTrouble() {
+        keepDrop = false;
+        stopDrop();
+        confirmClearTrouble = false;
+        drop = new Drop(act, new Drop.Quiet());
+        drop.only("/report", "/report.txt");
+        String url = drop.start();
+        keyCard = qrCard(url == null ? null : url + "/report", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
+                url != null ? "Read the report" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
+        go("trouble");
+    }
+
     private String artPkg, artLabel = "";
 
     /** An app's own picture, from the phone: opened from its tile's menu. */
@@ -1207,7 +1271,7 @@ final class SettingsPanel {
         authCard = qrCard(null, "ONE MOMENT", "Asking TMDB…", "");
         go("tmdbauth");
         final android.content.Context app = act.getApplicationContext();
-        new Thread(() -> {
+        new SafeThread(() -> {
             String t;
             try {
                 t = Picks.requestToken(app);
@@ -1235,7 +1299,7 @@ final class SettingsPanel {
         final android.content.Context app = act.getApplicationContext();
         rows.postDelayed(() -> {
             if (!token.equals(authToken) || !isOpen()) return;
-            new Thread(() -> {
+            new SafeThread(() -> {
                 boolean ok;
                 try {
                     ok = Picks.finishSignIn(app, token);
@@ -1317,7 +1381,7 @@ final class SettingsPanel {
         if (dpm != null && dpm.isAdminActive(admin)) dpm.removeActiveAdmin(admin);
         host.hud(R.drawable.ic_info, "Handing the TV back…");
         final String home = Safety.original(app);
-        new Thread(() -> {
+        new SafeThread(() -> {
             if (Adb.on(app)) Safety.restoreHome(app);
             // a moment for Android to let go of the admin before it's asked to uninstall
             android.os.SystemClock.sleep(800);
@@ -1493,7 +1557,7 @@ final class SettingsPanel {
         }
         confirmRetire = false;
         final android.content.Context app = act.getApplicationContext();
-        new Thread(() -> {
+        new SafeThread(() -> {
             Boolean took = Safety.retireGoogleHome(app, retire);
             act.runOnUiThread(() -> {
                 if (took == null) {
@@ -1541,7 +1605,7 @@ final class SettingsPanel {
         if (adbState.equals("asking") || setupRunning) return;
         adbState = "asking";
         build();
-        new Thread(() -> {
+        new SafeThread(() -> {
             String r = Adb.connect(act);
             act.runOnUiThread(() -> {
                 adbState = r;
@@ -1654,7 +1718,7 @@ final class SettingsPanel {
         city.setVisibility(View.GONE);
         String h = hostname.replaceFirst("^(tls|https)://", "").replaceAll("/.*$", "").toLowerCase(java.util.Locale.ROOT);
         host.hud(R.drawable.ic_info, "Trying " + h + "…");
-        new Thread(() -> {
+        new SafeThread(() -> {
             Shield.Probe p = Shield.probe(h);
             act.runOnUiThread(() -> {
                 if (p == null) {
@@ -1675,7 +1739,7 @@ final class SettingsPanel {
         if (probing) return;
         probing = true;
         build();
-        new Thread(() -> {
+        new SafeThread(() -> {
             String best = null;
             long bestMs = Long.MAX_VALUE;
             for (String[] f : Shield.FILTERS) {
@@ -1716,7 +1780,11 @@ final class SettingsPanel {
             build();
             return;
         }
-        Shield.set(act, true);
+        if (!Shield.set(act, true)) {
+            host.hud(R.drawable.ic_info, "This TV didn't allow it: set 94.140.14.14 as DNS in its Wi-Fi settings instead");
+            build();
+            return;
+        }
         checkShield(Shield.name(act));
     }
 
@@ -1724,7 +1792,7 @@ final class SettingsPanel {
     private void checkShield(String name) {
         shieldNote = "Checking…";
         build();
-        new Thread(() -> {
+        new SafeThread(() -> {
             String used = name;
             String tried = Shield.host(act);
             boolean ok = Shield.verify(act), port853 = ok;
@@ -1764,7 +1832,7 @@ final class SettingsPanel {
     private void checkUpdate() {
         updateState = "checking";
         build();
-        new Thread(() -> {
+        new SafeThread(() -> {
             Updater.Release r = null;
             String state;
             try {
@@ -1789,20 +1857,35 @@ final class SettingsPanel {
     private void installUpdate() {
         if (release == null || updateState.equals("downloading")) return;
         if (!Updater.allowed(act)) {
-            // Android asks once whether Aura may install apps
-            try {
-                act.startActivity(new Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES",
-                        android.net.Uri.parse("package:" + act.getPackageName())));
-            } catch (RuntimeException e) {
-                host.hud(R.drawable.ic_info, "Allow Aura to install apps: Settings, Apps, Special app access");
+            // Android asks once whether Aura may install apps. Fire TV keeps the switch in its
+            // Developer options, under a name of its own, and has no "Special app access" page
+            boolean fire = Trouble.fireTv(act);
+            // the update stays offered: back from allowing it, Install is right there
+            installHint = fire
+                    ? "Fire TV asks once whether Aura may install updates: Settings → My Fire TV → Developer options → Install unknown apps → Aura, then On. Then come back here and choose Install."
+                    : "Android asks once whether Aura may install updates: allow it on the page that opens (Settings → Apps → Special app access → Install unknown apps), then come back here and choose Install.";
+            build();
+            boolean opened = false;
+            for (Intent i : new Intent[]{
+                    new Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES", android.net.Uri.parse("package:" + act.getPackageName())),
+                    new Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES"),
+                    new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)}) {
+                if (opened || i.resolveActivity(act.getPackageManager()) == null) continue;
+                try {
+                    HomeKeys.letTvHomePass();
+                    act.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    opened = true;
+                } catch (RuntimeException ignored) {
+                }
             }
+            if (!opened) host.hud(R.drawable.ic_info, fire ? "My Fire TV → Developer options → Install unknown apps" : "Settings → Apps → Special app access");
             return;
         }
         final Updater.Release r = release;
         updateState = "downloading";
         updateNote = "Starting…";
         build();
-        new Thread(() -> {
+        new SafeThread(() -> {
             try {
                 Updater.install(act, r, (done, total) -> {
                     String t = total > 0 ? "Downloading " + Math.round(100f * done / total) + "%" : "Downloading…";
@@ -1816,8 +1899,13 @@ final class SettingsPanel {
                     updateState = "available";
                     updateNote = "";
                     if (page.equals("updates")) build();
+                    // the TV's installer should answer within seconds; one that never does (seen on
+                    // Fire TV) or that refuses gets a way round it rather than a button that does nothing
+                    rows.removeCallbacks(installerSilent);
+                    rows.postDelayed(installerSilent, 25_000);
                 });
             } catch (Exception e) {
+                Trouble.caught("update", e);
                 act.runOnUiThread(() -> {
                     updateState = "error";
                     updateNote = "The download stopped part-way. Check the connection, then try again.";
@@ -1826,6 +1914,20 @@ final class SettingsPanel {
             }
         }, "update").start();
     }
+
+    /** How to let Aura install updates on this TV, shown above the notes once Android said no. */
+    private String installHint;
+
+    /** After an update was handed to the installer: no answer, or a refusal, and the Downloader way is offered. */
+    private final Runnable installerSilent = () -> {
+        String why = Updater.refused;
+        if (Updater.answeredAt != 0 && why == null) return;
+        updateState = "error";
+        updateNote = (why != null ? "The TV wouldn't install it: " + why + "." : "The TV's installer didn't answer.")
+                + "\n\nInstall it with the free Downloader app instead: type the code 4172997 there. Your settings stay as they are.";
+        Trouble.note("UPDATE", why != null ? "refused: " + why : "the installer never answered");
+        if (page.equals("updates")) build();
+    };
 
     private boolean keepDrop;
     private final Runnable stopDropIdle = this::stopDropNow;
@@ -2143,6 +2245,9 @@ final class SettingsPanel {
         HELP.put("anim", "How fast every menu and app on the TV moves. Fast makes the whole TV feel quicker.");
         HELP.put("tv", "Lets Aura switch on its extras itself (ad blocking, the Home button, a faster TV) through the TV's own debugging. Once, no computer.");
         HELP.put("android", "The TV's own settings: network, picture, sound, accounts.");
+        HELP.put("w:forgive", "Cards you turned down from the Smart Stack, and ones it rested after you passed them by. OK lets them all come back.");
+        HELP.put("wx:unit", "Celsius or Fahrenheit for the weather, its forecast and the wind (km/h or mph). Auto follows the TV's country.");
+        HELP.put("trouble", "What went wrong lately, kept on this TV. Read it on your phone and send it along when you report a problem.");
         HELP.put("backup", "Save your app order, folders and settings to your phone, and bring them back on any TV.");
         HELP.put("updates", "Aura's version, and the new one when it's out. Updating keeps every setting.");
         HELP.put("remove", "Hands the TV back to its own home screen first, then uninstalls Aura.");
@@ -2245,7 +2350,7 @@ final class SettingsPanel {
     private void findCity(String name) {
         if (name.isEmpty()) return;
         hideKeyboard();
-        new Thread(() -> {
+        new SafeThread(() -> {
             String found = null;
             try {
                 HttpURLConnection con = (HttpURLConnection) new URL("https://geocoding-api.open-meteo.com/v1/search?count=1&name="

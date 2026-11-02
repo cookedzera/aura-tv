@@ -17,6 +17,9 @@ if (((& $adb -s $Tv get-state 2>&1) -join '') -notmatch 'device') { throw "TV $T
 
 & $adb -s $Tv install -r $apk
 & $adb -s $Tv shell cmd package set-home-activity app.aura.home/.HomeActivity
+# Android 13+ greys out the Accessibility switch for apps installed from a file ("restricted setting")
+$sdkLevel = [int](((& $adb -s $Tv shell getprop ro.build.version.sdk) -join '').Trim())
+if ($sdkLevel -ge 33) { & $adb -s $Tv shell appops set app.aura.home ACCESS_RESTRICTED_SETTINGS allow }
 # force-lock only: lets the Standby button and sleep timer turn the TV off
 & $adb -s $Tv shell dpm set-active-admin --user 0 app.aura.home/.SleepAdmin
 # usage history for Habit Stage (read on the TV only) and a full ahead-of-time compile for speed
@@ -25,8 +28,18 @@ if (((& $adb -s $Tv get-state 2>&1) -join '') -notmatch 'device') { throw "TV $T
 # Control Center's Wi-Fi sheet: Android shows nearby networks only to apps with location access,
 # and only while location services are on (the TV has no GPS; this is Wi-Fi/network location)
 & $adb -s $Tv shell pm grant app.aura.home android.permission.ACCESS_FINE_LOCATION
-# Now Playing: Android shares media sessions only with approved notification listeners
-& $adb -s $Tv shell cmd notification allow_listener app.aura.home/app.aura.home.MediaWatch
+# Now Playing: Android shares media sessions only with approved notification listeners.
+# "cmd notification allow_listener" arrived in Android 8.1; before it (Fire OS 6 is Android 7.1) the
+# setting itself is written, with any other listener already on it kept
+$me = "app.aura.home/app.aura.home.MediaWatch"
+$sdk = [int](((& $adb -s $Tv shell getprop ro.build.version.sdk) -join '').Trim())
+if ($sdk -ge 27) {
+    & $adb -s $Tv shell cmd notification allow_listener $me
+} else {
+    $cur = ((& $adb -s $Tv shell settings get secure enabled_notification_listeners) -join '').Trim()
+    $list = if (-not $cur -or $cur -eq "null") { $me } elseif ($cur.Contains($me)) { $cur } else { "${cur}:${me}" }
+    & $adb -s $Tv shell "settings put secure enabled_notification_listeners '$list'"
+}
 # Continue Watching reads Android TV's Watch Next list
 & $adb -s $Tv shell pm grant app.aura.home android.permission.READ_TV_LISTINGS
 # the Wi-Fi sheet reads the connected network's name from the Wi-Fi service's status report, because

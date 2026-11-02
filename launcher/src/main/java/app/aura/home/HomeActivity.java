@@ -13,6 +13,7 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.drawable.GradientDrawable;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
@@ -82,7 +83,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Compat.background("home", android.os.Process.THREAD_PRIORITY_BACKGROUND);
     /** Recent apps read on their own thread: never queued behind the widgets' work or an app being stopped. */
-    private final ExecutorService recentWorker = Executors.newSingleThreadExecutor();
+    private final ExecutorService recentWorker = Compat.pool("recents", 1);
+    /** Top Shelf's cards, found as focus settles on an app: never queued behind the rest of home's work. */
+    private final ExecutorService shelfWorker = Compat.background("shelf", android.os.Process.THREAD_PRIORITY_DEFAULT);
     private final int[] loc = new int[2];
 
     private SharedPreferences prefs;
@@ -115,7 +118,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private TextView hello, dateLine, gridLabel, stTime, tipText, hudText;
     private TextView skyKicker, skyTitle, skyRise, skySet, tdValue, tdSub, tdMem, tdData;
     private LinearLayout tdDataRow;
-    private ImageView stWifi, stBt, stWx, hudIcon;
+    private ImageView stWifi, stBt, stVpn, stWx, hudIcon;
     private TextView stTemp;
     private SmartStack stack;
     private ControlCenter cc;
@@ -136,6 +139,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private ValueAnimator scrollAnim, wiggle;
     private boolean ccOpen, racked, photo, resumed, introPending, editing, held, tipShown, dashboard = true, greetingShown = true;
     private boolean wallReady, appsReady, splashFinishing;
+    /** The stack's cards on show since home was last opened, for {@link Taste}. */
+    private final Set<String> shownThisVisit = new HashSet<>();
+    /** A start's milestones, for the problem report: when Aura began, its apps and its photograph were ready. */
+    private long createdAt, appsAt, wallAt, appsLoadMs;
+    /** The last key pressed, and when home was first on show (the boot screen gone). */
+    private long keyAt, homeAt;
+    private int appsCount;
     private long splashAt, lastStep;
     private View beforeCc;
     private int swallowUp = -1, heldConfirm = KeyEvent.KEYCODE_DPAD_CENTER;
@@ -162,8 +172,25 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private final Runnable rack = () -> setRacked(true);
     private final Runnable goPhoto = () -> setPhoto(true);
     private final Runnable hideHud = this::hideHud;
-    private final Runnable warmCc = () -> {
-        if (!ccOpen && resumed && !held) cc.refresh();
+    private final Runnable warmCc = new Runnable() {
+        @Override
+        public void run() {
+            // under the boot screen it waits: its readings are system calls on the main thread,
+            // and just after a restart they'd land in the middle of the sunrise
+            if (splash != null) {
+                handler.postDelayed(this, 1500);
+                return;
+            }
+            // nor while you're using the remote, nor in the first seconds of home after the TV
+            // started: each reading is a call into Android, which is slow to answer then, and
+            // together they held the arrows for seconds as home arrived
+            long now = SystemClock.uptimeMillis();
+            if (now - keyAt < 2500 || Compat.justBooted() && now - homeAt < 8000) {
+                handler.postDelayed(this, 1500);
+                return;
+            }
+            if (!ccOpen && resumed && !held) cc.refresh();
+        }
     };
     /**
      * Once Control Center's frost is opaque, everything beneath it stops drawing: the photograph
@@ -195,7 +222,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private final BroadcastReceiver packageReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent i) {
+            Vpn.forget();
             reloadApps();
+            // an app installed or updated: asked for its home-screen rows, as Google TV's home would
+            String act = i.getAction();
+            String pkg = i.getData() != null ? i.getData().getSchemeSpecificPart() : null;
+            if (pkg != null && (Intent.ACTION_PACKAGE_ADDED.equals(act) || Intent.ACTION_PACKAGE_REPLACED.equals(act))) {
+                final Context app = getApplicationContext();
+                worker.execute(() -> Continue.askToPublish(app, pkg));
+            }
         }
     };
 
@@ -203,6 +238,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     @Override
     protected void onCreate(Bundle state) {
+        createdAt = SystemClock.uptimeMillis();
         super.onCreate(state);
         // crashing again and again: back quieter, or Home handed back to the TV's own home screen
         Safety.watch(this);
@@ -229,10 +265,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             // first launch since boot: hold a loading screen until photos and apps are truly ready
             warm = true;
             splash = new Splash(this);
+            // long after the TV started, this is Aura back after Android closed it for memory
+            // (common on 1 to 1.5 GB TVs while an app plays): home as soon as it's ready
+            splash.quick = !Compat.justBooted();
             root.addView(splash, match());
             splashAt = SystemClock.uptimeMillis();
             hideForIntro();
-            handler.postDelayed(this::finishSplash, 7000);
+            // the longest it may hold, should the photograph or the apps be slow to come (a busy boot)
+            handler.postDelayed(this::finishSplash, 5000);
         } else if (introPending) {
             playIntro();
         } else {
@@ -241,10 +281,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (cache != null) {
             apps = cache;
             populate();
+        } else {
+            showSavedApps();
         }
         reloadApps();
         // a fresh Picture of the Day every day, imported in the background
         worker.execute(() -> Daily.schedule(getApplicationContext()));
+        // Android's own record of how Aura's last runs ended (Android 11+), for Problem reports
+        worker.execute(() -> Trouble.exits(getApplicationContext()));
         IntentFilter pf = new IntentFilter();
         pf.addAction(Intent.ACTION_PACKAGE_ADDED);
         pf.addAction(Intent.ACTION_PACKAGE_REMOVED);
@@ -253,6 +297,36 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         pf.addDataScheme("package");
         registerReceiver(packageReceiver, pf);
         Previews.listener = shotTaken;
+        Ambient.makeRoom = makeRoom;
+    }
+
+    /**
+     * The screensaver is starting on a small TV: the home screen, out of sight, lets go of its
+     * photographs and kept pictures, so the screensaver's have room. They come back on return.
+     */
+    private final Runnable makeRoom = () -> runOnUiThread(() -> {
+        // on older Android the screensaver is only a window over home, which stays resumed beneath
+        // it without focus: either way, home is out of sight
+        if (isDestroyed() || resumed && hasWindowFocus()) return;
+        backdrop.stop();
+        backdrop.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_MODERATE);
+        roomMade = true;
+        Previews.trim();
+        dropExtras();
+        Continue.trim();
+    });
+
+    /** The photographs were let go for the screensaver: they come back with home. */
+    private boolean roomMade;
+
+    @Override
+    public void onWindowFocusChanged(boolean focus) {
+        super.onWindowFocusChanged(focus);
+        // back from a screensaver that only covered home (older Android): no onStart to restart it
+        if (focus && roomMade && resumed) {
+            roomMade = false;
+            backdrop.start();
+        }
     }
 
     /** A picture of an app just taken (on the capture thread): an open switcher shows it at once. */
@@ -269,6 +343,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     @Override
     protected void onStart() {
         super.onStart();
+        roomMade = false;
+        watchVpn(true);
         backdrop.start();
         IntentFilter f = new IntentFilter(Intent.ACTION_TIME_TICK);
         f.addAction(Intent.ACTION_TIME_CHANGED);
@@ -276,7 +352,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         registerReceiver(clockReceiver, f);
         tick();
         if (tim != null) {
-            tim.registerCallback(inputWatch, handler);
+            try {
+                tim.registerCallback(inputWatch, handler);
+            } catch (RuntimeException e) {
+                if (!Compat.noTvInputs(this)) Trouble.caught("TV inputs", e);
+            }
             refreshLive(false);
         }
     }
@@ -329,6 +409,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     protected void onResume() {
         super.onResume();
         resumed = true;
+        // home is up: the cover over a slow Home on older Fire TVs goes (see HomeCover)
+        HomeCover.hide(true);
+        // while home is on show, a freeze is caught in the act (see Problem reports)
+        Trouble.watchMain(true);
         // the profile button's listener, once setup has allowed it (it costs nothing when already on)
         ProfileButton.start(this);
         MediaWatch.ensureWatching(this);
@@ -399,8 +483,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     protected void onPause() {
         super.onPause();
         resumed = false;
+        Trouble.watchMain(false);
+        if (!shownThisVisit.isEmpty()) {
+            final Set<String> seenNow = new HashSet<>(shownThisVisit);
+            final Context app = getApplicationContext();
+            shownThisVisit.clear();
+            worker.execute(() -> Taste.shown(app, seenNow));
+        }
         if (MediaWatch.onChange == listen) MediaWatch.onChange = null;
         handler.removeCallbacks(listenTick);
+        photoMusic(false);
         awayAt = SystemClock.uptimeMillis();
         openWhenWarm = false;
         stack.stop();
@@ -415,20 +507,32 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     @Override
     protected void onStop() {
         super.onStop();
+        watchVpn(false);
         endLaunch();
         backdrop.stop();
         unregisterReceiver(clockReceiver);
-        if (tim != null) tim.unregisterCallback(inputWatch);
+        if (tim != null) {
+            try {
+                tim.unregisterCallback(inputWatch);
+            } catch (RuntimeException ignored) {
+            }
+        }
     }
 
     @Override
     protected void onDestroy() {
+        // nothing posted earlier runs on a torn-down home: several hand work to the workers below,
+        // which refuse it once shut (a crash), and the rest touch views that are gone
+        handler.removeCallbacksAndMessages(null);
         settings.shutDrop();
         unregisterReceiver(packageReceiver);
         if (Previews.listener == shotTaken) Previews.listener = null;
+        if (Ambient.makeRoom == makeRoom) Ambient.makeRoom = null;
+        cc.release();
         backdrop.release();
         worker.shutdown();
         recentWorker.shutdown();
+        shelfWorker.shutdown();
         super.onDestroy();
     }
 
@@ -436,9 +540,20 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
         backdrop.trim(level);
-        if (level >= TRIM_MEMORY_RUNNING_LOW || level >= TRIM_MEMORY_MODERATE) {
+        // UI_HIDDEN only says an app is now in front, which is every app opened: dropping the kept
+        // pictures and the ready-made recent-app cards there meant Home twice inside that app built
+        // eight cards at the press (the stutter they're made ahead of time to avoid), and home
+        // fetched its pictures again on return. They go when Android is actually short of memory:
+        // while Aura is on screen (RUNNING_LOW, CRITICAL) or behind an app (BACKGROUND and up).
+        // The last screen taken (0.9 MB) stays too: it's how an app that hasn't drawn yet, still
+        // showing the previous app's screen, is told apart, and dropping it each time an app opened
+        // let that previous screen be kept as the new app's picture.
+        if (level == TRIM_MEMORY_UI_HIDDEN) return;
+        if (level >= TRIM_MEMORY_RUNNING_LOW) {
             Previews.trim();
             Tiles.trim();
+            dropExtras();
+            Continue.trim();
             if (!switcher.isOpen()) {
                 faces.clear();
                 switcher.forget();
@@ -742,7 +857,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     if (left != null) openFolder(id);
                     hud(R.drawable.ic_check, a.label + " is back on the grid");
                 }));
-                items.add(new AppMenu.Item(R.drawable.ic_info, "App info", () -> {
+                // a kids' profile can move apps and make folders, nothing more (as on the grid)
+                if (!Profiles.kids(HomeActivity.this)) items.add(new AppMenu.Item(R.drawable.ic_info, "App info", () -> {
                     menu.hide();
                     closeFolder();
                     open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + a.pkg)), from);
@@ -789,14 +905,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 Previews.forget(getApplicationContext(), a.pkg);
                 if (recentCache != null) recentCache.remove(a.pkg);
                 final Context app = getApplicationContext();
-                worker.execute(() -> {
+                // on a thread of its own, as Close all is: a TV debugging link slow to answer held
+                // home's one worker (widgets, the stack, artwork) for as long as it took
+                new SafeThread(() -> {
                     Habits.close(app, a.pkg);
                     // set up on this TV: a real Force stop. Otherwise Android stops it only if it counts
                     // it as in the background, and one playing music carries on
                     if (Adb.forceStop(app, a.pkg)) return;
                     ActivityManager am = Compat.svc(app, ActivityManager.class);
                     if (am != null) am.killBackgroundProcesses(a.pkg);
-                });
+                }, "close-app").start();
             }
 
             @Override
@@ -817,7 +935,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     Previews.forget(app, pkg);
                     if (recentCache != null) recentCache.remove(pkg);
                 }
-                new Thread(() -> {
+                new SafeThread(() -> {
                     for (String pkg : pkgs) Habits.close(app, pkg);
                     if (Adb.forceStop(app, pkgs)) return;
                     ActivityManager am = Compat.svc(app, ActivityManager.class);
@@ -989,11 +1107,23 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         stack.listener = s -> {
             widgetGlow[1] = s.color;
             if (getCurrentFocus() == fyW) bloom.setColor(s.color, 700);
+            // on show during this visit: counted once, when you leave (see Taste)
+            if (resumed && s.key != null && fyW.isShown()) shownThisVisit.add(s.key);
         };
         fyW.addView(stack, match());
         fyW.onClick = () -> {
             SmartStack.Slide s = stack.current();
-            if (s != null && s.intent != null) launch(s.intent, fyW, s.label);
+            if (s != null && s.action != null) {
+                s.action.run();
+                return;
+            }
+            if (s != null && s.intent != null) {
+                launch(s.intent, fyW, s.label);
+                final String key = s.key;
+                final Context app = getApplicationContext();
+                worker.execute(() -> Taste.opened(app, key));
+                shownThisVisit.remove(key);
+            }
         };
         placeWidget(fyW, 1);
     }
@@ -1034,10 +1164,19 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         d.addView(m, lp(MATCH, WRAP, 0, 6));
         memory = new Meter(this);
         d.addView(memory, lp(MATCH, Ui.dp(4), 0, 6));
+        tdDay = d;
         tdW.addView(d, match());
+        buildTodayMusic();
         tdW.onClick = () -> {
             if (playing == null) {
                 openCc(false);
+                return;
+            }
+            if (minimised(playing)) {
+                // the small player: back to the big card, focus on it
+                minimisedPkg = null;
+                expandPkg = playing.pkg;
+                updateListening();
                 return;
             }
             if (playing.controller == null) {
@@ -1046,10 +1185,136 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 else openCc(false);
                 return;
             }
+            if (!playing.playing) {
+                // paused: the button says Resume, and OK does just that
+                try {
+                    playing.controller.getTransportControls().play();
+                    hud(R.drawable.ic_play, "Playing  ·  " + playing.title);
+                    handler.postDelayed(() -> refreshWidgets(false), 250);
+                    return;
+                } catch (RuntimeException e) {
+                    // the app let its player go: its own big view instead
+                }
+            }
             // what's playing, large: artwork, progress, previous / play-pause / next
             openNowPlaying();
         };
         placeWidget(tdW, 2);
+    }
+
+    private LinearLayout tdDay, tdMusic, tdChip;
+    private ImageView tdArt, tdChipIcon;
+    private TextView tdmKicker, tdmTitle, tdmBy, tdChipText;
+    private Meter tdProgress;
+
+    /**
+     * The same card while music waits (paused, or the last thing you listened to): the cover with
+     * the title beside it, who it's by (and in which app), how far in, and a frosted Resume button,
+     * in the type of the other cards. Laid out for the card's height, so nothing is cut off at the bottom.
+     */
+    private void buildTodayMusic() {
+        tdMusic = column(18, 18, 18, 16);
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        tdArt = new ImageView(this);
+        tdArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        GradientDrawable clip = new GradientDrawable();
+        clip.setCornerRadius(Ui.dpf(9));
+        clip.setColor(0x1FFFFFFF);
+        tdArt.setBackground(clip);
+        tdArt.setClipToOutline(true);
+        tdArt.setElevation(Ui.dpf(6));
+        top.addView(tdArt, new LinearLayout.LayoutParams(Ui.dp(50), Ui.dp(50)));
+        LinearLayout words = new LinearLayout(this);
+        words.setOrientation(LinearLayout.VERTICAL);
+        // the same small spaced capitals as the card's TODAY
+        tdmKicker = Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.24f);
+        tdmKicker.setSingleLine(true);
+        tdmKicker.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        words.addView(tdmKicker, lp(MATCH, WRAP, 0, 0));
+        tdmTitle = Ui.text(this, 13.5f, Ui.semibold, 0xFFF7F4EE);
+        tdmTitle.setSingleLine(false);
+        tdmTitle.setMaxLines(2);
+        tdmTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        tdmTitle.setLetterSpacing(-0.015f);
+        tdmTitle.setLineSpacing(0, 0.9f);
+        words.addView(tdmTitle, lp(MATCH, WRAP, 0, 3));
+        LinearLayout.LayoutParams wl = new LinearLayout.LayoutParams(0, WRAP, 1f);
+        wl.leftMargin = Ui.dp(12);
+        top.addView(words, wl);
+        tdMusic.addView(top, lp(MATCH, WRAP, 0, 0));
+        tdmBy = Ui.text(this, 10.5f, Ui.regular, 0xB3FFFFFF);
+        tdmBy.setSingleLine(true);
+        tdmBy.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        tdMusic.addView(tdmBy, lp(MATCH, WRAP, 0, 8));
+        tdMusic.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
+        tdProgress = new Meter(this);
+        // the button and how far in, side by side on one line: a frosted pill, as tvOS draws its
+        // buttons on glass, and a hairline beside it
+        LinearLayout foot = new LinearLayout(this);
+        foot.setGravity(Gravity.CENTER_VERTICAL);
+        tdChip = new LinearLayout(this);
+        tdChip.setGravity(Gravity.CENTER_VERTICAL);
+        tdChip.setPadding(Ui.dp(10), 0, Ui.dp(12), 0);
+        GradientDrawable pill = new GradientDrawable();
+        pill.setCornerRadius(Ui.dpf(12));
+        pill.setColor(0x29FFFFFF);
+        pill.setStroke(Ui.dp(1), 0x1FFFFFFF);
+        tdChip.setBackground(pill);
+        tdChipIcon = new ImageView(this);
+        tdChipIcon.setImageResource(R.drawable.ic_play);
+        tdChipIcon.setColorFilter(0xF2FFFFFF);
+        tdChip.addView(tdChipIcon, new LinearLayout.LayoutParams(Ui.dp(10), Ui.dp(10)));
+        tdChipText = Ui.text(this, 10f, Ui.semibold, 0xF2FFFFFF);
+        tdChipText.setSingleLine(true);
+        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(WRAP, WRAP);
+        cl.leftMargin = Ui.dp(6);
+        tdChip.addView(tdChipText, cl);
+        foot.addView(tdChip, new LinearLayout.LayoutParams(WRAP, Ui.dp(24)));
+        LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(0, Ui.dp(3), 1f);
+        pl.leftMargin = Ui.dp(12);
+        foot.addView(tdProgress, pl);
+        tdMusic.addView(foot, lp(MATCH, Ui.dp(24), 0, 0));
+        tdMusic.setVisibility(View.GONE);
+        tdW.addView(tdMusic, match());
+    }
+
+    /** The card dressed for {@code p}, or back to your day without it. */
+    private void showTodayMusic(MediaWatch.Playing p, AppRepo.App owner) {
+        if (p == null) {
+            tdMusic.setVisibility(View.GONE);
+            tdDay.setVisibility(View.VISIBLE);
+            tdArt.setImageDrawable(null);
+            return;
+        }
+        tdDay.setVisibility(View.GONE);
+        tdMusic.setVisibility(View.VISIBLE);
+        boolean live = p.controller != null;
+        String app = owner != null ? owner.label : null;
+        tdmKicker.setText(live ? (p.playing ? "NOW PLAYING" : "PAUSED") : "LAST PLAYED");
+        // the text column beside the cover: two lines, the type a little smaller before anything is cut
+        int col = (tdW.getWidth() > 0 ? tdW.getWidth() : Ui.dp(WIDGET_W[2])) - Ui.dp(18 + 18 + 50 + 12);
+        Ui.fitLines(tdmTitle, Ui.songTitle(p.title), col, 2, 13.5f, 11.5f);
+        boolean by = p.by != null && !p.by.trim().isEmpty() && !p.by.equalsIgnoreCase(p.title);
+        tdmBy.setText(by && app != null ? p.by + "  ·  " + app : by ? p.by : app != null ? app : "");
+        if (p.art != null && !p.art.isRecycled()) {
+            tdArt.setImageBitmap(p.art);
+            tdArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            tdArt.setPadding(0, 0, 0, 0);
+        } else if (owner != null && owner.icon != null) {
+            tdArt.setImageDrawable(owner.icon);
+            tdArt.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            tdArt.setPadding(Ui.dp(8), Ui.dp(8), Ui.dp(8), Ui.dp(8));
+        } else {
+            tdArt.setImageResource(R.drawable.ic_play);
+            tdArt.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            tdArt.setPadding(Ui.dp(14), Ui.dp(14), Ui.dp(14), Ui.dp(14));
+        }
+        tdProgress.setVisibility(p.progress > 0.005f ? View.VISIBLE : View.INVISIBLE);
+        tdProgress.set(Math.max(0f, Math.min(1f, p.progress)));
+        boolean pausable = live && p.playing, small = minimised(p);
+        tdChipIcon.setImageResource(small ? R.drawable.ic_expand : pausable ? R.drawable.ic_pause : R.drawable.ic_play);
+        tdChipText.setText(small ? "Expand" : pausable ? "Playing" : live ? "Resume" : "Continue");
     }
 
     // ---- listening -----------------------------------------------------------------------------
@@ -1062,7 +1327,18 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private MediaWatch.Playing listening;
     /** The app whose music was minimised (OK held on the card): the widgets stay until it stops. */
     private String minimisedPkg;
+    /** The row was laid out with music minimised (the Today card kept as its small player). */
+    private boolean miniRow;
+    /** Expand was just pressed for this app's music: its big card comes back, paused or not. */
+    private String expandPkg;
+
+    /** Music minimised and still there: the Today card is its small player, and OK brings the big card back. */
+    private boolean minimised(MediaWatch.Playing p) {
+        return p != null && p.controller != null && p.pkg != null && p.pkg.equals(minimisedPkg);
+    }
     private android.graphics.Bitmap lShownArt;
+    /** The song ({@code pkg|title}) the card's cover belongs to. */
+    private String lShownKey;
 
     /**
      * While music plays (Spotify, YouTube Music, any app with a media session), one calm card takes
@@ -1115,8 +1391,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         listenW.onLongClick = () -> {
             if (listening == null) return;
             minimisedPkg = listening.pkg;
-            hud(R.drawable.ic_check, "Minimised \u00b7 Control Center still has it");
+            hud(R.drawable.ic_check, "Minimised \u00b7 OK on the small card brings it back");
             updateListening();
+            refreshWidgets(false);
         };
         page.addView(listenW, frame(Ui.dp(WIDGET_ROW), Ui.dp(WIDGET_H), Gravity.TOP | Gravity.START,
                 Ui.dp(PAGE_X), Ui.dp(WIDGET_Y), 0, 0));
@@ -1141,11 +1418,33 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         MediaWatch.Playing p = MediaWatch.now(this);
         // the music stopped: the next song brings the card back, minimised or not
         if (p == null) minimisedPkg = null;
+        // Expand on the small player brings the big card back even while the song is paused
+        boolean asked = p != null && p.pkg != null && p.pkg.equals(expandPkg);
+        expandPkg = null;
         boolean show = p != null && p.controller != null && p.pkg != null && !p.pkg.equals(minimisedPkg)
-                && (p.playing || listening != null && p.pkg.equals(listening.pkg));
+                && (p.playing || asked || listening != null && p.pkg.equals(listening.pkg));
         boolean was = listening != null;
         listening = show ? p : null;
+        // in photo mode: a song that starts brings its bar (one that stops takes its own away)
+        if (photo && show && p.playing) photoMusic(true);
         if (cc != null) cc.music(p != null && p.controller != null ? p : null);
+        // the song changed (or paused, or its cover came) while the app previews show it: they were
+        // only made again when focus moved, so the last song stayed on its card. Made again in place
+        String song = p != null && p.controller != null ? p.pkg + "|" + p.title + "|" + p.playing + "|" + (p.art != null) : null;
+        if (!java.util.Objects.equals(song, shelfSong)) {
+            shelfSong = song;
+            String on = shelf.shownFor();
+            if (!show && on != null && zone == GRID) {
+                shelfWanted = on;
+                handler.removeCallbacks(shelfLoad);
+                handler.post(shelfLoad);
+            }
+        }
+        // the music minimised went (or a song was minimised with the row already set): the small player comes or goes
+        if (was == show && miniRow != (minimisedPkg != null)) {
+            layoutWidgets(true);
+            refreshWidgets(false);
+        }
         if (was != show) {
             hideShelf();
             long left = introUntil - SystemClock.uptimeMillis();
@@ -1168,7 +1467,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     for (int i = 0; i < widgets.size(); i++) enter(widgets.get(i), 0, Ui.dp(18), i * 70L, 720);
                 }, leaving.isEmpty() ? 0 : 230);
             }
-            if (!show) lShownArt = null;
+            if (!show) {
+                lShownArt = null;
+                lShownKey = null;
+            }
         }
         handler.removeCallbacks(listenTick);
         if (show) {
@@ -1204,6 +1506,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         lTitle.setText(p.title);
         lBy.setText(p.by != null ? p.by : "");
         lBy.setVisibility(p.by == null || p.by.isEmpty() ? View.GONE : View.VISIBLE);
+        // a new song without a cover of its own: the last one's isn't left up while its own is fetched
+        String song = p.pkg + "|" + p.title;
+        if (!song.equals(lShownKey)) {
+            lShownKey = song;
+            if (p.art == null) lShownArt = null;
+        }
         if (p.art != null) {
             showListenArt(p.art);
         } else {
@@ -1293,7 +1601,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         float natural = 0;
         for (int i : shown) natural += WIDGET_W[i];
-        float k = (WIDGET_ROW - WIDGET_GAP * (shown.size() - 1)) / Math.max(1f, natural), x = 0;
+        // music minimised: the Today card stays as its small player, in either style (the tvOS
+        // style shows no widgets otherwise, so there was nothing left to bring the music back from).
+        // On its own it keeps its own size rather than stretching across the row
+        boolean mini = minimisedPkg != null && !shown.contains(2);
+        if (mini) {
+            shown.add(2);
+            natural += WIDGET_W[2];
+        }
+        miniRow = minimisedPkg != null;
+        float k = mini && shown.size() == 1 ? 1f : (WIDGET_ROW - WIDGET_GAP * (shown.size() - 1)) / Math.max(1f, natural), x = 0;
         boolean[] was = new boolean[3];
         for (int i = 0; i < 3; i++) {
             was[i] = allWidgets[i].getVisibility() == View.VISIBLE;
@@ -1641,6 +1958,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(Ui.dp(15), Ui.dp(15));
         bl.leftMargin = Ui.dp(10);
         r.addView(stBt, bl);
+        // a VPN carrying the TV's traffic: a small shield beside them, only while it's on
+        stVpn = ControlCenter.icon(this, R.drawable.ic_vpn);
+        stVpn.setColorFilter(0xFFFFFFFF);
+        stVpn.setVisibility(View.GONE);
+        LinearLayout.LayoutParams vl = new LinearLayout.LayoutParams(Ui.dp(15), Ui.dp(15));
+        vl.leftMargin = Ui.dp(10);
+        r.addView(stVpn, vl);
         LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(Ui.hair(), Ui.dp(14));
         sl.leftMargin = Ui.dp(14);
         sl.rightMargin = Ui.dp(14);
@@ -1782,20 +2106,86 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         reloadApps(false);
     }
 
+    /** The real list has been read at least once since Aura started: a saved one is no longer wanted. */
+    private volatile boolean appsRead;
+    /** The saved list home is showing until the real one is read. */
+    private List<AppRepo.App> savedApps;
+
+    /** The saved list is exactly what's installed (same apps, names, screens and package versions). */
+    private static boolean sameApps(List<AppRepo.App> real, List<AppRepo.App> saved) {
+        if (saved == null || real.size() != saved.size()) return false;
+        for (int i = 0; i < real.size(); i++) {
+            AppRepo.App a = real.get(i), b = saved.get(i);
+            if (!a.pkg.equals(b.pkg) || !a.label.equals(b.label) || !String.valueOf(a.cls).equals(b.cls)
+                    || !String.valueOf(a.src).equals(b.src) || (a.banner != null) != (b.banner != null)
+                    || (a.art != null) != (b.art != null)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Just started with nothing in memory: the apps as they were last time, from Aura's own saved
+     * copy, so home (and the boot screen's wait) doesn't hang on opening every app's package. The
+     * real list replaces it the moment it's read, repainting only if anything differs.
+     */
+    private void showSavedApps() {
+        final Context app = getApplicationContext();
+        new SafeThread(() -> {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT);
+            final List<AppRepo.App> saved = AppRepo.saved(app);
+            if (saved == null) return;
+            runOnUiThread(() -> {
+                if (isDestroyed() || appsRead || !cells.isEmpty()) return;
+                apps = saved;
+                savedApps = saved;
+                populate();
+            });
+        }, "apps-saved").start();
+    }
+
     private void reloadApps(boolean force) {
         final Context app = getApplicationContext();
-        worker.execute(() -> {
-            final List<AppRepo.App> list = AppRepo.load(app);
+        Runnable read = () -> {
+            long t0 = SystemClock.uptimeMillis();
+            final List<AppRepo.App> read0 = AppRepo.load(app);
+            appsLoadMs = SystemClock.uptimeMillis() - t0;
+            appsCount = read0.size();
             runOnUiThread(() -> {
                 if (isDestroyed()) return;
-                boolean changed = force || cells.isEmpty() || !samePackages(list, apps);
+                boolean first = !appsRead;
+                appsRead = true;
+                List<AppRepo.App> list = read0;
+                // the saved list on show is exactly this one: it stays, and the copy just read is let
+                // go, so home never holds every banner twice (and no tile is painted again)
+                List<AppRepo.App> was = savedApps;
+                savedApps = null;
+                if (was != null && was == apps && sameApps(read0, was)) {
+                    for (int i = 0; i < was.size(); i++) was.get(i).fresh = read0.get(i).fresh;
+                    list = was;
+                }
+                final List<AppRepo.App> keep = list;
+                // a saved list that turned out stale (an app updated while Aura was off): every tile
+                // painted again from the real one, which also lets the saved pictures go
+                boolean changed = force || cells.isEmpty() || was != null && list != was || !samePackages(list, apps);
                 apps = list;
                 cache = list;
+                // kept for the next start, once the TV has settled (it's only written when something changed)
+                handler.postDelayed(() -> worker.execute(() -> AppRepo.save(app, keep)), first ? 20_000 : 2_000);
                 if (!changed) return;
                 populate();
                 refreshOverlays();
             });
-        });
+        };
+        if (cells.isEmpty() && !appsRead) {
+            // the first read, with the grid waiting on it: its own thread at normal priority, not
+            // behind whatever home's background worker has queued
+            new SafeThread(() -> {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT);
+                read.run();
+            }, "apps-first").start();
+        } else {
+            worker.execute(read);
+        }
     }
 
     /** The open folder, find and Settings, made again from the new list of apps (one may have gone). */
@@ -1969,6 +2359,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (introPending && splash == null) cascade();
         if (!appsReady) {
             appsReady = true;
+            appsAt = SystemClock.uptimeMillis();
             progressSplash();
         }
         refreshWidgets(true);
@@ -2126,7 +2517,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             // should the app never come up, the switcher puts itself away
             handler.removeCallbacks(launchGaveUp);
             handler.postDelayed(launchGaveUp, 12_000);
-        } catch (ActivityNotFoundException | SecurityException e) {
+        } catch (RuntimeException e) {
+            // not on this TV (a settings page Fire OS doesn't have), not allowed, or refused
+            if (!(e instanceof ActivityNotFoundException)) Trouble.caught("opening " + label, e);
             hud(R.drawable.ic_info, "Couldn't open " + label);
             endLaunch();
         }
@@ -2148,6 +2541,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     private void launch(Intent intent, View from, String label) {
+        // the TV's own settings (Wi-Fi, Bluetooth, display, the whole Settings app): on Fire OS 8 they
+        // pass through Amazon's home on the way, which the Home button service mustn't answer
+        String action = intent.getAction();
+        if (action != null && action.startsWith("android.settings.")) {
+            HomeKeys.letTvHomePass();
+            intent = fireSettings(intent);
+        }
         try {
             Bundle opts = ActivityOptions.makeScaleUpAnimation(from, 0, 0, from.getWidth(), from.getHeight()).toBundle();
             startActivity(intent, opts);
@@ -2162,7 +2562,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 for (Map.Entry<String, Long> e : recentCache.entrySet()) if (!e.getKey().equals(pkg)) r.put(e.getKey(), e.getValue());
                 recentCache = r;
             }
-        } catch (ActivityNotFoundException | SecurityException e) {
+        } catch (RuntimeException e) {
+            // not on this TV (a settings page Fire OS doesn't have), not allowed, or refused
+            if (!(e instanceof ActivityNotFoundException)) Trouble.caught("opening " + label, e);
             hud(R.drawable.ic_info, "Couldn't open " + label);
         }
     }
@@ -2206,8 +2608,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             Object[] recent = null;
             List<String> ranked = null;
             boolean full = habits && !list.isEmpty();
+            // every app opened in the last four weeks: "apps you use", as against apps you merely have
+            final Set<String> used = new HashSet<>();
             if (full) {
-                score = Habits.forNow(app);
+                score = Habits.forNow(app, used);
                 Set<String> installed = new HashSet<>();
                 for (AppRepo.App a : list) if (watchable(a.pkg)) installed.add(a.pkg);
                 recent = Habits.recent(app, installed);
@@ -2220,15 +2624,28 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             // then your own rows from apps that skip Watch Next (Netflix): never the same title twice
             Set<String> seen = new HashSet<>();
             for (int i = 0; cw != null && i < cw.size(); i++) seen.add(Continue.key(cw.get(i).title));
+            // what video apps said they were playing (their media sessions): Continue watching where
+            // the app never filled Watch Next, and on Fire TV, which has none at all
+            if (cw != null) {
+                for (Continue.Item it : Watched.recent(app, seen, Math.max(0, 4 - cw.size()))) {
+                    cw.add(it);
+                    seen.add(Continue.key(it.title));
+                }
+            }
             final List<Continue.Item> mine = full ? Continue.channels(app, ranked, seen, 3) : null;
-            final Extras x = full ? extras(app) : null;
+            final Extras x = full ? extras(app, list.size()) : null;
+            // what the stack has learned from you, read once for this round
+            final Taste.View taste = full ? Taste.view(app) : null;
+            // things worth knowing about the TV itself: a remote running flat, storage running out
+            final List<String[]> remotes = full ? BtSheet.lowBatteries(app) : null;
+            final long freeBytes = full ? freeStorage() : -1;
             final long data = dataToday(app, c.getTimeInMillis());
             runOnUiThread(() -> {
                 if (isDestroyed()) return;
                 applySky(now, rise, set, up, next, phase);
                 applyToday(today, top);
                 showData(data);
-                if (s != null) applyStack(cw, mine, s, r, top, now, x);
+                if (s != null) applyStack(cw, mine, s, r, top, now, x, used, taste, remotes, freeBytes);
             });
         });
     }
@@ -2295,29 +2712,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void applyToday(long today, String top) {
         // something playing (or paused/remembered) takes the widget over: title, who, and OK plays or resumes
         playing = MediaWatch.nowOrLast(this);
-        if (playing != null) {
-            AppRepo.App owner = find(playing.pkg);
-            String label = playing.controller != null ? "NOW PLAYING" : "CONTINUE PLAYING";
-            tdKicker.setText((label + (owner != null ? "  ·  " + owner.label : "")).toUpperCase(Locale.getDefault()));
-            // a title gets two lines rather than being cut short
-            tdValue.setSingleLine(false);
-            tdValue.setMaxLines(2);
-            tdValue.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            tdValue.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
-            tdValue.setLineSpacing(0, 1f);
-            tdValue.setText(playing.title);
-            if (playing.controller != null) {
-                tdSub.setText(playing.playing ? (playing.by != null ? playing.by : "Playing") : "Paused" + (playing.by != null ? "  ·  " + playing.by : ""));
-            } else {
-                tdSub.setText("OK to resume" + (playing.by != null && !playing.by.isEmpty() ? "  ·  " + playing.by : ""));
-            }
-            widgetGlow[2] = owner != null ? owner.color : DAY_GLOW;
-        } else {
-            tdKicker.setText("TODAY");
-            tdValue.setSingleLine(true);
-            tdValue.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 30);
-            widgetGlow[2] = DAY_GLOW;
-        }
+        AppRepo.App owner = playing != null ? find(playing.pkg) : null;
+        showTodayMusic(playing, owner);
+        widgetGlow[2] = owner != null ? owner.color : DAY_GLOW;
         if (playing != null) {
             // memory still shows below
         } else if (today < 0) {
@@ -2339,12 +2736,41 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private static final class Extras {
         final List<Fresh.Show> shows = new ArrayList<>();
         final List<android.graphics.Bitmap> art = new ArrayList<>();
-        Picks.Pick pick;
-        android.graphics.Bitmap pickArt;
+        /** Tonight's picks, two a day, with their posters. */
+        final List<Picks.Pick> picks = new ArrayList<>();
+        final List<android.graphics.Bitmap> pickArt = new ArrayList<>();
     }
 
-    /** Off the main thread: up to four new releases and one random pick, with their pictures. */
-    private static Extras extras(Context c) {
+    /** The last extras made, and what they were made from: they're kept until any of it changes. */
+    private static Extras extrasKept;
+    private static String extrasKey;
+
+    /**
+     * Off the main thread: up to four new releases and one pick, with their pictures. They change
+     * at most once a day, so they're made once and kept: every press of Home used to read and
+     * decode all five pictures again (and the stack then worked out each one's blur again).
+     */
+    private static Extras extras(Context c, int apps) {
+        String key = localDay() + "|" + Fresh.stamp(c) + "|" + Picks.stamp(c)
+                + "|" + Prefs.on(c, Prefs.PICKS) + "|" + apps + "|" + Taste.changes + "|" + Profiles.current(c);
+        synchronized (HomeActivity.class) {
+            if (key.equals(extrasKey) && extrasKept != null) return extrasKept;
+        }
+        Extras x = makeExtras(c);
+        synchronized (HomeActivity.class) {
+            extrasKept = x;
+            extrasKey = key;
+        }
+        return x;
+    }
+
+    /** Short on memory: the kept extras go (the cards on show keep their own pictures). */
+    private static synchronized void dropExtras() {
+        extrasKept = null;
+        extrasKey = null;
+    }
+
+    private static Extras makeExtras(Context c) {
         Extras x = new Extras();
         for (Fresh.Show s : Fresh.load(c)) {
             if (x.shows.size() >= 4) break;
@@ -2354,15 +2780,30 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             x.art.add(b);
         }
         if (Prefs.on(c, Prefs.PICKS)) {
-            List<Picks.Pick> pool = Picks.load(c);
+            List<Picks.Pick> pool = new ArrayList<>();
+            Taste.View t = Taste.view(c);
+            // what you turned down, or passed over day after day, is left out of the pool
+            for (Picks.Pick p : Picks.load(c)) if (!t.skip(Continue.key(p.name))) pool.add(p);
             if (!pool.isEmpty()) {
-                // the same pick all evening, a new one tomorrow
-                Picks.Pick p = pool.get((int) ((System.currentTimeMillis() / 86_400_000L) % pool.size()));
-                x.pickArt = Picks.poster(p);
-                if (x.pickArt != null) x.pick = p;
+                // two a day, the same two all evening and new ones tomorrow (at your midnight), walking
+                // the pool in order: thirty picks last a fortnight, and the pool is renewed weekly
+                int n = pool.size(), first = (int) ((localDay() * 2) % n);
+                for (int i = 0; i < Math.min(2, n); i++) {
+                    Picks.Pick p = pool.get((first + i) % n);
+                    android.graphics.Bitmap b = Picks.poster(p);
+                    if (b == null) continue;
+                    x.picks.add(p);
+                    x.pickArt.add(b);
+                }
             }
         }
         return x;
+    }
+
+    /** Days since 1970 on this TV's own calendar: "tomorrow" starts at your midnight, not at UTC's. */
+    private static long localDay() {
+        long now = System.currentTimeMillis();
+        return (now + java.util.TimeZone.getDefault().getOffset(now)) / 86_400_000L;
     }
 
     /**
@@ -2385,28 +2826,38 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     /**
-     * The smart stack's cards, most useful first: a new episode of something you're watching,
-     * everything you're partway through (from Watch Next, then from the rows of apps that keep it
-     * there instead, such as Netflix), your own picks from those rows, your usual app for this hour,
-     * what's new today on your apps, what you opened last, what you've watched most today, and
-     * tonight's pick. New releases and suggested apps can each be switched off.
+     * The smart stack's cards, most useful first: a new episode of something you're watching (or
+     * have opened from the stack before), everything you're partway through (from Watch Next, then
+     * from the rows of apps that keep it there instead, such as Netflix), your own picks from those
+     * rows, your usual app for this hour, what's new today on the apps you use, what you opened
+     * last, what you've watched most today, and tonight's two picks.
+     *
+     * It learns ({@link Taste}): a card you turn down (hold OK) isn't dealt again, and a suggestion
+     * shown on visit after visit that you never opened rests for a while. New releases come from
+     * the country's schedule, not your account, so only a show you've opened before, or one release
+     * from an app you actually use, makes it. New releases and suggested apps can each be switched off.
      */
     private void applyStack(List<Continue.Item> cw, List<Continue.Item> mine, Map<String, Float> score, Object[] recent,
-                            String top, long now, Extras x) {
+                            String top, long now, Extras x, Set<String> used, Taste.View taste,
+                            List<String[]> remotes, long freeBytes) {
         List<SmartStack.Slide> out = new ArrayList<>();
-        Set<String> used = new HashSet<>();
+        Set<String> suggested = new HashSet<>();
         Set<Fresh.Show> claimed = new HashSet<>();
         boolean suggest = Prefs.on(this, Prefs.STACK_APPS);
+        List<String> yourTitles = taste.openedTitles();
         List<Continue.Item> yours = new ArrayList<>(cw);
         if (mine != null) yours.addAll(mine);
         for (Continue.Item it : yours) {
             if (it.pkg != null && !HomeKeys.allowed(this, it.pkg)) continue;
+            String key = Continue.key(it.title);
+            boolean watching = cw.contains(it) || it.progress > 0f;
+            // what you're partway through only goes when you say so; an app's suggestion can also wear out
+            if (taste.declined(key) || !watching && taste.tired(key)) continue;
             SmartStack.Slide s = new SmartStack.Slide();
             AppRepo.App owner = it.pkg == null ? null : find(it.pkg);
             String app = owner != null ? "  ·  " + owner.label.toUpperCase(Locale.getDefault()) : "";
             Fresh.Show fresh = x == null ? null : sameShow(it.title, x.shows);
-            boolean watching = cw.contains(it) || it.progress > 0f;
-            s.kicker = (fresh != null ? "NEW EPISODE OUT" : watching ? "CONTINUE WATCHING" : "FOR YOU") + app;
+            s.kicker = (fresh != null ? "NEW EPISODE OUT" : watching ? "CONTINUE WATCHING" : it.kicker != null ? it.kicker : "FOR YOU") + app;
             s.title = it.title;
             s.sub = fresh != null && !fresh.episode.isEmpty() ? fresh.episode : it.sub;
             s.art = it.art;
@@ -2414,6 +2865,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.intent = it.intent;
             s.label = it.title;
             s.fresh = fresh != null;
+            s.key = key;
+            s.decline = watching ? "Hide from the stack" : "Not interested";
             // what you're watching stays a little longer than a suggestion
             s.dwellMs = watching ? 9_000 : 7_000;
             if (owner != null) {
@@ -2432,7 +2885,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         AppRepo.App usual = null;
         float best = 1.2f; // about two recent visits at this hour before it counts as a habit
         for (Map.Entry<String, Float> e : score.entrySet()) {
-            AppRepo.App a = watchable(e.getKey()) && HomeKeys.allowed(this, e.getKey()) ? find(e.getKey()) : null;
+            AppRepo.App a = watchable(e.getKey()) && HomeKeys.allowed(this, e.getKey()) && !taste.declined(Taste.app(e.getKey()))
+                    ? find(e.getKey()) : null;
             if (a != null && e.getValue() > best) {
                 best = e.getValue();
                 usual = a;
@@ -2443,18 +2897,23 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             String hour = DateFormat.is24HourFormat(this) ? c.get(Calendar.HOUR_OF_DAY) + ":00"
                     : (c.get(Calendar.HOUR) == 0 ? 12 : c.get(Calendar.HOUR)) + (c.get(Calendar.AM_PM) == Calendar.AM ? " AM" : " PM");
             out.add(appSlide(usual, "YOUR " + hour + " USUAL", "You tend to open it around this time"));
-            used.add(usual.pkg);
+            suggested.add(usual.pkg);
         }
-        // new today on the streaming apps you have, with the show's own artwork: the country's
-        // schedule, not your account, so two at most, after everything of your own
-        int releases = 0;
-        for (int i = 0; x != null && Prefs.on(this, Prefs.STACK_NEW) && i < x.shows.size() && releases < 2; i++) {
+        // new today on your streaming apps, with the show's own artwork. A show you've opened from the
+        // stack before is yours: its new episode leads, like one you're partway through. Anything
+        // else is the country's schedule, not your account: one at most, and only from an app you
+        // actually use (when Android says which; usage access off, the most popular one)
+        int others = 0;
+        for (int i = 0; x != null && Prefs.on(this, Prefs.STACK_NEW) && i < x.shows.size(); i++) {
             Fresh.Show f = x.shows.get(i);
             AppRepo.App owner = find(f.pkg);
-            if (claimed.contains(f) || owner == null || !HomeKeys.allowed(this, f.pkg)) continue;
-            releases++;
+            String key = Continue.key(f.name);
+            if (claimed.contains(f) || owner == null || !HomeKeys.allowed(this, f.pkg) || taste.skip(key)) continue;
+            boolean known = Taste.matches(f.name, yourTitles);
+            if (!known && (others >= 1 || !used.isEmpty() && !used.contains(f.pkg))) continue;
             SmartStack.Slide s = new SmartStack.Slide();
-            s.kicker = "NEW TODAY  ·  " + owner.label.toUpperCase(Locale.getDefault());
+            String label = owner.label.toUpperCase(Locale.getDefault());
+            s.kicker = known ? "NEW EPISODE OUT  ·  " + label : "NEW TODAY ON " + label;
             s.title = f.name;
             s.sub = f.episode.isEmpty() ? "Out now on " + owner.label : f.episode;
             s.art = x.art.get(i);
@@ -2463,26 +2922,75 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.fresh = true;
             s.intent = owner.launch;
             s.label = owner.label;
-            out.add(s);
+            s.key = key;
+            s.decline = "Not interested";
+            if (known) {
+                out.add(0, s);
+            } else {
+                others++;
+                out.add(s);
+            }
         }
-        AppRepo.App last = suggest && recent != null && HomeKeys.allowed(this, (String) recent[0]) ? find((String) recent[0]) : null;
-        if (last != null && used.add(last.pkg)) out.add(appSlide(last, "JUMP BACK IN", "Opened " + Habits.ago(now - (Long) recent[1])));
-        AppRepo.App most = suggest && top != null && watchable(top) && HomeKeys.allowed(this, top) ? find(top) : null;
-        if (most != null && used.add(most.pkg)) out.add(appSlide(most, "MOST WATCHED TODAY", "Where most of today's screen time went"));
-        if (x != null && x.pick != null) {
+        AppRepo.App last = suggest && recent != null && HomeKeys.allowed(this, (String) recent[0])
+                && !taste.declined(Taste.app((String) recent[0])) ? find((String) recent[0]) : null;
+        if (last != null && suggested.add(last.pkg)) out.add(appSlide(last, "JUMP BACK IN", "Opened " + Habits.ago(now - (Long) recent[1])));
+        AppRepo.App most = suggest && top != null && watchable(top) && HomeKeys.allowed(this, top)
+                && !taste.declined(Taste.app(top)) ? find(top) : null;
+        if (most != null && suggested.add(most.pkg)) out.add(appSlide(most, "MOST WATCHED TODAY", "Where most of today's screen time went"));
+        List<SmartStack.Slide> picks = new ArrayList<>();
+        for (int i = 0; x != null && i < x.picks.size(); i++) {
+            Picks.Pick p = x.picks.get(i);
             SmartStack.Slide s = new SmartStack.Slide();
-            s.kicker = "TONIGHT'S PICK  ·  " + x.pick.why;
-            s.title = x.pick.name;
-            s.sub = x.pick.line;
-            s.art = x.pickArt;
+            s.kicker = (i == 0 ? "TONIGHT'S PICK" : "ALSO TONIGHT") + "  ·  " + p.why;
+            s.title = p.name;
+            s.sub = p.line;
+            s.art = x.pickArt.get(i);
             s.color = 0xFFE8B04A;
-            s.intent = Picks.watch(this, x.pick);
-            s.label = x.pick.name + " trailer";
+            s.intent = Picks.watch(this, p);
+            s.label = p.name + " trailer";
             s.dwellMs = 6_000;
-            out.add(s);
+            s.key = Continue.key(p.name);
+            s.decline = "Not interested";
+            picks.add(s);
         }
-        // nine cards at most, so the dots stay a glance; the pick (last) always keeps its place
-        while (out.size() > 9) out.remove(out.size() - 2);
+        // the TV itself, before anything to watch: a remote about to go flat, and storage running out
+        // (a full TV slows down). Each can be put off with hold OK until its reading changes
+        for (int i = 0; remotes != null && i < remotes.size(); i++) {
+            String[] d = remotes.get(i);
+            SmartStack.Slide s = new SmartStack.Slide();
+            s.kicker = "BATTERY LOW";
+            s.title = d[0];
+            s.sub = d[1] + "% left  ·  time for new batteries";
+            s.color = 0xFFE8A33A;
+            s.icon = getDrawable(R.drawable.ic_bluetooth);
+            s.key = "battery:" + d[2] + ":" + Integer.parseInt(d[1]) / 5;
+            s.decline = "Not now";
+            s.action = this::openBluetooth;
+            s.label = d[0];
+            s.dwellMs = 8_000;
+            out.add(0, s);
+        }
+        if (freeBytes >= 0 && freeBytes < 600L * 1024 * 1024) {
+            SmartStack.Slide s = new SmartStack.Slide();
+            s.kicker = "STORAGE ALMOST FULL";
+            s.title = (freeBytes >> 20) + " MB free";
+            s.sub = "A full TV slows down  ·  OK to make room";
+            s.color = 0xFFE06A4A;
+            s.icon = getDrawable(R.drawable.ic_info);
+            s.key = "storage:" + (freeBytes >> 20) / 100;
+            s.decline = "Not now";
+            s.intent = new Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            // Android's storage page uninstalls and clears apps: a kids' profile asks for the PIN first
+            final Intent room = s.intent;
+            s.action = () -> guarded(() -> launch(room, fyW, "storage"));
+            s.label = "storage";
+            out.add(Math.min(out.size(), remotes != null ? remotes.size() : 0), s);
+        }
+        for (int i = out.size() - 1; i >= 0; i--) if (out.get(i).decline != null && "Not now".equals(out.get(i).decline) && taste.declined(out.get(i).key)) out.remove(i);
+        // nine cards at most, so the dots stay a glance: the last suggestions go first, and
+        // tonight's picks (dealt last) always keep their places
+        while (out.size() + picks.size() > 9 && !out.isEmpty()) out.remove(out.size() - 1);
+        out.addAll(picks);
         if (out.isEmpty()) {
             for (Cell cell : cells) {
                 AppRepo.App a = watchable(cell.tag) ? find(cell.tag) : null;
@@ -2493,6 +3001,37 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
         }
         stack.setSlides(out);
+    }
+
+    /**
+     * Fire TV answers most of Android's settings links with a stand-in that only bounces through
+     * Amazon's home (or with nothing at all), and keeps its real pages behind a permission only its
+     * own apps hold. Its launcher does open Settings itself to any app, by name: there it goes.
+     */
+    private Intent fireSettings(Intent wanted) {
+        if (!Trouble.fireTv(this)) return wanted;
+        android.content.pm.ResolveInfo ri = getPackageManager().resolveActivity(wanted, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+        String name = ri != null && ri.activityInfo != null ? ri.activityInfo.name : null;
+        if (name != null && !name.contains("Dummy") && !name.contains("CTS")) return wanted;
+        Intent fire = new Intent("amazon.intent.action.MAINSETTINGS")
+                .setClassName("com.amazon.tv.launcher", "com.amazon.tv.launcher.ui.MainSettingsActivity")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return fire.resolveActivity(getPackageManager()) != null ? fire : wanted;
+    }
+
+    /** Free space where apps keep their data, or -1 when the TV won't say. Off the main thread. */
+    private static long freeStorage() {
+        try {
+            return new android.os.StatFs(android.os.Environment.getDataDirectory().getPath()).getAvailableBytes();
+        } catch (RuntimeException e) {
+            return -1;
+        }
+    }
+
+    /** Control Center, straight to its Bluetooth sheet. */
+    private void openBluetooth() {
+        openCc(false);
+        cc.showBluetoothSoon();
     }
 
     /** A release of the show you're partway through: names matched loosely, ignoring case and punctuation. */
@@ -2508,6 +3047,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private SmartStack.Slide appSlide(AppRepo.App a, String kicker, String sub) {
         SmartStack.Slide s = new SmartStack.Slide();
+        s.key = Taste.app(a.pkg);
+        s.decline = "Don't suggest " + a.label;
         s.kicker = kicker;
         s.title = a.label;
         s.sub = sub;
@@ -2841,30 +3382,49 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void wake() {
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
-        handler.removeCallbacks(goMusic);
         if (photo) setPhoto(false);
         if (racked) setRacked(false);
         // nothing drifts into photo mode under an open panel: the next press would only wake it
         if (resumed && !ccOpen && !editing && !overlayOpen()) {
             handler.postDelayed(rack, RACK_MS);
-            handler.postDelayed(goPhoto, PHOTO_MS);
-            // a song playing: after a little while, Now Playing becomes the screen, in place of the photograph
-            if (listening != null) handler.postDelayed(goMusic, musicClosedAt > 0 && SystemClock.uptimeMillis() - musicClosedAt < 120_000 ? 30_000 : 10_000);
+            // a song playing: the photograph and the song's quiet bar come sooner, as a screensaver
+            // of Aura's own (the full-screen player no longer takes over by itself)
+            handler.postDelayed(goPhoto, listening != null ? MUSIC_PHOTO_MS : PHOTO_MS);
         }
     }
 
-    /** When Now Playing was last put away by hand: it waits longer before coming back by itself. */
-    private long musicClosedAt;
+    /** With music on, how long home idles before the photograph and the song take the screen. */
+    private static final long MUSIC_PHOTO_MS = 20_000;
 
-    private final Runnable goMusic = this::musicNow;
+    /** The song's small bar over the photograph in photo mode, while music plays; null otherwise. */
+    private MusicStrip photoMusic;
 
-    private void musicNow() {
-        if (!resumed || listening == null || ccOpen || editing || overlayOpen() || listening.controller == null) return;
-        android.media.session.PlaybackState st = listening.controller.getPlaybackState();
-        if (st == null || st.getState() != android.media.session.PlaybackState.STATE_PLAYING) return;
-        handler.removeCallbacks(goPhoto);
-        openNowPlaying();
-        if (nowPlaying.isOpen()) nowPlaying.restNow();
+    private void photoMusic(boolean on) {
+        if (!on) {
+            MusicStrip m = photoMusic;
+            photoMusic = null;
+            if (m != null) m.stop();
+            return;
+        }
+        MediaWatch.Playing p = listening;
+        if (photoMusic != null || p == null || p.controller == null || !p.playing) return;
+        final MusicStrip m = new MusicStrip(this);
+        FrameLayout.LayoutParams ml = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.START);
+        // above the photograph's clock, lined up with it
+        ml.leftMargin = Ui.dp(64);
+        ml.bottomMargin = Ui.dp(196);
+        root.addView(m, root.indexOfChild(story) + 1, ml);
+        photoMusic = m;
+        try {
+            m.start(p.controller, () -> {
+                root.removeView(m);
+                if (photoMusic == m) photoMusic = null;
+            });
+        } catch (RuntimeException e) {
+            // the player went as it was asked for
+            root.removeView(m);
+            photoMusic = null;
+        }
     }
 
     private boolean overlayOpen() {
@@ -2896,7 +3456,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             bloom.setStrength(0f, 2000);
             story.tick(Calendar.getInstance());
             story.reveal(900);
+            photoMusic(true);
         } else {
+            photoMusic(false);
             racked = false;
             backdrop.setDefocus(HOME_DEFOCUS, 520);
             bloom.setStrength(glow(), 520);
@@ -2912,11 +3474,26 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     // ---- keys --------------------------------------------------------------------------------
 
+    /**
+     * Every press of the remote, with a net under it: a bug in what one key does is noted (Problem
+     * reports) and that press is let go, rather than the home screen closing in the viewer's hands.
+     */
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        keyAt = SystemClock.uptimeMillis();
+        try {
+            return handleKey(e);
+        } catch (RuntimeException ex) {
+            Trouble.caught("key " + KeyEvent.keyCodeToString(e.getKeyCode()), ex);
+            return true;
+        }
+    }
+
+    private boolean handleKey(KeyEvent e) {
         int code = e.getKeyCode();
         boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
-        if (splash != null && !isVolumeKey(code)) {
+        // once it's dissolving, home is there and answers at once (it used to wait out the fade)
+        if (splash != null && !splash.exiting() && !isVolumeKey(code)) {
             // never more than a moment: a press after 9 s takes it away
             if (SystemClock.uptimeMillis() - splashAt > 9000) dropSplash.run();
             return true;
@@ -3056,6 +3633,27 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 }, 250);
                 return swallow(code);
             }
+        }
+        // a Fire TV remote has no next or previous: with music playing, its rewind and fast-forward skip
+        if (first && (code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || code == KeyEvent.KEYCODE_MEDIA_REWIND
+                || code == KeyEvent.KEYCODE_MEDIA_NEXT || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS)) {
+            MediaWatch.Playing p = MediaWatch.now(this);
+            if (p != null && p.controller != null && p.playing) {
+                boolean next = code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || code == KeyEvent.KEYCODE_MEDIA_NEXT;
+                if (next) p.controller.getTransportControls().skipToNext();
+                else p.controller.getTransportControls().skipToPrevious();
+                hud(R.drawable.ic_check, next ? "Next song" : "Previous song");
+                handler.postDelayed(() -> refreshWidgets(false), 600);
+                return swallow(code);
+            }
+        }
+        // channel up and down (and page keys): a page of apps at a time, or a couple of rows
+        if (first && (code == KeyEvent.KEYCODE_CHANNEL_UP || code == KeyEvent.KEYCODE_CHANNEL_DOWN
+                || code == KeyEvent.KEYCODE_PAGE_UP || code == KeyEvent.KEYCODE_PAGE_DOWN) && !cells.isEmpty() && !folderPanel.isOpen()) {
+            boolean back = code == KeyEvent.KEYCODE_CHANNEL_UP || code == KeyEvent.KEYCODE_PAGE_UP;
+            int step = paged ? perPage() : COLS * 2;
+            focusGrid(Math.max(0, Math.min(cells.size() - 1, gridAt + (back ? -step : step))));
+            return swallow(code);
         }
         // a letter on a keyboard remote: straight into finding an app, the letter typed
         if (first && code >= KeyEvent.KEYCODE_A && code <= KeyEvent.KEYCODE_Z && !folderPanel.isOpen()) {
@@ -3231,7 +3829,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private TopShelf shelf;
     private int shelfAt;
-    private String shelfWanted;
+    private volatile String shelfWanted;
+    /** The song the app previews last saw ({@code pkg|title|playing|has cover}): a change draws them again. */
+    private String shelfSong;
 
     /**
      * Resting on an app in the top row brings up its Top Shelf a moment later; anywhere else the
@@ -3252,9 +3852,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         if (c.tag.equals(shelf.shownFor())) return;
         shelfWanted = c.tag;
+        // the last app's cards don't stay over this one while its own are found
+        shelf.fade();
         // while the home screen is still arriving (the TV just started or woke), an app's cards
-        // wait for its tile: nothing appears above the dock before the dock itself
-        handler.postDelayed(shelfLoad, Math.max(650, introUntil - SystemClock.uptimeMillis()));
+        // wait for its tile: nothing appears above the dock before the dock itself. Cards found a
+        // moment ago come almost at once; others wait until focus has settled on the app
+        long settle = TopShelf.cached(c.tag) ? 150 : 650;
+        handler.postDelayed(shelfLoad, Math.max(settle, introUntil - SystemClock.uptimeMillis()));
     }
 
     /** When the intro's last tile has settled: Top Shelf waits for it. */
@@ -3270,7 +3874,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             return;
         }
         final Context app = getApplicationContext();
-        worker.execute(() -> {
+        // on a thread of its own: behind home's worker (the widgets, artwork, the stack) the cards
+        // were sometimes quick and sometimes seconds late
+        shelfWorker.execute(() -> {
+            // focus moved on while this waited: the app it's on now has its own turn
+            if (!pkg.equals(shelfWanted)) return;
             final List<Continue.Item> items = TopShelf.items(app, pkg);
             runOnUiThread(() -> {
                 if (isDestroyed() || !pkg.equals(shelfWanted) || zone != GRID || rowOf(gridAt) > 0) return;
@@ -3299,7 +3907,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void hideShelf() {
         handler.removeCallbacks(shelfLoad);
         shelfWanted = null;
-        if (shelf.shownFor() == null) return;
+        if (!shelf.up()) return;
         shelf.hide();
         if (dashboard) for (Widget w : widgets) w.animate().alpha(1f).setDuration(380).setStartDelay(120).setInterpolator(Ui.SOFT).start();
     }
@@ -3325,7 +3933,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private void closeNowPlaying() {
         if (!nowPlaying.isOpen()) return;
-        musicClosedAt = SystemClock.uptimeMillis();
         for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         nowPlaying.close();
@@ -3502,6 +4109,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             faces.put(switcherOver, Previews.painter(fresh));
             switcher.face(switcherOver, android.os.SystemClock.uptimeMillis());
         }
+        // checked again as it opens: a list read before a switch to a kids' profile (or before an
+        // app was hidden from it) mustn't offer what that profile hides
+        java.util.LinkedHashMap<String, Long> shown = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, Long> e : recent.entrySet()) if (HomeKeys.allowed(this, e.getKey())) shown.put(e.getKey(), e.getValue());
         beforeSwitcher = getCurrentFocus();
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
@@ -3509,7 +4120,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         stack.hold(true);
         // the photograph beneath the frost stops drifting: otherwise the whole screen redraws every 80 ms
         backdrop.stop();
-        switcher.open(new java.util.LinkedHashMap<>(recent), switcherOver);
+        switcher.open(shown, switcherOver);
         // the frost is opaque from the first frame, so nothing beneath it needs to draw at all
         for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
     }
@@ -3663,6 +4274,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         final String name = WIDGET_NAMES[id], key = WIDGET_IDS[id];
         swallow(heldConfirm);
         List<AppMenu.Item> items = new ArrayList<>();
+        // the card on show first: leave it out of the stack from now on
+        final SmartStack.Slide card = w == fyW ? stack.current() : null;
+        if (card != null && card.key != null && card.decline != null) {
+            items.add(new AppMenu.Item(R.drawable.ic_hide, card.decline, () -> {
+                closeMenu(w);
+                Taste.decline(getApplicationContext(), card.key);
+                hud(R.drawable.ic_hide, "It won't come back  ·  Settings → Widgets brings it back");
+                refreshWidgets(true);
+            }));
+        }
         if (n > 0) items.add(new AppMenu.Item(R.drawable.ic_move, "Move left", () -> moveWidget(w, -1)));
         if (n < widgets.size() - 1) items.add(new AppMenu.Item(R.drawable.ic_move, "Move right", () -> moveWidget(w, 1)));
         // what the stack deals: its cards are chosen on the Widgets page
@@ -3957,6 +4578,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private List<String[]> liveInputs() {
         List<String[]> out = new ArrayList<>();
         if (tim == null) return out;
+        try {
+            readInputs(out);
+        } catch (RuntimeException e) {
+            // the TV's input service not ready yet (just after a restart) or missing on this box:
+            // no input tiles this time, rather than a home screen that stops as the TV starts
+            out.clear();
+        }
+        return out;
+    }
+
+    private void readInputs(List<String[]> out) {
         for (TvInputInfo info : tim.getTvInputList()) {
             // digital sources only: composite (AV) ports report "connected" even with nothing playing
             int type = info.getType();
@@ -3971,7 +4603,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     : Cec.name(this, String.valueOf(info.loadLabel(this)).replaceAll("(?i)^hdmi\\s*(\\d)", "HDMI $1"));
             out.add(new String[]{info.getId(), label});
         }
-        return out;
     }
 
     /** A set-top box or console just woke up: it takes the first tile and says so. */
@@ -4280,6 +4911,19 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 backdrop.reload();
                 cc.picksChanged();
                 showWeather();
+                // their own Smart Stack (what they watch, what they turned down) and Top Shelf, not
+                // the last person's until the next press of Home
+                TopShelf.clearCache();
+                hideShelf();
+                if (!widgets.isEmpty()) refreshWidgets(true);
+                // the music card read again for this person: a kids' profile doesn't see what it hides
+                minimisedPkg = null;
+                updateListening();
+                // and their own recent apps, read afresh (a kids' profile without what it hides)
+                recentCache = null;
+                recentAt = 0;
+                openWhenWarm = false;
+                if (!apps.isEmpty()) warmRecents(false);
                 break;
             case "shelf":
                 TopShelf.clearCache();
@@ -4366,6 +5010,46 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         stWifi.setImageAlpha(Compat.online(cm) ? 255 : 80);
         BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
         stBt.setImageAlpha(ba != null && ba.isEnabled() ? 255 : 80);
+        stVpn.setVisibility(Vpn.on(this) ? View.VISIBLE : View.GONE);
+    }
+
+    /** A VPN coming up or going down: the status bar (and Control Center, if open) follow at once. */
+    private android.net.ConnectivityManager.NetworkCallback vpnWatch;
+
+    private void watchVpn(boolean on) {
+        ConnectivityManager cm = Compat.svc(this, ConnectivityManager.class);
+        if (cm == null) return;
+        try {
+            if (on && vpnWatch == null) {
+                vpnWatch = new ConnectivityManager.NetworkCallback() {
+                    @Override
+                    public void onAvailable(android.net.Network n) {
+                        changed();
+                    }
+
+                    @Override
+                    public void onLost(android.net.Network n) {
+                        changed();
+                    }
+
+                    private void changed() {
+                        handler.post(() -> {
+                            if (isDestroyed()) return;
+                            refreshStatus();
+                            if (ccOpen) cc.refresh();
+                        });
+                    }
+                };
+                cm.registerNetworkCallback(new android.net.NetworkRequest.Builder()
+                        .addTransportType(android.net.NetworkCapabilities.TRANSPORT_VPN)
+                        .removeCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(), vpnWatch);
+            } else if (!on && vpnWatch != null) {
+                cm.unregisterNetworkCallback(vpnWatch);
+                vpnWatch = null;
+            }
+        } catch (RuntimeException e) {
+            vpnWatch = null;
+        }
     }
 
     @Override
@@ -4375,6 +5059,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         story.set(w, photo);
         if (first && !wallReady) {
             wallReady = true;
+            wallAt = SystemClock.uptimeMillis();
             progressSplash();
         }
     }
@@ -4434,7 +5119,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 public boolean onPreDraw() {
                     page.getViewTreeObserver().removeOnPreDrawListener(this);
                     long held = SystemClock.uptimeMillis() - splashAt;
-                    handler.postDelayed(HomeActivity.this::finishSplash, Math.max(0, 1900 - held));
+                    // a moment for the sun to be seen rising, no more: ready means home
+                    handler.postDelayed(HomeActivity.this::finishSplash, Math.max(0, (splash != null && splash.quick ? 0 : 600) - held));
                     return true;
                 }
             });
@@ -4461,6 +5147,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (splash != s) return;
         root.removeView(s);
         splash = null;
+        long now = SystemClock.uptimeMillis();
+        homeAt = now;
+        Trouble.started(this, now - createdAt, appsAt > 0 ? appsAt - createdAt : -1, appsLoadMs, appsCount,
+                wallAt > 0 ? wallAt - createdAt : -1);
         // the landing never played (no frames came): the home screen its intro would fade in, shown now
         if ((dock ? dockGlass : status).getAlpha() == 0f) {
             for (View v : new View[]{sidebar, status, greeting, skyW, fyW, tdW, gridLabel, topCc, topFind, topSettings, dockGlass, tvosHint}) if (v != null) v.setAlpha(1f);

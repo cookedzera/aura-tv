@@ -126,6 +126,47 @@ final class Ui {
         t.setText(s);
     }
 
+    /**
+     * {@code s} on at most {@code lines} lines {@code widthPx} wide: as large as it can be, from
+     * {@code maxSp} down to {@code minSp}, wrapping by words as it will be drawn. Only a text too
+     * long even then is shortened at its end.
+     */
+    static void fitLines(TextView t, CharSequence s, float widthPx, int lines, float maxSp, float minSp) {
+        android.text.TextPaint p = new android.text.TextPaint(t.getPaint());
+        int w = Math.max(1, Math.round(widthPx));
+        float sp = maxSp;
+        while (sp > minSp) {
+            p.setTextSize(sp * scaled);
+            @SuppressWarnings("deprecation")
+            android.text.StaticLayout l = new android.text.StaticLayout(s, p, w, android.text.Layout.Alignment.ALIGN_NORMAL,
+                    t.getLineSpacingMultiplier(), t.getLineSpacingExtra(), t.getIncludeFontPadding());
+            if (l.getLineCount() <= lines) break;
+            sp -= 0.5f;
+        }
+        t.setSingleLine(lines == 1);
+        t.setMaxLines(lines);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, Math.max(sp, minSp));
+        t.setText(s);
+    }
+
+    private static final java.util.regex.Pattern NOISE = java.util.regex.Pattern.compile(
+            "\\s*(?:[-–—]\\s*(?:\\d{4}\\s+)?remaster(?:ed)?(?:\\s+(?:version|\\d{4}))*"
+                    + "|[(\\[](?:official|remaster|lyric|audio|visuali[sz]er|hd|4k)[^)\\]]*[)\\]])\\s*$",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /** A song's name without the release's noise ("- Remastered 2011", "(Official Video)"), which crowds a small card. */
+    static String songTitle(String s) {
+        if (s == null) return "";
+        String out = s.trim();
+        for (int i = 0; i < 3; i++) {
+            String next = NOISE.matcher(out).replaceFirst("").trim();
+            if (next.equals(out) || next.isEmpty()) break;
+            out = next;
+        }
+        return out;
+    }
+
     static int withAlpha(int color, int a) {
         return (Math.max(0, Math.min(255, a)) << 24) | (color & 0xFFFFFF);
     }

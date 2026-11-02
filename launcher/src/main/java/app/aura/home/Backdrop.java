@@ -148,6 +148,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     private float intro = 1f, parallax, parallaxFrom, parallaxTo;
     private int accent = 0xFF8AA4C8, accentFrom = accent, accentTo = accent;
     private int frame, generation;
+    /** Photographs in a row that couldn't be read: the first few are skipped at once, then it waits. */
+    private int failures;
     private final List<Tick> ticks = new ArrayList<>();
     private ColorFilter dim;
     private int dimLevel = 64;
@@ -212,6 +214,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     void show(String path) {
         wanted = path;
         if (!loading && incoming == null) nextAt = 0;
+        kick();
     }
 
     /**
@@ -290,6 +293,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
 
     void skip() {
         if (incoming == null && !loading) nextAt = 0;
+        kick();
     }
 
     /**
@@ -303,12 +307,14 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         defocusStart = SystemClock.uptimeMillis();
         if (ms <= 0) defocus = to;
         invalidate();
+        kick();
     }
 
     void setParallax(float px) {
         parallaxFrom = parallax;
         parallaxTo = px;
         parallaxStart = SystemClock.uptimeMillis();
+        kick();
     }
 
     int accent() {
@@ -353,6 +359,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         intro = 0f;
         introStart = current != null ? SystemClock.uptimeMillis() : -1;
         invalidate();
+        kick();
     }
 
     void addMirror(View v) {
@@ -363,34 +370,56 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         mirrors.remove(v);
     }
 
+    /** When the drift last moved and the glass last followed: paced by the clock, not by counting frames. */
+    private long lastDrift, lastMirror;
+
+    /**
+     * One frame. While something moves (a fade, the parallax, the rack focus, the intro) it asks for
+     * the very next frame. Otherwise only the slow drift is left, which moves about a pixel a second:
+     * it sleeps until its next step (15 a second, or 2 in Light mode) instead of waking the main
+     * thread at every one of the screen's 60 refreshes to decide there was nothing to do.
+     */
     @Override
     public void doFrame(long frameTimeNanos) {
         if (!running) return;
         long now = SystemClock.uptimeMillis();
         boolean fade = incoming != null || intro < 1f || now - defocusStart < defocusMs;
         boolean parallax = now - parallaxStart < PARALLAX_MS;
-        boolean drift = (++frame % (calm ? 30 : 4)) == 0;
+        long driftEvery = calm ? 500 : 66;
+        boolean drift = now - lastDrift >= driftEvery;
         boolean busy = fade || parallax || drift;
 
-        // the drift alone moves ~1px/s, so a quarter of the rate is visually identical and spares
-        // the CPU and GPU on a TV that's also decoding video
         if (busy) {
+            frame++;
+            if (drift) lastDrift = now;
             step(now);
             invalidate();
             for (int i = 0; i < ticks.size(); i++) ticks.get(i).onTick(now);
             // blur is 1/22 scale, so a 4dp parallax nudge is invisible inside glass; keep mirrors cached while focus animates
             // through a crossfade the glass follows every third frame: its blur changes too slowly for
             // the difference to show, and two dozen panes redrawn per frame is what made fades stutter
-            if (fade ? frame % 3 == 0 : !parallax && (frame % (calm ? 30 : 12)) == 0)
-            for (int i = 0; i < mirrors.size(); i++) {
-                View v = mirrors.get(i);
-                if (v.isShown() && v.getAlpha() > 0f) v.invalidate();
+            if (fade ? frame % 3 == 0 : !parallax && now - lastMirror >= (calm ? 500 : 200)) {
+                lastMirror = now;
+                for (int i = 0; i < mirrors.size(); i++) {
+                    View v = mirrors.get(i);
+                    if (v.isShown() && v.getAlpha() > 0f) v.invalidate();
+                }
             }
         }
         if (incoming == null && !loading && now >= nextAt && (walls.size() > 1 || wanted != null || stale) && current != null) {
             load(index + 1, false);
         }
-        Choreographer.getInstance().postFrameCallback(this);
+        Choreographer ch = Choreographer.getInstance();
+        if (fade || parallax || incoming != null) ch.postFrameCallback(this);
+        else ch.postFrameCallbackDelayed(this, Math.max(0, lastDrift + driftEvery - SystemClock.uptimeMillis() - 4));
+    }
+
+    /** Something has started to move: frames at once, not at the drift's next step. */
+    private void kick() {
+        if (!running) return;
+        Choreographer ch = Choreographer.getInstance();
+        ch.removeFrameCallback(this);
+        ch.postFrameCallback(this);
     }
 
     private void step(long now) {
@@ -565,15 +594,28 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         final int gen = generation;
         final Wallpaper w = walls.get(idx);
         io.execute(() -> {
-            final Slide s = decode(w);
+            Slide made;
+            try {
+                made = decode(w);
+            } catch (Throwable e) {
+                // whatever happened, the answer still goes back: "loading" must never stay stuck on
+                Trouble.caught("photo", e);
+                made = null;
+            }
+            final Slide s = made;
             main.post(() -> {
                 if (gen != generation) return;
                 loading = false;
                 index = idx;
                 if (s == null) {
-                    nextAt = SystemClock.uptimeMillis() + 5_000;
+                    // nothing on screen yet (the boot screen is waiting for it): the next photograph
+                    // at once, a few times, rather than five seconds of waiting each
+                    failures++;
+                    nextAt = SystemClock.uptimeMillis() + (current == null && failures < Math.min(4, walls.size()) ? 0 : 5_000);
+                    if (nextAt <= SystemClock.uptimeMillis() && running) load(idx + 1, false);
                     return;
                 }
+                failures = 0;
                 prefs.edit().putInt("wall", idx).apply();
                 begin(s);
             });
@@ -643,7 +685,11 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         return -1;
     }
 
+    /** The photograph on show's tiny frosted copy, for the cover over a slow Home on older Fire TVs ({@link HomeCover}). */
+    static volatile Bitmap lastBlur;
+
     private void begin(Slide s) {
+        lastBlur = s.blur;
         long now = SystemClock.uptimeMillis();
         s.start = now;
         path(s);
@@ -662,6 +708,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         }
         place(s, now);
         if (running) play(s, true);
+        // a crossfade (or the first photograph) needs every frame from now
+        kick();
         if (listener != null) listener.onWallpaperChanged(s.wall, s.lumaTop, s.lumaBottom, first);
         invalidate();
     }
@@ -706,21 +754,9 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             s.lumaTop = s.lumaBottom = 0f;
             return s;
         }
-        try (InputStream in = w.onDisk() ? new java.io.FileInputStream(w.path) : getContext().getAssets().open("wallpapers/" + w.file)) {
-            Bitmap b = BitmapFactory.decodeStream(in);
+        try {
+            Bitmap b = read(w);
             if (b == null) return null;
-            // no larger than the screen at the drift's deepest zoom (1.2x): a 1080p photograph on a
-            // 720p TV would hold twice the memory for detail no one can see
-            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
-            float k = 1.2f * Math.max(Math.max(dm.widthPixels, dm.heightPixels) / (float) b.getWidth(),
-                    Math.min(dm.widthPixels, dm.heightPixels) / (float) b.getHeight());
-            if (k < 0.95f) {
-                Bitmap fit = Bitmap.createScaledBitmap(b, Math.round(b.getWidth() * k), Math.round(b.getHeight() * k), true);
-                if (fit != b) {
-                    b.recycle();
-                    b = fit;
-                }
-            }
             b.prepareToDraw();
             Slide s = new Slide();
             s.wall = w;
@@ -739,7 +775,46 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             return s;
         } catch (IOException | RuntimeException e) {
             return null;
+        } catch (OutOfMemoryError e) {
+            // a 1 GB TV short of room: this photograph is skipped, the home screen stays
+            Trouble.caught("photo (memory)", e);
+            return null;
         }
+    }
+
+    private java.io.InputStream open(Wallpaper w) throws IOException {
+        return w.onDisk() ? new java.io.FileInputStream(w.path) : getContext().getAssets().open("wallpapers/" + w.file);
+    }
+
+    /**
+     * The photograph, no larger than the screen at the drift's deepest zoom (1.2x): a 1080p
+     * photograph on a 720p TV would hold twice the memory for detail no one can see. Decoded
+     * straight at that size: the full-size picture is never held in memory, even for a moment
+     * (it was decoded whole and then shrunk, an extra 8 MB each time the photograph changed).
+     */
+    private Bitmap read(Wallpaper w) throws IOException {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        try (InputStream in = open(w)) {
+            BitmapFactory.decodeStream(in, null, o);
+        }
+        if (o.outWidth <= 0 || o.outHeight <= 0) return null;
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        float k = 1.2f * Math.max(Math.max(dm.widthPixels, dm.heightPixels) / (float) o.outWidth,
+                Math.min(dm.widthPixels, dm.heightPixels) / (float) o.outHeight);
+        o.inJustDecodeBounds = false;
+        if (k < 0.95f) {
+            o.inScaled = true;
+            o.inDensity = o.outWidth;
+            o.inTargetDensity = Math.max(1, Math.round(o.outWidth * k));
+        }
+        Bitmap b;
+        try (InputStream in = open(w)) {
+            b = BitmapFactory.decodeStream(in, null, o);
+        }
+        // drawn through matrices only: no density of its own to scale by anywhere
+        if (b != null) b.setDensity(Bitmap.DENSITY_NONE);
+        return b;
     }
 
     /**

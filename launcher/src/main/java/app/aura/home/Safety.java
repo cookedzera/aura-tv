@@ -32,6 +32,8 @@ final class Safety {
         final Context c = ctx.getApplicationContext();
         final Thread.UncaughtExceptionHandler before = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            // what went wrong and where, kept for Settings → Problem reports
+            Trouble.crash(t, e);
             try {
                 SharedPreferences p = Prefs.device(c);
                 List<String> times = recent(p.getString("crashes", ""), System.currentTimeMillis() - AFTER_MS);
@@ -77,7 +79,7 @@ final class Safety {
         final String home = original(c);
         if (home == null || !Adb.on(c)) return null;
         final Context app = c.getApplicationContext();
-        new Thread(() -> restoreHome(app), "give-home").start();
+        new SafeThread(() -> restoreHome(app), "give-home").start();
         return "home";
     }
 
@@ -113,7 +115,7 @@ final class Safety {
     static void tidy(Context ctx) {
         final Context c = ctx.getApplicationContext();
         if (Prefs.device(c).getBoolean("tidied_76", false)) return;
-        new Thread(() -> {
+        new SafeThread(() -> {
             for (String dir : new String[]{"flyovers", "museum"}) wipe(new java.io.File(c.getFilesDir(), dir));
             Prefs.device(c).edit().putBoolean("tidied_76", true).apply();
         }, "tidy").start();

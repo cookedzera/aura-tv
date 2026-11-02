@@ -46,7 +46,7 @@ final class Power {
         if (!Adb.on(c)) return false;
         // the remote's own Sleep key, through the TV's debugging link
         final Context app = c.getApplicationContext();
-        new Thread(() -> Adb.run(app, "input keyevent 223"), "standby").start();
+        new SafeThread(() -> Adb.run(app, "input keyevent 223"), "standby").start();
         return true;
     }
 

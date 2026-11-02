@@ -71,7 +71,7 @@ final class SpeedTest {
         long start = SystemClock.elapsedRealtime(), end = start + PHASE_MS;
         Thread[] th = new Thread[STREAMS];
         for (int i = 0; i < STREAMS; i++) {
-            th[i] = new Thread(() -> {
+            th[i] = new SafeThread(() -> {
                 byte[] buf = new byte[32 * 1024];
                 while (!stop.get() && SystemClock.elapsedRealtime() < end) {
                     try {

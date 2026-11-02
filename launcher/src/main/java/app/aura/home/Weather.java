@@ -157,7 +157,19 @@ final class Weather {
     }
 
     /** Fahrenheit and miles an hour where those are what people use: the US and a few others. */
-    static boolean fahrenheit() {
+    /** Settings → Temperature: "auto" (by the TV's country), "c" or "f". Shared by every profile on the TV. */
+    static final String UNIT = "wx_unit";
+    static final String[] UNITS = {"auto", "c", "f"};
+
+    static String unit(Context c) {
+        String u = prefs(c).getString(UNIT, "auto");
+        return java.util.Arrays.asList(UNITS).contains(u) ? u : "auto";
+    }
+
+    /** Fahrenheit (and mph) when chosen, or, on Auto, in the countries that use it. */
+    static boolean fahrenheit(Context c) {
+        String u = unit(c);
+        if (!u.equals("auto")) return u.equals("f");
         switch (Locale.getDefault().getCountry()) {
             case "US": case "LR": case "MM": case "BS": case "BZ": case "KY": case "PW": case "FM": case "MH":
                 return true;
@@ -173,6 +185,19 @@ final class Weather {
 
     private static SharedPreferences prefs(Context c) {
         return c.getSharedPreferences("aura", Context.MODE_PRIVATE);
+    }
+
+    /**
+     * The country this TV is in, as two capital letters, or "": from the same lookup that finds the
+     * weather's city, else the TV's time zone for the commonest cases, else its locale.
+     */
+    static String country(Context c) {
+        String cc = prefs(c).getString("geo_country", "");
+        if (cc.length() == 2) return cc.toUpperCase(Locale.ROOT);
+        String tz = java.util.TimeZone.getDefault().getID();
+        if (tz.equals("Asia/Kolkata") || tz.equals("Asia/Calcutta")) return "IN";
+        String loc = Locale.getDefault().getCountry();
+        return loc.length() == 2 ? loc.toUpperCase(Locale.ROOT) : "";
     }
 
     /** The last reading, or null before the first one. */
@@ -203,7 +228,8 @@ final class Weather {
                 double lat = g.optDouble("latitude"), lon = g.optDouble("longitude");
                 if (!Double.isNaN(lat) && !Double.isNaN(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
                     p.edit().putFloat("geo_lat", (float) lat).putFloat("geo_lon", (float) lon)
-                            .putString("wx_city", g.optString("city")).putLong("geo_at", now).apply();
+                            .putString("wx_city", g.optString("city")).putString("geo_country", g.optString("country_code", ""))
+                            .putLong("geo_at", now).apply();
                     placeSun(c);
                     changed = true;
                 }
@@ -211,18 +237,18 @@ final class Weather {
             float lat = p.getFloat("geo_lat", Float.NaN), lon = p.getFloat("geo_lon", Float.NaN);
             // the same one request carries the week and the next hours, for the weather card
             if (!Float.isNaN(lat) && !Float.isNaN(lon) && (now - p.getLong("wx_at", 0) > WEATHER_MS || !p.contains("wx_json")
-                    || p.getBoolean("wx_f", false) != fahrenheit())) {
+                    || p.getBoolean("wx_f", false) != fahrenheit(c))) {
                 String url = String.format(Locale.ROOT,
                         "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
                                 + "&current=temperature_2m,weather_code,is_day,apparent_temperature,relative_humidity_2m,wind_speed_10m"
                                 + "&hourly=temperature_2m,weather_code,precipitation_probability,is_day&forecast_hours=36"
                                 + "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=7"
-                                + "&timezone=auto" + (fahrenheit() ? "&temperature_unit=fahrenheit&wind_speed_unit=mph" : ""),
+                                + "&timezone=auto" + (fahrenheit(c) ? "&temperature_unit=fahrenheit&wind_speed_unit=mph" : ""),
                         lat, lon);
                 String body = get(url);
                 JSONObject cur = new JSONObject(body).getJSONObject("current");
                 p.edit().putInt("wx_temp", (int) Math.round(cur.getDouble("temperature_2m"))).putInt("wx_code", cur.getInt("weather_code"))
-                        .putBoolean("wx_day", cur.optInt("is_day", 1) == 1).putString("wx_json", body).putBoolean("wx_f", fahrenheit()).putLong("wx_at", now).apply();
+                        .putBoolean("wx_day", cur.optInt("is_day", 1) == 1).putString("wx_json", body).putBoolean("wx_f", fahrenheit(c)).putLong("wx_at", now).apply();
                 changed = true;
             }
         } catch (IOException | org.json.JSONException | RuntimeException ignored) {

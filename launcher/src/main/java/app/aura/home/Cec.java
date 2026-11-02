@@ -35,7 +35,7 @@ final class Cec {
     private static void refresh(Context c) {
         if (reading || SystemClock.elapsedRealtime() - readAt < 30_000 || !Reports.allowed(c)) return;
         reading = true;
-        new Thread(() -> {
+        new SafeThread(() -> {
             Map<Integer, String> found = new HashMap<>();
             Reports.read("hdmi_control", new String[0], s -> {
                 Matcher m = DEVICE.matcher(s);

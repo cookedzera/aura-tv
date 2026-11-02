@@ -45,7 +45,7 @@ final class ProfileButton {
             return;
         }
         proc = p;
-        Thread t = new Thread(() -> {
+        Thread t = new SafeThread(() -> {
             try (BufferedReader in = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
                 for (String line; (line = in.readLine()) != null; ) {
                     if (!line.contains("START u") || !line.contains(PICKER)) continue;

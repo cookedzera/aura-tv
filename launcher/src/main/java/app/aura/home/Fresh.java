@@ -47,24 +47,30 @@ final class Fresh {
     /** Service name as TVmaze writes it, then the Android TV packages that play it. */
     private static final String[][] SERVICES = {
             {"netflix", "com.netflix.ninja", "com.netflix.mediaclient"},
-            {"prime video", "com.amazon.amazonvideo.livingroom", "com.amazon.avod.thirdpartyclient"},
-            {"amazon", "com.amazon.amazonvideo.livingroom", "com.amazon.avod.thirdpartyclient"},
+            // the last of each row are Fire TV's own builds, where they differ
+            {"prime video", "com.amazon.amazonvideo.livingroom", "com.amazon.avod.thirdpartyclient", "com.amazon.avod"},
+            {"amazon", "com.amazon.amazonvideo.livingroom", "com.amazon.avod.thirdpartyclient", "com.amazon.avod"},
             {"hotstar", "in.startv.hotstar", "in.startv.hotstartvonly"},
             {"jiocinema", "com.jio.media.stb.ondemand", "in.startv.hotstar"},
             {"sonyliv", "com.sonyliv"},
             {"zee5", "com.graymatrix.did"},
-            {"youtube", "com.google.android.youtube.tv", "io.gh.reisxd.tizentube.cobalt"},
+            {"youtube", "com.google.android.youtube.tv", "io.gh.reisxd.tizentube.cobalt", "com.amazon.firetv.youtube"},
             {"apple tv", "com.apple.atve.androidtv.appletv"},
             {"mx player", "com.mxtech.videoplayer.television"},
             {"crunchyroll", "com.crunchyroll.crunchyroid"},
     };
     // index renamed when the choosing rules change, so an older day's list is fetched again
-    private static final String DIR = "fresh", INDEX = "fresh2.json";
+    private static final String DIR = "fresh", INDEX = "fresh3.json";
     private static final String API = "https://api.tvmaze.com/";
     private static final String UA = "AuraTV/7 (open-source Android TV home screen)";
     private static final int KEEP = 6;
 
     private Fresh() { }
+
+    /** When today's list was written: anything made from it is made again once this changes. */
+    static long stamp(Context c) {
+        return new File(dir(c), INDEX).lastModified();
+    }
 
     /** True when today's list hasn't been fetched yet. */
     static boolean stale(Context c) {
@@ -75,6 +81,8 @@ final class Fresh {
     static List<Show> load(Context c) {
         List<Show> out = new ArrayList<>();
         File f = new File(dir(c), INDEX);
+        // just updated: the list made under the old rules serves until the day's job makes a new one
+        if (!f.isFile()) f = new File(dir(c), "fresh2.json");
         if (!f.isFile()) return out;
         try (InputStream in = new FileInputStream(f)) {
             JSONArray a = new JSONArray(new String(readAll(in), StandardCharsets.UTF_8));
@@ -107,20 +115,21 @@ final class Fresh {
         Set<Integer> seen = new HashSet<>();
         List<JSONObject[]> picks = new ArrayList<>();
         long now = System.currentTimeMillis();
+        final String country = Weather.country(c);
         try {
             for (long d : new long[]{now, now - 86_400_000L}) {
                 JSONArray eps = new JSONArray(new String(get(API + "schedule/web?date=" + day(new Date(d))), StandardCharsets.UTF_8));
                 for (int i = 0; i < eps.length(); i++) {
                     JSONObject ep = eps.getJSONObject(i);
                     JSONObject show = ep.optJSONObject("_embedded") != null ? ep.getJSONObject("_embedded").optJSONObject("show") : null;
-                    if (show == null || !seen.add(show.optInt("id")) || score(show) < 0) continue;
+                    if (show == null || !seen.add(show.optInt("id")) || score(show, country) < 0) continue;
                     JSONObject ch = show.optJSONObject("webChannel");
                     if (ch == null || packageFor(c, ch.optString("name")) == null) continue;
                     picks.add(new JSONObject[]{ep, show});
                 }
             }
             // what's from here first, then what most people are watching
-            java.util.Collections.sort(picks, (a, b) -> Integer.compare(score(b[1]), score(a[1])));
+            java.util.Collections.sort(picks, (a, b) -> Integer.compare(score(b[1], country), score(a[1], country)));
             for (JSONObject[] p : picks) {
                 if (out.length() >= KEEP) break;
                 JSONObject ep = p[0], show = p[1], ch = show.getJSONObject("webChannel");
@@ -155,22 +164,25 @@ final class Fresh {
             "kannada", "marathi", "bengali", "punjabi", "gujarati", "urdu", "odia", "assamese"));
 
     /**
-     * How much a show belongs on your stack, or -1 to leave it out. Indian shows lead, then
-     * English (and the TV's own language), each ranked by TVmaze's popularity weight; weak
-     * matches in a foreign language never make it.
+     * How much a show belongs on your stack, or -1 to leave it out. Shows from your own country
+     * lead (in India, any of its languages counts as from here), then English and the TV's own
+     * language, each ranked by TVmaze's popularity weight; weak matches in a foreign language never
+     * make it. It used to be India first for every TV, wherever it was.
      */
-    private static int score(JSONObject show) {
+    private static int score(JSONObject show, String country) {
         String lang = show.optString("language", "").toLowerCase(Locale.ROOT);
         JSONObject ch = show.optJSONObject("webChannel");
-        JSONObject country = ch != null ? ch.optJSONObject("country") : null;
-        boolean indian = INDIAN.contains(lang) || country != null && "IN".equals(country.optString("code"));
+        JSONObject from = ch != null ? ch.optJSONObject("country") : null;
+        String code = from != null ? from.optString("code", "") : "";
+        boolean india = "IN".equals(country);
+        boolean local = !country.isEmpty() && country.equals(code) || india && INDIAN.contains(lang);
         String mine = Locale.getDefault().getDisplayLanguage(Locale.ENGLISH).toLowerCase(Locale.ROOT);
-        boolean understood = indian || "english".equals(lang) || lang.equals(mine);
+        boolean understood = local || "english".equals(lang) || lang.equals(mine);
         if (!understood) return -1;
         int weight = show.optInt("weight", 0);
-        // a niche English web show isn't news; an Indian one is, whatever its weight
-        if (!indian && weight < 60) return -1;
-        return (indian ? 1000 : 0) + weight;
+        // a niche web show from elsewhere isn't news; one from here is, whatever its weight
+        if (!local && weight < 60) return -1;
+        return (local ? 1000 : 0) + weight;
     }
 
     /** "S2 · E5 · Episode title", whatever parts TVmaze has. */

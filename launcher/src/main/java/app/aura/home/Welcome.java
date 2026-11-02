@@ -605,10 +605,15 @@ final class Welcome extends FrameLayout {
     }
 
     private void openSettings(String action) {
+        HomeKeys.letTvHomePass();
         try {
             act.startActivity(new android.content.Intent(action).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
         } catch (RuntimeException e) {
-            act.startActivity(new android.content.Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            try {
+                act.startActivity(new android.content.Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (RuntimeException again) {
+                // no settings app this one can open: the welcome stays where it is
+            }
         }
     }
 
@@ -625,7 +630,7 @@ final class Welcome extends FrameLayout {
         }
         setupBusy = true;
         setupStatus.setText("Android is asking on the screen: tick Always allow, then Allow.");
-        new Thread(() -> {
+        new SafeThread(() -> {
             String r = Adb.connect(act);
             act.runOnUiThread(() -> {
                 if (page != 5) {
@@ -744,7 +749,7 @@ final class Welcome extends FrameLayout {
         retireBusy = true;
         retireStatus.setText("Switching it off…");
         final Context app = act.getApplicationContext();
-        new Thread(() -> {
+        new SafeThread(() -> {
             Boolean took = Safety.retireGoogleHome(app, true);
             act.runOnUiThread(() -> {
                 retireBusy = false;
@@ -817,7 +822,7 @@ final class Welcome extends FrameLayout {
         if (pairing || page != 7) return;
         pairing = true;
         setupStatus.setText("Pairing with the TV…");
-        new Thread(() -> {
+        new SafeThread(() -> {
             String r = Adb.pair(act, code);
             act.runOnUiThread(() -> {
                 pairing = false;

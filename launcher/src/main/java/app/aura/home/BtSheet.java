@@ -355,7 +355,7 @@ final class BtSheet extends GlassFrame {
         host.openSettings(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
     }
 
-    private static boolean isConnected(BluetoothDevice d) {
+    static boolean isConnected(BluetoothDevice d) {
         try {
             Object r = BluetoothDevice.class.getMethod("isConnected").invoke(d);
             return Boolean.TRUE.equals(r);
@@ -364,7 +364,30 @@ final class BtSheet extends GlassFrame {
         }
     }
 
-    private static int batteryLevel(BluetoothDevice d) {
+    /**
+     * Connected remotes, controllers and headphones running low (20% or less), as {name, level,
+     * address}: Android knows each one's battery (the same reading its own Bluetooth settings show)
+     * but no app is told. Off the main thread.
+     */
+    static java.util.List<String[]> lowBatteries(android.content.Context c) {
+        java.util.List<String[]> out = new java.util.ArrayList<>();
+        try {
+            BluetoothAdapter a = BluetoothAdapter.getDefaultAdapter();
+            if (a == null || !a.isEnabled()) return out;
+            for (BluetoothDevice d : a.getBondedDevices()) {
+                if (!isConnected(d)) continue;
+                int level = batteryLevel(d);
+                if (level <= 0 || level > 20) continue;
+                String name = d.getName() != null && !d.getName().trim().isEmpty() ? d.getName().trim() : "Your remote";
+                out.add(new String[]{name, String.valueOf(level), d.getAddress()});
+            }
+        } catch (RuntimeException ignored) {
+            // no Bluetooth to ask, or not allowed to: nothing to say
+        }
+        return out;
+    }
+
+    static int batteryLevel(BluetoothDevice d) {
         try {
             Object r = BluetoothDevice.class.getMethod("getBatteryLevel").invoke(d);
             if (r instanceof Integer) {

@@ -18,28 +18,60 @@ public class DailyJob extends JobService {
     @Override
     public boolean onStartJob(JobParameters params) {
         if (params.getJobId() == OLD_FLYOVER_JOB) return false;
-        worker = new Thread(() -> {
+        final android.content.Context c = getApplicationContext();
+        worker = new SafeThread(() -> {
             // downloads and photo resizing, well behind whatever is on screen
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
-            retireScenes();
+            boolean complete = true;
+            // each step on its own: one that fails (offline, a source that changed its answers)
+            // no longer skips the ones after it, and Android always hears the job is done
+            step("retire", () -> {
+                retireScenes();
+                return true;
+            });
             // one small request, first: the photo import below spaces its requests and takes minutes
-            Updater.notice(getApplicationContext());
-            boolean complete = Daily.run(getApplicationContext());
+            step("update-check", () -> {
+                Updater.notice(c);
+                return true;
+            });
+            complete &= step("daily", () -> Daily.run(c));
             // then a few photographs for the wall, from the sources switched on
-            complete &= Gallery.run(getApplicationContext());
-            try {
-                Picks.refresh(getApplicationContext(), false);
-                Fresh.refresh(getApplicationContext());
-            } catch (java.io.IOException e) {
-                complete = false;
-            } catch (InterruptedException e) {
-                return;
-            }
+            complete &= step("photos", () -> Gallery.run(c));
+            complete &= step("picks", () -> {
+                Picks.refresh(c, false);
+                return true;
+            });
+            complete &= step("new-today", () -> {
+                Fresh.refresh(c);
+                return true;
+            });
+            // stopped by Android (onStopJob): it already knows
+            if (Thread.currentThread().isInterrupted()) return;
             // a one-off catch-up that hit a network failure asks to be retried later
             jobFinished(params, !complete && params.getJobId() == Daily.JOB_NOW);
         }, "daily-photos");
         worker.start();
         return true;
+    }
+
+    private interface Step {
+        boolean run() throws Exception;
+    }
+
+    /** One step of the job: false when it couldn't finish. Being offline is normal; anything else is noted. */
+    private static boolean step(String name, Step s) {
+        if (Thread.currentThread().isInterrupted()) return false;
+        try {
+            return s.run();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (java.io.IOException e) {
+            return false;
+        } catch (Throwable e) {
+            Trouble.caught("daily job: " + name, e);
+            return false;
+        }
     }
 
     /**

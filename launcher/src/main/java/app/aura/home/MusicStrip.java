@@ -144,6 +144,8 @@ final class MusicStrip extends LinearLayout {
                 v.setAlpha(0f);
                 v.animate().alpha(1f).setDuration(800).setStartDelay(150).setInterpolator(Ui.SOFT).start();
             }
+            // and the last song's cover doesn't stay on for one that has none (or hasn't arrived yet)
+            shownArt = null;
         }
         shownTitle = t;
         title.setText(t != null ? t : "");
@@ -175,7 +177,7 @@ final class MusicStrip extends LinearLayout {
             fetching = uri;
             final String want = uri;
             final Context app2 = getContext().getApplicationContext();
-            new Thread(() -> {
+            new SafeThread(() -> {
                 Bitmap loaded = Continue.load(app2, want);
                 if (loaded == null) return;
                 MediaWatch.cacheArt(want, loaded);

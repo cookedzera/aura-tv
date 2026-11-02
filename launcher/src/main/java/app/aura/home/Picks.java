@@ -114,7 +114,7 @@ final class Picks {
             {"com.apple.atve.androidtv.appletv", "350"}, {"com.cbs.ott", "531"}, {"com.peacocktv.peacockandroid", "386|387"},
             {"in.startv.hotstar", "122|2336"}, {"com.jio.media.ondemand", "220"}, {"com.graymatrix.did", "232"},
             {"com.sonyliv", "237"}, {"com.crunchyroll.crunchyroid", "283"}, {"com.mubi", "11"},
-            {"com.amazon.avod.thirdpartyclient", "9|119"}, {"com.netflix.mediaclient", "8"},
+            {"com.amazon.avod.thirdpartyclient", "9|119"}, {"com.netflix.mediaclient", "8"}, {"com.amazon.avod", "9|119"},
     };
 
     // renamed (with the posters' "q" prefix) when the posters grew from 185 px, so the pool is made again
@@ -219,6 +219,11 @@ final class Picks {
 
     // ---- reading -------------------------------------------------------------------------------
 
+    /** When the pool was last written: anything made from it is made again once this changes. */
+    static long stamp(Context c) {
+        return new File(new File(c.getFilesDir(), DIR), INDEX).lastModified();
+    }
+
     static List<Pick> load(Context c) {
         List<Pick> out = new ArrayList<>();
         File f = new File(new File(c.getFilesDir(), DIR), INDEX);
@@ -253,14 +258,23 @@ final class Picks {
     static Intent watch(Context c, Pick p) {
         PackageManager pm = c.getPackageManager();
         if (!p.yt.isEmpty()) {
-            Intent v = new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=" + p.yt))
-                    .setPackage("com.google.android.youtube.tv");
+            Uri video = Uri.parse("https://www.youtube.com/watch?v=" + p.yt);
+            Intent v = new Intent(Intent.ACTION_VIEW, video).setPackage("com.google.android.youtube.tv");
             if (v.resolveActivity(pm) != null) return v;
+            // no Android TV YouTube (Fire TV has its own, under another name): whatever app here opens
+            // YouTube's links, as long as it isn't only a browser
+            Intent any = new Intent(Intent.ACTION_VIEW, video);
+            android.content.pm.ResolveInfo ri = pm.resolveActivity(any, PackageManager.MATCH_DEFAULT_ONLY);
+            if (ri != null && ri.activityInfo != null && !"android".equals(ri.activityInfo.packageName)
+                    && ri.activityInfo.packageName.contains("youtube")) return any;
         }
         Intent yt = new Intent(Intent.ACTION_SEARCH).setPackage("com.google.android.youtube.tv")
                 .putExtra(android.app.SearchManager.QUERY, p.query);
-        return yt.resolveActivity(pm) != null ? yt
-                : new Intent("android.search.action.GLOBAL_SEARCH").putExtra(android.app.SearchManager.QUERY, p.query);
+        if (yt.resolveActivity(pm) != null) return yt;
+        Intent global = new Intent("android.search.action.GLOBAL_SEARCH").putExtra(android.app.SearchManager.QUERY, p.query);
+        if (global.resolveActivity(pm) != null) return global;
+        // nothing that searches: YouTube's page for the trailer, in whatever opens links
+        return new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(p.query + " trailer")));
     }
 
     // ---- making the pool -----------------------------------------------------------------------

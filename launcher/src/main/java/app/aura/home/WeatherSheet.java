@@ -177,7 +177,7 @@ final class WeatherSheet extends FrameLayout {
         StringBuilder d = new StringBuilder();
         if (f != null && f.feels != Integer.MIN_VALUE) d.append("Feels like ").append(f.feels).append(unit);
         if (f != null && f.humidity >= 0) d.append(d.length() > 0 ? "  ·  " : "").append("Humidity ").append(f.humidity).append('%');
-        if (f != null && f.wind >= 0) d.append(d.length() > 0 ? "  ·  " : "").append("Wind ").append(f.wind).append(Weather.fahrenheit() ? " mph" : " km/h");
+        if (f != null && f.wind >= 0) d.append(d.length() > 0 ? "  ·  " : "").append("Wind ").append(f.wind).append(Weather.fahrenheit(getContext()) ? " mph" : " km/h");
         details.setText(d);
         details.setVisibility(d.length() > 0 ? VISIBLE : GONE);
         if (f == null) return;

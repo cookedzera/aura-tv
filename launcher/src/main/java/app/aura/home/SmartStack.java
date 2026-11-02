@@ -59,6 +59,12 @@ final class SmartStack extends FrameLayout {
         int tone;
         /** A tiny blurred copy of the artwork, for the fill beside a picture narrower than the card. */
         Bitmap blur;
+        /** What the stack learns this card as (see {@link Taste}): a title's key, or an app's. */
+        String key;
+        /** Holding OK offers to leave it out with these words ("Not interested"), or null. */
+        String decline;
+        /** What OK does when it isn't opening something (a sheet in Control Center), or null. */
+        Runnable action;
     }
 
     interface Listener {
@@ -316,7 +322,12 @@ final class SmartStack extends FrameLayout {
             Drawable.ConstantState cs = s.icon != null ? s.icon.getConstantState() : null;
             icon.setImageDrawable(cs != null ? cs.newDrawable(getResources()).mutate() : s.icon);
             icon.setVisibility(s.icon != null ? View.VISIBLE : View.GONE);
-            Ui.fit(title, s.title == null ? "" : s.title, Ui.dp(250), 20, 14);
+            // a long name (a film's full title) takes a second line rather than being cut short
+            String name = s.title == null ? "" : s.title;
+            android.graphics.Paint m = new android.graphics.Paint(title.getPaint());
+            m.setTextSize(Ui.scaled * 17);
+            if (m.measureText(name) <= Ui.dp(250)) Ui.fit(title, name, Ui.dp(250), 20, 17);
+            else Ui.fitLines(title, name, Ui.dp(250), 2, 17, 13);
             refresh(s);
             if (s.art != null) {
                 art.set(s);
@@ -351,7 +362,7 @@ final class SmartStack extends FrameLayout {
 
         /** What can change on a card while it's on show: its line and how far along. */
         void refresh(Slide s) {
-            sub.setText(s.sub == null ? "" : s.sub);
+            Ui.fit(sub, s.sub == null ? "" : s.sub, Ui.dp(250), 11, 9);
             sub.setVisibility(s.sub == null || s.sub.isEmpty() ? View.GONE : View.VISIBLE);
             bar.set(s.progress);
             bar.setVisibility(s.progress > 0f ? View.VISIBLE : View.GONE);

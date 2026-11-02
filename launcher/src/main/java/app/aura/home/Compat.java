@@ -30,10 +30,37 @@ final class Compat {
      * it competed for every frame, worst just after the TV starts, while Android is busy too.
      */
     static java.util.concurrent.ExecutorService background(String name, int priority) {
-        return java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(() -> {
+        return quiet(1, r -> new SafeThread(() -> {
             android.os.Process.setThreadPriority(priority);
             r.run();
         }, name));
+    }
+
+    /**
+     * A fixed pool whose work handed over after it was shut (a late callback reaching a torn-down
+     * home screen, screensaver or phone link) is dropped, not thrown back as a crash.
+     */
+    private static java.util.concurrent.ExecutorService quiet(int threads, java.util.concurrent.ThreadFactory f) {
+        return new java.util.concurrent.ThreadPoolExecutor(threads, threads, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+                new java.util.concurrent.LinkedBlockingQueue<>(), f, new java.util.concurrent.ThreadPoolExecutor.DiscardPolicy());
+    }
+
+    /** {@code threads} workers at normal priority, for work someone is waiting on; each a {@link SafeThread}. */
+    static java.util.concurrent.ExecutorService pool(String name, int threads) {
+        return quiet(threads, r -> new SafeThread(r, name));
+    }
+
+    /**
+     * A box with no TV inputs to speak of: no live TV support declared (Fire TV sticks, most
+     * streaming boxes). Its input service is missing, and asking it throws every time; that's
+     * simply no inputs there, not a problem worth a report.
+     */
+    static boolean noTvInputs(Context c) {
+        try {
+            return !c.getPackageManager().hasSystemFeature(android.content.pm.PackageManager.FEATURE_LIVE_TV);
+        } catch (RuntimeException e) {
+            return true;
+        }
     }
 
     /** True for the first minutes after the TV started, while Android is still busy starting everything else. */

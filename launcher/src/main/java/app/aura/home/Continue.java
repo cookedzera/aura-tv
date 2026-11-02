@@ -155,7 +155,11 @@ final class Continue {
             final Item it = items.get(i);
             final String uri = uris.get(i);
             if (uri == null) continue;
-            Thread t = new Thread(() -> it.art = load(c, uri), "continue-art");
+            Thread t = new SafeThread(() -> {
+                // behind the screen: these used to compete with every frame, worst just after a restart
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                it.art = load(c, uri);
+            }, "continue-art");
             t.start();
             threads.add(t);
         }
@@ -208,7 +212,12 @@ final class Continue {
                 Item it = new Item();
                 it.title = title;
                 it.pkg = pkg;
-                it.intent = Intent.parseUri(intentUri, Intent.URI_INTENT_SCHEME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                try {
+                    it.intent = Intent.parseUri(intentUri, Intent.URI_INTENT_SCHEME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                } catch (java.net.URISyntaxException e) {
+                    // one malformed row doesn't cost the app's others (it used to end the whole read)
+                    continue;
+                }
                 if (ytClient && !direct) {
                     // open YouTube's preview video inside TizenTube / SmartTube
                     it.intent.setComponent(null);
@@ -254,6 +263,36 @@ final class Continue {
             }
         }
         return out;
+    }
+
+    /**
+     * Asks apps to put their rows on the TV's home screen ({@code only}, or every app that listens).
+     * Google TV's own home sends this when an app arrives; switched off, nothing does, and apps that
+     * wait for it never publish rows Top Shelf can read. (SonyLIV ignores it: it only feeds Google's
+     * Engage.) It isn't a protected broadcast: any app may send it, one app at a time by name. Off
+     * the main thread.
+     */
+    static void askToPublish(Context c, String only) {
+        if (android.os.Build.VERSION.SDK_INT < 26) return;
+        Intent ask = new Intent(TvContract.ACTION_INITIALIZE_PROGRAMS);
+        if (only != null) ask.setPackage(only);
+        List<android.content.pm.ResolveInfo> apps;
+        try {
+            apps = c.getPackageManager().queryBroadcastReceivers(ask, 0);
+        } catch (RuntimeException e) {
+            return;
+        }
+        for (android.content.pm.ResolveInfo r : apps) {
+            if (r.activityInfo == null || c.getPackageName().equals(r.activityInfo.packageName)) continue;
+            try {
+                c.sendBroadcast(new Intent(TvContract.ACTION_INITIALIZE_PROGRAMS)
+                        .setClassName(r.activityInfo.packageName, r.activityInfo.name));
+            } catch (RuntimeException e) {
+                // a TV that keeps it for the system after all: noted once, nobody else asked
+                Trouble.caught("asking apps for their rows", e);
+                return;
+            }
+        }
     }
 
     /** Channel IDs published by YouTube whose title is Music (e.g. "Music", "YouTube Music"). */
@@ -318,7 +357,11 @@ final class Continue {
                 TvContract.PreviewPrograms.COLUMN_EPISODE_DISPLAY_NUMBER, TvContract.PreviewPrograms.COLUMN_SHORT_DESCRIPTION,
                 TvContract.PreviewPrograms.COLUMN_POSTER_ART_URI, TvContract.PreviewPrograms.COLUMN_THUMBNAIL_URI,
                 TvContract.PreviewPrograms.COLUMN_INTENT_URI, TvContract.BaseTvColumns.COLUMN_PACKAGE_NAME,
-                TvContract.PreviewPrograms.COLUMN_LAST_PLAYBACK_POSITION_MILLIS, TvContract.PreviewPrograms.COLUMN_DURATION_MILLIS};
+                TvContract.PreviewPrograms.COLUMN_LAST_PLAYBACK_POSITION_MILLIS, TvContract.PreviewPrograms.COLUMN_DURATION_MILLIS,
+                TvContract.PreviewPrograms.COLUMN_CHANNEL_ID};
+        // which of each app's rows are yours (continue watching, your list) and which are its shop window
+        Map<Long, Integer> rowRank = rowRanks(c);
+        Map<String, Integer> bestRank = new HashMap<>();
         Map<String, Item> best = new HashMap<>();
         Map<String, String> pictures = new HashMap<>();
         // no selection (see previews); the rows come in each app's own order, its first pick first
@@ -331,9 +374,14 @@ final class Continue {
                 if (title == null || intentUri == null || pkg == null || picture == null || !apps.contains(pkg)
                         || skip.contains(key(title))) continue;
                 long pos = cur.getLong(8), dur = cur.getLong(9);
+                Integer r = rowRank.get(cur.getLong(10));
+                int rank = r != null ? r : 0;
                 Item had = best.get(pkg);
-                // an app's first pick, unless something further down its row is partway through
-                if (had != null && (had.progress > 0f || pos <= 0 || dur <= 0)) continue;
+                // an app's first pick from its most personal row; something partway through beats all
+                if (had != null) {
+                    boolean partway = pos > 0 && dur > 0;
+                    if (had.progress > 0f || !partway && rank <= bestRank.get(pkg)) continue;
+                }
                 Item it = new Item();
                 try {
                     it.intent = Intent.parseUri(intentUri, Intent.URI_INTENT_SCHEME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -355,7 +403,10 @@ final class Continue {
                     parts.add(cur.getString(3));
                 }
                 it.sub = TextUtils.join("  ·  ", parts);
+                // what the row is called says what it is, even when the app leaves out the progress
+                if (it.progress <= 0f) it.kicker = rank == 3 ? "CONTINUE WATCHING" : rank == 2 ? "ON YOUR LIST" : null;
                 best.put(pkg, it);
+                bestRank.put(pkg, rank);
                 pictures.put(pkg, picture);
             }
         } catch (Exception ignored) {
@@ -377,9 +428,87 @@ final class Continue {
         return out;
     }
 
+    /**
+     * How personal each app row is, by its name: 3 for what you're partway through ("Continue
+     * watching", "Resume"), 2 for your own list ("My List", "Watchlist", "Subscriptions"), 1 for
+     * picks made for you ("Top picks for you", "Recommended"), 0 for an app's shop window
+     * ("Trending now", "New releases"). The rows of every app that lets them be searched can be
+     * read, with their names; an app's first row used to win, whatever it was.
+     */
+    private static Map<Long, Integer> rowRanks(Context c) {
+        Map<Long, Integer> out = new HashMap<>();
+        String[] cols = {TvContract.Channels._ID, TvContract.Channels.COLUMN_DISPLAY_NAME};
+        try (Cursor cur = c.getContentResolver().query(TvContract.Channels.CONTENT_URI, cols, null, null, null)) {
+            if (cur == null) return out;
+            while (cur.moveToNext()) {
+                String name = cur.getString(1);
+                if (name == null) continue;
+                out.put(cur.getLong(0), rank(name));
+            }
+        } catch (Exception ignored) {
+            // no names here: every row counts the same, as before
+        }
+        return out;
+    }
+
+    static int rank(String rowName) {
+        String n = rowName.toLowerCase(Locale.ROOT);
+        if (n.contains("continue") || n.contains("resume") || n.contains("keep watching") || n.contains("watch next")
+                || n.contains("in progress")) return 3;
+        if (n.contains("my list") || n.contains("watchlist") || n.contains("watch list") || n.contains("subscription")
+                || n.contains("saved") || n.contains("favourite") || n.contains("favorite") || n.contains("library")) return 2;
+        if (n.contains("for you") || n.contains("top picks") || n.contains("recommended") || n.contains("because you")
+                || n.contains("picked for") || n.contains("your ")) return 1;
+        return 0;
+    }
+
     /** A title as compared across sources: lower case, letters and digits only. */
     static String key(String title) {
         return title == null ? "" : title.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+    }
+
+    /**
+     * Pictures already fetched from the web, by address, most recently used last. Watch Next and
+     * the apps' rows are read again a minute later (or on the next press of Home) and name the same
+     * pictures: they used to be downloaded and decoded again every time. Kept within a share of
+     * what Android lets Aura use, and let go when memory runs short. Only web addresses: an app's
+     * own content address can show a different picture tomorrow (a music app's "now playing").
+     */
+    private static final java.util.LinkedHashMap<String, Bitmap> ART = new java.util.LinkedHashMap<>(32, 0.75f, true);
+    private static long artBytes, artBudget;
+
+    private static Bitmap kept(String uri) {
+        synchronized (ART) {
+            return ART.get(uri);
+        }
+    }
+
+    private static void keep(Context c, String uri, Bitmap b) {
+        synchronized (ART) {
+            if (artBudget == 0) {
+                android.app.ActivityManager am = Compat.svc(c, android.app.ActivityManager.class);
+                int mb = am != null ? am.getMemoryClass() : 96;
+                artBudget = Math.max(6, Math.min(24, mb / 10)) * 1024L * 1024L;
+            }
+            Bitmap was = ART.put(uri, b);
+            if (was != null) artBytes -= was.getByteCount();
+            artBytes += b.getByteCount();
+            java.util.Iterator<Map.Entry<String, Bitmap>> it = ART.entrySet().iterator();
+            while (artBytes > artBudget && it.hasNext()) {
+                Map.Entry<String, Bitmap> e = it.next();
+                if (e.getKey().equals(uri)) continue;
+                artBytes -= e.getValue().getByteCount();
+                it.remove();
+            }
+        }
+    }
+
+    /** Short on memory: the kept pictures go (cards on show keep their own). */
+    static void trim() {
+        synchronized (ART) {
+            ART.clear();
+            artBytes = 0;
+        }
     }
 
     /**
@@ -387,6 +516,15 @@ final class Continue {
      * only while it stays at least that wide, so a small thumbnail is never shrunk further.
      */
     static Bitmap load(Context c, String uri) {
+        boolean web = uri.startsWith("http");
+        Bitmap had = web ? kept(uri) : null;
+        if (had != null) return had;
+        Bitmap b = fetch(c, uri);
+        if (b != null && web) keep(c, uri, b);
+        return b;
+    }
+
+    private static Bitmap fetch(Context c, String uri) {
         try {
             byte[] data;
             if (uri.startsWith("http")) {

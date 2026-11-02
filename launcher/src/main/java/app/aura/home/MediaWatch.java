@@ -64,13 +64,130 @@ public class MediaWatch extends NotificationListenerService {
     @Override
     public void onListenerConnected() {
         super.onListenerConnected();
+        connected = this;
         ensureWatching(getApplicationContext());
+        notesChanged();
     }
 
     @Override
     public void onListenerDisconnected() {
+        if (connected == this) connected = null;
         stopWatching(getApplicationContext());
         super.onListenerDisconnected();
+    }
+
+    // ---- notifications, for Control Center -----------------------------------------------------
+
+    /** This listener while Android has it connected: what's in the TV's notifications can be read. */
+    private static volatile MediaWatch connected;
+    /** Told (on the main thread) when a notification arrives or goes: Control Center's list. */
+    static volatile Runnable onNotes;
+
+    static final class Note {
+        String key, pkg, title, text;
+        long when;
+        boolean clearable;
+        android.app.PendingIntent open;
+    }
+
+    @Override
+    public void onNotificationPosted(android.service.notification.StatusBarNotification sbn) {
+        notesChanged();
+    }
+
+    @Override
+    public void onNotificationRemoved(android.service.notification.StatusBarNotification sbn) {
+        notesChanged();
+    }
+
+    private static void notesChanged() {
+        final Runnable r = onNotes;
+        if (r != null) main.post(() -> {
+            try {
+                r.run();
+            } catch (RuntimeException e) {
+                Trouble.caught("notifications", e);
+            }
+        });
+    }
+
+    /** Whether Aura can read the TV's notifications (approved as a listener, as for Now Playing). */
+    static boolean notesReadable() {
+        return connected != null;
+    }
+
+    /**
+     * The newest notifications worth a look, up to {@code max}: what an app said, not what it keeps
+     * up while it runs (ongoing ones, players), nor Aura's own, nor a group's summary line.
+     */
+    static List<Note> notes(Context c, int max) {
+        List<Note> out = new ArrayList<>();
+        MediaWatch w = connected;
+        if (w == null) return out;
+        android.service.notification.StatusBarNotification[] all;
+        try {
+            all = w.getActiveNotifications();
+        } catch (RuntimeException e) {
+            return out;
+        }
+        if (all == null) return out;
+        java.util.Arrays.sort(all, (a, b) -> Long.compare(b.getPostTime(), a.getPostTime()));
+        for (android.service.notification.StatusBarNotification sbn : all) {
+            if (out.size() >= max) break;
+            android.app.Notification n = sbn.getNotification();
+            if (n == null || sbn.isOngoing() || sbn.getPackageName().equals(c.getPackageName())
+                    || !HomeKeys.allowed(c, sbn.getPackageName())) continue;
+            if ((n.flags & android.app.Notification.FLAG_GROUP_SUMMARY) != 0) continue;
+            android.os.Bundle x = n.extras;
+            if (x == null) continue;
+            String template = x.getString(android.app.Notification.EXTRA_TEMPLATE, "");
+            if (template.contains("MediaStyle")) continue;
+            CharSequence title = x.getCharSequence(android.app.Notification.EXTRA_TITLE);
+            CharSequence text = x.getCharSequence(android.app.Notification.EXTRA_TEXT);
+            if (title == null || title.toString().trim().isEmpty()) continue;
+            Note note = new Note();
+            note.key = sbn.getKey();
+            note.pkg = sbn.getPackageName();
+            note.title = title.toString().trim();
+            note.text = text != null ? text.toString().trim() : "";
+            note.when = sbn.getPostTime();
+            note.clearable = sbn.isClearable();
+            note.open = n.contentIntent;
+            out.add(note);
+        }
+        return out;
+    }
+
+    /** Dismissed from Control Center: gone from the TV's notifications, as a swipe would. */
+    static void dismiss(String key) {
+        MediaWatch w = connected;
+        if (w == null || key == null) return;
+        try {
+            w.cancelNotification(key);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    /**
+     * Before Android 8.1 there's no shell command to approve a notification listener: the setting
+     * itself is written, with every listener already on it kept. Read here, run over ADB at setup.
+     */
+    static String enableCommand(Context c) {
+        String me = new ComponentName(c, MediaWatch.class).flattenToString();
+        String list = null;
+        try {
+            list = android.provider.Settings.Secure.getString(c.getContentResolver(), "enabled_notification_listeners");
+        } catch (RuntimeException ignored) {
+        }
+        java.util.List<String> keep = new java.util.ArrayList<>();
+        if (list != null) {
+            for (String s : android.text.TextUtils.split(list, ":")) {
+                ComponentName cn = ComponentName.unflattenFromString(s);
+                if (!s.isEmpty() && (cn == null || !cn.equals(new ComponentName(c, MediaWatch.class)))) keep.add(s);
+            }
+        }
+        keep.add(me);
+        return "settings put secure enabled_notification_listeners '" + android.text.TextUtils.join(":", keep).replace("'", "") + "'";
     }
 
     static void ensureWatching(Context ctx) {
@@ -139,14 +256,16 @@ public class MediaWatch extends NotificationListenerService {
         for (final MediaController m : list) {
             if (m == null) continue;
             MediaController.Callback cb = new MediaController.Callback() {
+                // another app's player, read over Android's binder: it can die, or send something
+                // malformed, mid-call; that report is let go rather than Aura with it
                 @Override
                 public void onPlaybackStateChanged(PlaybackState state) {
-                    record(c, m);
+                    safeRecord(c, m);
                 }
 
                 @Override
                 public void onMetadataChanged(MediaMetadata metadata) {
-                    record(c, m);
+                    safeRecord(c, m);
                 }
             };
             try {
@@ -192,6 +311,8 @@ public class MediaWatch extends NotificationListenerService {
         }
         p.progress = length > 0 && at > 0 ? Math.min(1f, Math.max(0f, at / (float) length)) : 0f;
         p.updatedAt = System.currentTimeMillis();
+        // a programme (not a song): kept for the stack's Continue watching, where Watch Next is missing
+        Watched.note(c, p, length, at);
 
         synchronized (byPkg) {
             Playing prev = byPkg.get(p.pkg);
@@ -261,8 +382,22 @@ public class MediaWatch extends NotificationListenerService {
     static Runnable onChange;
 
     private static void changed() {
-        Runnable r = onChange;
-        if (r != null) main.post(r);
+        final Runnable r = onChange;
+        if (r != null) main.post(() -> {
+            try {
+                r.run();
+            } catch (RuntimeException e) {
+                Trouble.caught("now playing", e);
+            }
+        });
+    }
+
+    private static void safeRecord(Context c, MediaController m) {
+        try {
+            record(c, m);
+        } catch (RuntimeException e) {
+            Trouble.caught("a player's report", e);
+        }
     }
     private static long savedAt;
 
@@ -273,7 +408,7 @@ public class MediaWatch extends NotificationListenerService {
             if (uri.equals(fetching)) return;
             fetching = uri;
         }
-        new Thread(() -> {
+        new SafeThread(() -> {
             Bitmap b = Continue.load(c, uri);
             synchronized (byPkg) {
                 if (uri.equals(fetching)) fetching = null;
@@ -281,13 +416,18 @@ public class MediaWatch extends NotificationListenerService {
             if (b == null) return;
             cachedUri = uri;
             cachedBmp = b;
+            boolean updated = false;
             synchronized (byPkg) {
                 Playing cur = byPkg.get(pkg);
-                if (cur != null && title.equals(cur.title) && cur.art == null) cur.art = b;
+                if (cur != null && title.equals(cur.title) && cur.art == null) {
+                    cur.art = b;
+                    updated = true;
+                }
                 Playing ytm = byPkg.get("com.google.android.youtube.tvmusic");
                 if (ytm != null && title.equals(ytm.title) && ytm.art == null) ytm.art = b;
                 if (lastAny != null && title.equals(lastAny.title) && lastAny.art == null) lastAny.art = b;
             }
+            if (updated) changed();
         }, "media-art").start();
     }
 
@@ -375,6 +515,7 @@ public class MediaWatch extends NotificationListenerService {
         }
         MediaController best = null;
         for (MediaController m : list) {
+            if (c != null && !HomeKeys.allowed(c, m.getPackageName())) continue;
             PlaybackState st = m.getPlaybackState();
             if (m.getMetadata() == null || st == null) continue;
             int s = st.getState();
@@ -393,7 +534,8 @@ public class MediaWatch extends NotificationListenerService {
         if (live != null) return live;
         long now = System.currentTimeMillis();
         synchronized (byPkg) {
-            if (lastAny != null && now - lastAny.updatedAt <= REMEMBER_MS) return lastAny.copy();
+            if (lastAny != null && now - lastAny.updatedAt <= REMEMBER_MS
+                    && (c == null || HomeKeys.allowed(c, lastAny.pkg))) return lastAny.copy();
         }
         Playing saved = loadSaved(c);
         if (saved != null) {
@@ -401,14 +543,14 @@ public class MediaWatch extends NotificationListenerService {
                 lastAny = saved;
                 byPkg.put(saved.pkg, saved);
             }
-            return saved.copy();
+            if (c == null || HomeKeys.allowed(c, saved.pkg)) return saved.copy();
         }
         return null;
     }
 
     /** Live or remembered playback belonging to {@code pkg} (mapping YouTube Music to YouTube/Cobalt). */
     static Playing forApp(Context c, String pkg) {
-        if (pkg == null) return null;
+        if (pkg == null || c != null && !HomeKeys.allowed(c, pkg)) return null;
         Playing live = now(c);
         if (live != null && matchesApp(pkg, live.pkg)) return live;
         long now = System.currentTimeMillis();

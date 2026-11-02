@@ -1,0 +1,78 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <!-- Aura's tests: the real app started on simulated Android TVs (Robolectric), no TV needed.
+       Build first (tools/build.ps1 leaves launcher/build/classes.jar and aligned.apk), then:
+       mvn -f tests/pom.xml test        (or tools/test.ps1 for both)
+       Needs JDK 17+ and Maven; the Android SDK's android.jar is found as build.ps1 finds it. -->
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>app.aura</groupId>
+  <artifactId>aura-tests</artifactId>
+  <version>1</version>
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <android.sdk>${env.ANDROID_HOME}</android.sdk>
+    <android.platform>android-36</android.platform>
+    <android.jar>${android.sdk}/platforms/${android.platform}/android.jar</android.jar>
+  </properties>
+  <repositories>
+    <!-- Google's own repository: androidx.test, which Robolectric needs at run time -->
+    <repository><id>google</id><url>https://maven.google.com</url></repository>
+  </repositories>
+  <profiles>
+    <!-- Windows with Android Studio's SDK where build.ps1 looks for it, when ANDROID_HOME isn't set -->
+    <profile>
+      <id>windows-sdk</id>
+      <activation><property><name>!env.ANDROID_HOME</name></property><os><family>windows</family></os></activation>
+      <properties><android.sdk>${env.LOCALAPPDATA}/Android/Sdk</android.sdk></properties>
+    </profile>
+  </profiles>
+  <dependencies>
+    <dependency><groupId>junit</groupId><artifactId>junit</artifactId><version>4.13.2</version><scope>test</scope></dependency>
+    <dependency><groupId>org.robolectric</groupId><artifactId>robolectric</artifactId><version>4.16</version><scope>test</scope>
+      <exclusions>
+        <!-- Android libraries (AAR) Maven can't put on a class path as they are: unpacked below instead -->
+        <exclusion><groupId>androidx.test</groupId><artifactId>monitor</artifactId></exclusion>
+        <exclusion><groupId>androidx.test.espresso</groupId><artifactId>espresso-idling-resource</artifactId></exclusion>
+      </exclusions>
+    </dependency>
+    <dependency><groupId>android</groupId><artifactId>android-jar</artifactId><version>0</version><scope>system</scope>
+      <systemPath>${android.jar}</systemPath></dependency>
+    <dependency><groupId>app.aura</groupId><artifactId>aura-classes</artifactId><version>0</version><scope>system</scope>
+      <systemPath>${project.basedir}/../launcher/build/classes.jar</systemPath></dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <!-- androidx.test comes as AARs: copied, then their classes.jar taken out for the test class path -->
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-dependency-plugin</artifactId><version>3.6.1</version>
+        <executions><execution><id>androidx-test</id><phase>generate-test-resources</phase><goals><goal>copy</goal></goals>
+          <configuration><outputDirectory>${project.build.directory}/aar</outputDirectory><artifactItems>
+            <artifactItem><groupId>androidx.test</groupId><artifactId>monitor</artifactId><version>1.8.0</version><type>aar</type>
+              <destFileName>monitor.aar</destFileName></artifactItem>
+            <artifactItem><groupId>androidx.test.espresso</groupId><artifactId>espresso-idling-resource</artifactId><version>3.7.0</version><type>aar</type>
+              <destFileName>idling.aar</destFileName></artifactItem>
+          </artifactItems></configuration>
+        </execution></executions>
+      </plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-antrun-plugin</artifactId><version>3.1.0</version>
+        <executions><execution><id>androidx-test-classes</id><phase>generate-test-resources</phase><goals><goal>run</goal></goals>
+          <configuration><target>
+            <unzip src="${project.build.directory}/aar/monitor.aar" dest="${project.build.directory}/aar/monitor"><patternset><include name="classes.jar"/></patternset></unzip>
+            <unzip src="${project.build.directory}/aar/idling.aar" dest="${project.build.directory}/aar/idling"><patternset><include name="classes.jar"/></patternset></unzip>
+          </target></configuration>
+        </execution></executions>
+      </plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.2.5</version>
+        <configuration>
+          <additionalClasspathElements>
+            <additionalClasspathElement>${project.build.directory}/aar/monitor/classes.jar</additionalClasspathElement>
+            <additionalClasspathElement>${project.build.directory}/aar/idling/classes.jar</additionalClasspathElement>
+          </additionalClasspathElements>
+          <redirectTestOutputToFile>true</redirectTestOutputToFile>
+          <trimStackTrace>false</trimStackTrace>
+          <argLine>-Xmx3g</argLine>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

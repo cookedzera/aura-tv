@@ -113,14 +113,15 @@ final class Drop {
         return this;
     }
 
-    private static final int PORT = 8686;
+    private static final int PORT = 8686, MAX_MISSES = 40;
+    private final java.util.concurrent.atomic.AtomicInteger misses = new java.util.concurrent.atomic.AtomicInteger();
     private static final long MAX_APK = 500L << 20;
     private static final String ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
 
     private final Context app;
     private final Listener listener;
     private final Handler main = new Handler(Looper.getMainLooper());
-    private final ExecutorService pool = Executors.newFixedThreadPool(3);
+    private final ExecutorService pool = Compat.pool("phone-link", 3);
     private final String token;
     private volatile ServerSocket server;
     private String url;
@@ -154,7 +155,7 @@ final class Drop {
         server = ss;
         url = "http://" + ip + ":" + ss.getLocalPort() + "/" + token;
         final ServerSocket s = ss;
-        Thread t = new Thread(() -> {
+        Thread t = new SafeThread(() -> {
             while (server == s) {
                 try {
                     Socket c = s.accept();
@@ -199,6 +200,13 @@ final class Drop {
             String base = "/" + token;
             if (!target.equals(base) && !target.startsWith(base + "/")) {
                 send(s, 404, "text/html; charset=utf-8", expired());
+                // the code in the link is all that guards it: someone on the network trying codes
+                // finds the door shut after a few dozen tries (a phone from the QR code never misses
+                // more than its browser's request for an icon)
+                if (misses.incrementAndGet() == MAX_MISSES) {
+                    Trouble.note("PHONE LINK", "closed after " + MAX_MISSES + " requests with the wrong code");
+                    stop();
+                }
                 return;
             }
             String rest = target.substring(base.length());
@@ -271,6 +279,11 @@ final class Drop {
                 send(s, 200, "application/json", ("{\"ok\":" + (n >= 0) + ",\"count\":" + Math.max(n, 0) + "}").getBytes(StandardCharsets.UTF_8));
                 final int count = n;
                 if (count >= 0) main.postDelayed(() -> listener.onRestored(count), 600);
+            } else if (rest.equals("/report")) {
+                send(s, 200, "text/html; charset=utf-8", reportPage(Trouble.report(app)));
+            } else if (rest.equals("/report.txt")) {
+                send(s, 200, "text/plain; charset=utf-8", Trouble.report(app).getBytes(StandardCharsets.UTF_8),
+                        "Content-Disposition: attachment; filename=\"aura-report.txt\"\r\n");
             } else if (rest.equals("/art")) {
                 String pkg = artFor;
                 if (pkg == null) {
@@ -344,6 +357,24 @@ final class Drop {
     }
 
     /** A small page for the phone in Aura's look: a title, a line, its buttons, a status line and a script. */
+    /**
+     * The problem report on the phone: the text itself, to copy (the page is plain http on the home
+     * network, where browsers keep the clipboard API away, so it selects and copies the old way),
+     * save, or take to a new GitHub issue.
+     */
+    private static byte[] reportPage(String report) {
+        String text = report.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return page("Problem report", "What went wrong lately on this TV, and what TV it is. Copy it into a GitHub issue or a message to the developer.",
+                "<textarea id=\"r\" readonly style=\"width:100%;height:46vh;box-sizing:border-box;padding:14px;border-radius:18px;"
+                        + "border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff;font:12px/1.45 ui-monospace,Menlo,monospace\">"
+                        + text + "</textarea>"
+                        + "<button class=\"b\" id=\"c\" style=\"border:0\">Copy</button>"
+                        + "<a class=\"b ghost\" href=\"report.txt\" download=\"aura-report.txt\">Save as a file</a>"
+                        + "<a class=\"b ghost\" href=\"https://github.com/cookedzera/aura-tv/issues/new\" target=\"_blank\" rel=\"noopener\">Open a GitHub issue</a>",
+                "c.onclick=()=>{r.focus();r.select();r.setSelectionRange(0,r.value.length);let ok=false;try{ok=document.execCommand('copy')}catch(e){}"
+                        + "s.textContent=ok?'Copied. Paste it into the issue or message.':'Select the text and copy it.'}");
+    }
+
     private static byte[] page(String title, String lede, String buttons, String script) {
         return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
                 + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"theme-color\" content=\"#070a12\">"

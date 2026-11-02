@@ -38,6 +38,39 @@ final class Habits {
      * neighbouring hours by half, and older days fade (about two weeks' half-life).
      */
     static Map<String, Float> forNow(Context c) {
+        return forNow(c, null);
+    }
+
+    /** The last scores worked out, for which hour and when: four weeks of history isn't read on every press of Home. */
+    private static Map<String, Float> keptScore;
+    private static java.util.Set<String> keptUsed;
+    private static int keptHour = -1;
+    private static long keptAt;
+
+    /**
+     * As {@link #forNow(Context)}; {@code used}, when given, also gets every app opened in those four
+     * weeks, at any hour. Reading four weeks of Android's usage history is thousands of events on a
+     * TV used every day, and every return to home asked again: the answer is kept for ten minutes
+     * within the same hour, when it can hardly have changed.
+     */
+    static synchronized Map<String, Float> forNow(Context c, java.util.Set<String> used) {
+        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        long at = android.os.SystemClock.elapsedRealtime();
+        if (keptScore != null && hour == keptHour && at - keptAt < 10 * 60_000L) {
+            if (used != null) used.addAll(keptUsed);
+            return new HashMap<>(keptScore);
+        }
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        Map<String, Float> score = scores(c, seen);
+        keptScore = score;
+        keptUsed = seen;
+        keptHour = hour;
+        keptAt = at;
+        if (used != null) used.addAll(seen);
+        return new HashMap<>(score);
+    }
+
+    private static Map<String, Float> scores(Context c, java.util.Set<String> used) {
         Map<String, Float> score = new HashMap<>();
         if (!granted(c)) return score;
         UsageStatsManager usm = Compat.svc(c, UsageStatsManager.class);
@@ -46,6 +79,8 @@ final class Habits {
         UsageEvents.Event e = new UsageEvents.Event();
         Calendar cal = Calendar.getInstance();
         int hour = cal.get(Calendar.HOUR_OF_DAY);
+        int today = cal.get(Calendar.DAY_OF_WEEK);
+        boolean weekend = today == Calendar.SATURDAY || today == Calendar.SUNDAY;
         String self = c.getPackageName(), lastPkg = null;
         long lastT = 0;
         while (events.hasNextEvent()) {
@@ -59,11 +94,15 @@ final class Habits {
             lastPkg = p;
             lastT = t;
             if (sameVisit) continue;
+            if (used != null) used.add(p);
             cal.setTimeInMillis(t);
             int dh = Math.abs(cal.get(Calendar.HOUR_OF_DAY) - hour);
             dh = Math.min(dh, 24 - dh);
             float w = dh == 0 ? 1f : dh == 1 ? 0.45f : 0f;
             if (w == 0f) continue;
+            // a Saturday morning isn't a Monday morning: the same kind of day counts fully, the other less
+            int dow = cal.get(Calendar.DAY_OF_WEEK);
+            if ((dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) != weekend) w *= 0.35f;
             w *= (float) Math.exp(-(now - t) / (double) DAY / 14.0);
             Float old = score.get(p);
             score.put(p, old == null ? w : old + w);

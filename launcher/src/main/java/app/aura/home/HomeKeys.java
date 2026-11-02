@@ -86,6 +86,13 @@ public class HomeKeys extends AccessibilityService {
     private long homeReadAt = -1;
     /** Bringing Aura back over the TV's own launcher, kept from ever becoming a tug of war. */
     private long bouncedAt, restUntil;
+    /** Until when the TV's own home may come up once, unanswered: Aura opened the TV's settings. */
+    private static long passUntil;
+
+    /** Aura is opening the TV's settings: the TV's home showing on the way there isn't a Home press. */
+    static void letTvHomePass() {
+        passUntil = SystemClock.uptimeMillis() + 4_000;
+    }
     private int bounces;
     private final Runnable goHome = () -> {
         handler.removeCallbacks(this.held);
@@ -168,6 +175,13 @@ public class HomeKeys extends AccessibilityService {
         if (!takeover()) return;
         long now = SystemClock.uptimeMillis();
         if (now < restUntil) return;
+        // Aura has just opened the TV's settings: on Fire OS 8 they open through Amazon's home (the
+        // settings app starts a Home intent, and the pages live inside Amazon's launcher), so that
+        // one appearance is let be, or the TV's Settings would never stay open
+        if (now < passUntil) {
+            passUntil = 0;
+            return;
+        }
         if (now - bouncedAt > 10_000) bounces = 0;
         bouncedAt = now;
         if (++bounces > 3) {
@@ -175,7 +189,9 @@ public class HomeKeys extends AccessibilityService {
             restUntil = now + 60_000;
             return;
         }
-        openHome();
+        // Android 9 and older hold Aura back for up to five seconds after Home: covered meanwhile
+        HomeCover.show(this);
+        if (!openHome()) HomeCover.hide(false);
     }
 
     /** An activity's window, not a dialog, panel or pop-up drawn over one. */
@@ -276,11 +292,26 @@ public class HomeKeys extends AccessibilityService {
         }
     }
 
+    /**
+     * This service answers Home in every app: should it ever throw, Android ends it, and Home stops
+     * working on the whole TV until it's switched back on. So whatever goes wrong in one event is
+     * noted and that event let go.
+     */
     @Override
     public void onAccessibilityEvent(AccessibilityEvent e) {
+        try {
+            handleEvent(e);
+        } catch (RuntimeException ex) {
+            Trouble.caught("Home button service (window)", ex);
+        }
+    }
+
+    private void handleEvent(AccessibilityEvent e) {
         if (e.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || e.getPackageName() == null) return;
         String pkg = e.getPackageName().toString();
         String cls = e.getClassName() != null ? e.getClassName().toString() : null;
+        // Aura's home is up: whatever covered the wait for it goes (the cover's own window doesn't count)
+        if (pkg.equals(getPackageName()) && HomeActivity.class.getName().equals(cls)) HomeCover.hide(true);
         // the TV's own launcher came up (Google TV's, say, which keeps Home): Aura goes back over it
         // Google TV's "who's watching" picker: this TV's firmware (Realtek's key service) opens it
         // straight from the remote's profile button, before any app sees the key, and Google TV
@@ -387,6 +418,16 @@ public class HomeKeys extends AccessibilityService {
 
     @Override
     protected boolean onKeyEvent(KeyEvent e) {
+        try {
+            return handleKey(e);
+        } catch (RuntimeException ex) {
+            // the key goes on to the app as if this service weren't here
+            Trouble.caught("Home button service (key)", ex);
+            return false;
+        }
+    }
+
+    private boolean handleKey(KeyEvent e) {
         int key = e.getKeyCode();
         boolean up = e.getAction() == KeyEvent.ACTION_UP;
         if (up && e.getRepeatCount() == 0 && key >= KeyEvent.KEYCODE_DPAD_UP && key <= KeyEvent.KEYCODE_DPAD_RIGHT) measure(e);
@@ -567,6 +608,7 @@ public class HomeKeys extends AccessibilityService {
     /** Switched off or updated mid-press: a press held back still goes home. */
     @Override
     public boolean onUnbind(Intent intent) {
+        HomeCover.hide(false);
         handler.removeCallbacks(held);
         handler.removeCallbacks(goHome);
         if (waiting) goHome.run();

@@ -40,6 +40,8 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
+import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import java.util.Locale;
 import java.util.Set;
 
@@ -86,45 +88,67 @@ final class ControlCenter {
     private final BtSheet btSheet;
     private final List<View> modules = new ArrayList<>(), focusables = new ArrayList<>();
     private FrameLayout sky;
-    private Pad music;
-    private ImageView musicArt;
-    private TextView musicState, musicTitle, musicBy;
-    private android.graphics.Bitmap musicShown;
 
     /**
-     * What's playing (null: nothing): the Sky gives its place to the song while there is one, and
-     * takes it back when the music stops. Focus on the tile as it goes moves to Wi-Fi.
+     * What's playing (null: nothing): a wide card with the cover takes Tonight's pick's place while
+     * there's a song, and gives it back when the music stops. Focus on the card as it goes moves to Wi-Fi.
      */
     void music(MediaWatch.Playing p) {
-        if (music == null) return;
+        if (nowCard == null) return;
         boolean on = p != null;
         if (on) {
-            musicTitle.setText(p.title);
-            musicBy.setText(p.by != null ? p.by : "");
-            musicState.setText(p.playing ? "NOW PLAYING" : "PAUSED");
+            nowTitle.setText(p.title);
+            nowBy.setText(p.by != null ? p.by : "");
+            String app = "";
+            try {
+                PackageManager pm = act.getPackageManager();
+                app = "  ·  " + String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(p.pkg, 0))).toUpperCase(Locale.getDefault());
+            } catch (Exception ignored) {
+            }
+            nowState.setText((p.playing ? "NOW PLAYING" : "PAUSED") + app);
+            nowBar.set(p.progress);
+            nowBar.setVisibility(p.progress > 0f ? View.VISIBLE : View.INVISIBLE);
             if (p.art != null) {
-                if (p.art != musicShown) {
-                    musicShown = p.art;
-                    musicArt.setImageBitmap(p.art);
+                if (p.art != nowShown) {
+                    nowShown = p.art;
+                    nowArt.setImageBitmap(p.art);
                 }
-            } else if (musicShown == null) {
+            } else {
+                nowShown = null;
                 try {
-                    musicArt.setImageDrawable(act.getPackageManager().getApplicationIcon(p.pkg));
+                    nowArt.setImageDrawable(act.getPackageManager().getApplicationIcon(p.pkg));
                 } catch (Exception e) {
-                    musicArt.setImageDrawable(null);
+                    nowArt.setImageDrawable(null);
                 }
             }
         } else {
-            musicShown = null;
+            nowShown = null;
         }
-        if (on == (music.getVisibility() == View.VISIBLE)) return;
-        if (!on && music.hasFocus()) wifi.requestFocus();
-        music.setVisibility(on ? View.VISIBLE : View.GONE);
-        sky.setVisibility(on ? View.GONE : View.VISIBLE);
-        if (on) focusables.add(music);
-        else focusables.remove(music);
+        if (on == (nowCard.getVisibility() == View.VISIBLE)) return;
+        if (!on && nowCard.hasFocus()) wifi.requestFocus();
+        nowCard.setVisibility(on ? View.VISIBLE : View.GONE);
+        // Tonight's pick steps aside for the song, and comes back when it ends
+        if (on) {
+            if (pick.hasFocus()) nowCard.requestFocus();
+            pick.setVisibility(View.GONE);
+        } else if (shownPick != null && Prefs.on(act, Prefs.PICKS) && !top) {
+            pick.setVisibility(View.VISIBLE);
+        }
     }
+
+    /** The column's own title: shown in the Aura style, where the column has the clock. */
+    private TextView headTitle;
     private final TextView time, date, info, phase, eventName, eventTime, other, todayValue, boostValue;
+    private final Pad vpnPill, nowCard;
+    private final TextView vpnText, nowState, nowTitle, nowBy;
+    private final ImageView nowArt;
+    private final HomeActivity.Meter nowBar;
+    private Bitmap nowShown;
+    private final LinearLayout notesBox;
+    private final Pad[] noteRows = new Pad[3];
+    private final ImageView[] noteIcons = new ImageView[3];
+    private final TextView[] noteKicks = new TextView[3], noteTitles = new TextView[3], noteBodies = new TextView[3];
+    private final List<MediaWatch.Note> notesShown = new ArrayList<>();
     private final TextView wifiCap, btCap, sleepCap, photoCap;
     private final Round wifi, bt, sleep, photo;
     private final Slider volume;
@@ -161,6 +185,7 @@ final class ControlCenter {
         };
         header.setOrientation(LinearLayout.VERTICAL);
         TextView title = Ui.caps(a, 8, 0x99FFFFFF, 0.3f);
+        headTitle = title;
         title.setText("CONTROL CENTER");
         header.addView(title);
         time = Ui.text(a, 62, Ui.heavy, 0xFFFFFFFF);
@@ -177,6 +202,29 @@ final class ControlCenter {
         header.addView(info, lp(0, 14));
         header.setClipChildren(false);
         header.setClipToPadding(false);
+
+        // a VPN at a glance: on or off, and OK opens yours (hold OK picks which, with several)
+        vpnPill = new Pad(a, null, 16, 0f);
+        vpnPill.plainColor = MODULE;
+        vpnPill.focusScale = 1.05f;
+        LinearLayout vr = new LinearLayout(a);
+        vr.setGravity(Gravity.CENTER_VERTICAL);
+        vr.setPadding(Ui.dp(12), 0, Ui.dp(14), 0);
+        vr.addView(vpnPill.tint(icon(a, R.drawable.ic_vpn), 1f), new LinearLayout.LayoutParams(Ui.dp(15), Ui.dp(15)));
+        vpnText = vpnPill.tint(Ui.text(a, 10.5f, Ui.medium, 0xFFFFFFFF), 0.9f);
+        vpnText.setSingleLine(true);
+        vpnText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        vpnText.setMaxWidth(Ui.dp(240));
+        LinearLayout.LayoutParams vtl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        vtl.leftMargin = Ui.dp(8);
+        vr.addView(vpnText, vtl);
+        vpnPill.addView(vr, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        vpnPill.onClick = () -> host.guarded(this::openVpn);
+        vpnPill.onLongClick = () -> host.guarded(this::nextVpn);
+        vpnPill.setVisibility(View.GONE);
+        LinearLayout.LayoutParams vpl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(32));
+        vpl.topMargin = Ui.dp(12);
+        header.addView(vpnPill, vpl);
 
         // Tonight's pick: from TVmaze, or TMDB with your own key, to your taste; OK plays its trailer
         pick = new Pad(a, null, 18, 0f);
@@ -225,6 +273,106 @@ final class ControlCenter {
         LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(110));
         pl.topMargin = Ui.dp(22);
         header.addView(pick, pl);
+
+        // while music plays it takes Tonight's pick's place: a real cover, the song, how far in
+        nowCard = new Pad(a, null, 18, 0f);
+        nowCard.plainColor = MODULE;
+        nowCard.focusScale = 1.04f;
+        LinearLayout nr = new LinearLayout(a);
+        nr.setGravity(Gravity.CENTER_VERTICAL);
+        nr.setPadding(Ui.dp(9), Ui.dp(9), Ui.dp(14), Ui.dp(9));
+        nowArt = new ImageView(a);
+        nowArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        nowArt.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override
+            public void getOutline(View v, android.graphics.Outline o) {
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(10));
+            }
+        });
+        nowArt.setClipToOutline(true);
+        nr.addView(nowArt, new LinearLayout.LayoutParams(Ui.dp(92), Ui.dp(92)));
+        LinearLayout nc = new LinearLayout(a);
+        nc.setOrientation(LinearLayout.VERTICAL);
+        nowState = nowCard.tint(Ui.caps(a, 6.5f, 0xFFFFFFFF, 0.24f), 0.6f);
+        nowState.setShadowLayer(0, 0, 0, 0);
+        nc.addView(nowState, lp(0, 0));
+        nowTitle = nowCard.tint(Ui.text(a, 15, Ui.heavy, 0xFFFFFFFF), 1f);
+        nowTitle.setIncludeFontPadding(true);
+        nowTitle.setSingleLine(false);
+        nowTitle.setMaxLines(2);
+        nowTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        nc.addView(nowTitle, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        nowBy = nowCard.tint(Ui.text(a, 10.5f, Ui.semibold, 0xFFFFFFFF), 0.8f);
+        nowBy.setSingleLine(true);
+        nowBy.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        nc.addView(nowBy, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        nowBar = new HomeActivity.Meter(a);
+        LinearLayout.LayoutParams nbl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(3));
+        nbl.topMargin = Ui.dp(10);
+        nc.addView(nowBar, nbl);
+        LinearLayout.LayoutParams ncl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        ncl.leftMargin = Ui.dp(12);
+        nr.addView(nc, ncl);
+        nowCard.addView(nr, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        nowCard.onClick = () -> host.nowPlaying();
+        nowCard.setVisibility(View.GONE);
+        LinearLayout.LayoutParams ncp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(110));
+        ncp.topMargin = Ui.dp(22);
+        header.addView(nowCard, ncp);
+
+        // the TV's notifications, the newest few, quietly: OK opens one, hold OK dismisses it
+        notesBox = new LinearLayout(a);
+        notesBox.setOrientation(LinearLayout.VERTICAL);
+        notesBox.setClipChildren(false);
+        TextView ncap = Ui.caps(a, 7, 0x8CFFFFFF, 0.24f);
+        ncap.setText("NOTIFICATIONS");
+        notesBox.addView(ncap);
+        for (int k = 0; k < noteRows.length; k++) {
+            Pad row = new Pad(a, null, 14, 0f);
+            row.plainColor = MODULE;
+            row.focusScale = 1.03f;
+            LinearLayout rr = new LinearLayout(a);
+            rr.setGravity(Gravity.CENTER_VERTICAL);
+            rr.setPadding(Ui.dp(10), 0, Ui.dp(12), 0);
+            ImageView ic = new ImageView(a);
+            ic.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            rr.addView(ic, new LinearLayout.LayoutParams(Ui.dp(22), Ui.dp(22)));
+            LinearLayout col = new LinearLayout(a);
+            col.setOrientation(LinearLayout.VERTICAL);
+            TextView kick = row.tint(Ui.caps(a, 6, 0xFFFFFFFF, 0.2f), 0.55f);
+            kick.setShadowLayer(0, 0, 0, 0);
+            kick.setSingleLine(true);
+            col.addView(kick);
+            TextView t = row.tint(Ui.text(a, 11, Ui.semibold, 0xFFFFFFFF), 1f);
+            t.setSingleLine(true);
+            t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col.addView(t);
+            TextView b = row.tint(Ui.text(a, 9.5f, Ui.regular, 0xFFFFFFFF), 0.7f);
+            b.setSingleLine(true);
+            b.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col.addView(b);
+            LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            cl.leftMargin = Ui.dp(10);
+            rr.addView(col, cl);
+            row.addView(rr, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            row.setVisibility(View.GONE);
+            final int at = k;
+            row.onClick = () -> openNote(at);
+            row.onLongClick = () -> dismissNote(at);
+            noteRows[k] = row;
+            noteIcons[k] = ic;
+            noteKicks[k] = kick;
+            noteTitles[k] = t;
+            noteBodies[k] = b;
+            LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(48));
+            rl.topMargin = Ui.dp(6);
+            notesBox.addView(row, rl);
+        }
+        notesBox.setVisibility(View.GONE);
+        LinearLayout.LayoutParams nbx = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        nbx.topMargin = Ui.dp(18);
+        header.addView(notesBox, nbx);
+        MediaWatch.onNotes = notesChanged;
         FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(Ui.dp(300), ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.START | Gravity.CENTER_VERTICAL);
         hl.leftMargin = Ui.dp(112);
@@ -244,7 +392,7 @@ final class ControlCenter {
 
             @Override
             public void openSettings(Intent intent) {
-                launch(intent, wifi);
+                host.guarded(() -> launch(intent, wifi));
             }
         });
         FrameLayout.LayoutParams wl = new FrameLayout.LayoutParams(Ui.dp(side), Ui.dp(side), Gravity.END | Gravity.CENTER_VERTICAL);
@@ -258,7 +406,7 @@ final class ControlCenter {
 
             @Override
             public void openSettings(Intent intent) {
-                launch(intent, bt);
+                host.guarded(() -> launch(intent, bt));
             }
         });
         FrameLayout.LayoutParams btl = new FrameLayout.LayoutParams(Ui.dp(side), Ui.dp(side), Gravity.END | Gravity.CENTER_VERTICAL);
@@ -319,36 +467,6 @@ final class ControlCenter {
         sc.addView(other, lp(0, 8));
         sky.addView(sc);
 
-        // the same place, while music plays: the cover, the song, and OK for Now Playing
-        music = place(new Pad(a, null, 26, 0f), 3, 0, 1, 2);
-        music.plainColor = MODULE;
-        music.focusScale = 1.05f;
-        LinearLayout mc = new LinearLayout(a);
-        mc.setOrientation(LinearLayout.VERTICAL);
-        mc.setPadding(Ui.dp(10), Ui.dp(10), Ui.dp(10), Ui.dp(12));
-        musicArt = new ImageView(a);
-        musicArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        musicArt.setClipToOutline(true);
-        musicArt.setOutlineProvider(new android.view.ViewOutlineProvider() {
-            @Override
-            public void getOutline(View v, android.graphics.Outline o) {
-                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(14));
-            }
-        });
-        mc.addView(musicArt, new LinearLayout.LayoutParams(Ui.dp(U - 20), Ui.dp(U - 20)));
-        musicState = music.tint(Ui.caps(a, 6.5f, 0xFFFFFFFF, 0.2f), 0.6f);
-        mc.addView(musicState, lp(0, 10));
-        musicTitle = music.tint(Ui.text(a, 11.5f, Ui.semibold, 0xFFFFFFFF), 1f);
-        musicTitle.setSingleLine(false);
-        musicTitle.setMaxLines(2);
-        musicTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        mc.addView(musicTitle, lp(0, 3));
-        musicBy = music.tint(Ui.text(a, 9.5f, Ui.medium, 0xFFFFFFFF), 0.7f);
-        musicBy.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        mc.addView(musicBy, lp(0, 2));
-        music.addView(mc, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        music.onClick = () -> host.nowPlaying();
-        music.setVisibility(View.GONE);
 
         // 2x1: inputs
         FrameLayout inputs = place(module(a), 0, 2, 2, 1);
@@ -398,7 +516,8 @@ final class ControlCenter {
 
         settings = place(button(a, R.drawable.ic_settings, "Settings"), 2, 3, 1, 1);
         standby = place(button(a, R.drawable.ic_power, "Standby"), 3, 3, 1, 1);
-        focusables.addAll(Arrays.asList(picture, sound, boost, settings, standby, pick));
+        focusables.addAll(Arrays.asList(picture, sound, boost, settings, standby, pick, vpnPill, nowCard));
+        focusables.addAll(Arrays.asList(noteRows));
 
         wifi.onClick = this::showWifi;
         bt.onClick = this::showBt;
@@ -407,11 +526,11 @@ final class ControlCenter {
             host.closeCc(true);
             host.photoMode();
         };
-        picture.onClick = () -> launch(new Intent("android.settings.DISPLAY_SETTINGS"), picture);
-        sound.onClick = () -> {
+        picture.onClick = () -> host.guarded(() -> launch(new Intent("android.settings.DISPLAY_SETTINGS"), picture));
+        sound.onClick = () -> host.guarded(() -> {
             Intent s = new Intent(Settings.ACTION_SOUND_SETTINGS);
             launch(s.resolveActivity(a.getPackageManager()) != null ? s : new Intent(Settings.ACTION_SETTINGS), sound);
-        };
+        });
         settings.onClick = () -> host.guarded(() -> launch(new Intent(Settings.ACTION_SETTINGS), settings));
         standby.onClick = this::standby;
         // what's holding memory is best seen, and closed, in recent apps
@@ -456,6 +575,238 @@ final class ControlCenter {
     }
 
     /** A 1x1 button module: glyph over a small label, lighting up white when focused. */
+    /**
+     * A second, quieter line under a button's name: what the picture and the sound are doing right
+     * now. Added the first time, then only its words change.
+     */
+    private static void caption(Pad p, String line) {
+        LinearLayout l = p.getChildCount() > 0 && p.getChildAt(0) instanceof LinearLayout ? (LinearLayout) p.getChildAt(0) : null;
+        if (l == null) return;
+        TextView t = (TextView) l.findViewWithTag("caption");
+        if (t == null) {
+            if (line == null || line.isEmpty()) return;
+            t = p.tint(Ui.text(p.getContext(), 7.5f, Ui.medium, 0xFFFFFFFF), 0.55f);
+            t.setTag("caption");
+            t.setSingleLine(true);
+            t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            t.setGravity(Gravity.CENTER);
+            l.addView(t, lp(0, 2));
+        }
+        if (!android.text.TextUtils.equals(t.getText(), line)) t.setText(line);
+        t.setVisibility(line == null || line.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    /**
+     * What the TV is sending to the screen: the output's resolution and refresh rate (the mode the
+     * TV runs at, often 4K while the interface itself is drawn at 1080p), and the HDR the screen
+     * says it takes. Android tells any app this; hardly any home screen shows it.
+     */
+    private String pictureLine() {
+        try {
+            android.view.Display d = act.getWindowManager().getDefaultDisplay();
+            int h, hz;
+            if (android.os.Build.VERSION.SDK_INT >= 23) {
+                android.view.Display.Mode m = d.getMode();
+                h = Math.min(m.getPhysicalWidth(), m.getPhysicalHeight());
+                hz = Math.round(m.getRefreshRate());
+            } else {
+                android.graphics.Point pt = new android.graphics.Point();
+                d.getRealSize(pt);
+                h = Math.min(pt.x, pt.y);
+                hz = Math.round(d.getRefreshRate());
+            }
+            String res = h >= 2100 ? "4K" : h >= 1400 ? "1440p" : h >= 1000 ? "1080p" : h >= 700 ? "720p" : h + "p";
+            String hdr = "";
+            if (android.os.Build.VERSION.SDK_INT >= 24 && d.getHdrCapabilities() != null) {
+                java.util.Set<Integer> types = new java.util.HashSet<>();
+                for (int t : d.getHdrCapabilities().getSupportedHdrTypes()) types.add(t);
+                hdr = types.contains(android.view.Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION) ? "Dolby Vision"
+                        : types.contains(4) ? "HDR10+"
+                        : types.contains(android.view.Display.HdrCapabilities.HDR_TYPE_HDR10) ? "HDR10"
+                        : types.contains(android.view.Display.HdrCapabilities.HDR_TYPE_HLG) ? "HLG" : "";
+            }
+            return res + " · " + hz + " Hz" + (hdr.isEmpty() ? "" : " · " + hdr);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Where the sound is going, and the best surround format it takes: a soundbar over HDMI (ARC or
+     * eARC), Bluetooth, optical, or the TV's own speakers; Dolby Atmos, Dolby or DTS only when the
+     * device lists it outright. Android 6 and later.
+     */
+    private String soundLine() {
+        if (android.os.Build.VERSION.SDK_INT < 23 || audio == null) return null;
+        try {
+            android.media.AudioDeviceInfo best = null;
+            int rank = -1;
+            for (android.media.AudioDeviceInfo d : audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                int t = d.getType(), r;
+                if (t == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) r = 6;
+                else if (t == 29 /* HDMI eARC, Android 12 */ || t == android.media.AudioDeviceInfo.TYPE_HDMI_ARC) r = 5;
+                else if (t == android.media.AudioDeviceInfo.TYPE_USB_HEADSET || t == android.media.AudioDeviceInfo.TYPE_USB_DEVICE) r = 4;
+                else if (t == android.media.AudioDeviceInfo.TYPE_LINE_DIGITAL) r = 3;
+                else if (t == android.media.AudioDeviceInfo.TYPE_HDMI) r = 2;
+                else if (t == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) r = 1;
+                else continue;
+                if (r > rank) {
+                    rank = r;
+                    best = d;
+                }
+            }
+            if (best == null) return null;
+            int t = best.getType();
+            String where = t == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ? "Bluetooth"
+                    : t == 29 ? "Soundbar · eARC" : t == android.media.AudioDeviceInfo.TYPE_HDMI_ARC ? "Soundbar · ARC"
+                    : t == android.media.AudioDeviceInfo.TYPE_LINE_DIGITAL ? "Optical"
+                    : t == android.media.AudioDeviceInfo.TYPE_HDMI ? "HDMI"
+                    : t == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ? "TV speakers" : "USB audio";
+            java.util.Set<Integer> enc = new java.util.HashSet<>();
+            for (int e : best.getEncodings()) enc.add(e);
+            String format = enc.contains(18 /* E-AC-3 JOC: Dolby Atmos */) ? "Atmos"
+                    : enc.contains(14 /* Dolby TrueHD */) ? "TrueHD"
+                    : enc.contains(android.media.AudioFormat.ENCODING_E_AC3) || enc.contains(android.media.AudioFormat.ENCODING_AC3) ? "Dolby"
+                    : enc.contains(android.media.AudioFormat.ENCODING_DTS) ? "DTS" : "";
+            return format.isEmpty() ? where : where + " · " + format;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    // ---- VPN -------------------------------------------------------------------------------------
+
+    private void refreshVpn() {
+        List<String> apps = Vpn.apps(act);
+        boolean on = Vpn.on(act);
+        if (!on && apps.isEmpty()) {
+            if (vpnPill.hasFocus()) wifi.requestFocus();
+            vpnPill.setVisibility(View.GONE);
+            return;
+        }
+        String mine = Vpn.chosen(act, apps);
+        vpnText.setText("VPN  ·  " + (on ? "Connected" : "Off") + (mine != null ? "  ·  " + Vpn.label(act, mine) : ""));
+        vpnText.setAlpha(on ? 1f : 0.75f);
+        vpnPill.setVisibility(View.VISIBLE);
+    }
+
+    /** Your VPN app, to switch it on or off there: Android lets no other app do it. */
+    private void openVpn() {
+        String mine = Vpn.chosen(act, Vpn.apps(act));
+        Intent i = mine != null ? Vpn.launch(act, mine) : null;
+        if (i == null) {
+            launch(new Intent("android.net.vpn.SETTINGS"), vpnPill);
+            return;
+        }
+        launch(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), vpnPill);
+    }
+
+    /** Several VPN apps: hold OK goes to the next. */
+    private void nextVpn() {
+        List<String> apps = Vpn.apps(act);
+        if (apps.size() < 2) {
+            host.hud(R.drawable.ic_vpn, apps.isEmpty() ? "No VPN app on this TV" : "Your VPN app is " + Vpn.label(act, apps.get(0)));
+            return;
+        }
+        String next = apps.get((apps.indexOf(Vpn.chosen(act, apps)) + 1) % apps.size());
+        Vpn.choose(act, next);
+        host.hud(R.drawable.ic_vpn, "VPN app: " + Vpn.label(act, next));
+        refreshVpn();
+    }
+
+    // ---- notifications -------------------------------------------------------------------------
+
+    /** Kept as a field so it can be let go: a static hook left pointing here would hold the whole home screen. */
+    private final Runnable notesChanged = this::notesArrived;
+
+    private void notesArrived() {
+        if (panel.getVisibility() == View.VISIBLE) refreshNotes();
+    }
+
+    /** The home screen is going: nothing static keeps pointing back at it. */
+    void release() {
+        isOpen = false;
+        panel.removeCallbacks(delayedRefresh);
+        panel.removeCallbacks(delayedBt);
+        if (MediaWatch.onNotes == notesChanged) MediaWatch.onNotes = null;
+        // a sheet still open as home goes: its Wi-Fi or Bluetooth listener goes with it
+        if (wifiSheet.isOpen()) wifiSheet.close();
+        if (btSheet.isOpen()) btSheet.close();
+    }
+
+    /** Apps' names and icons for the rows, looked up once: decoding an icon each refresh cost frames as the board opened. */
+    private final java.util.Map<String, Object[]> appFaces = new java.util.HashMap<>();
+
+    private Object[] face(String pkg) {
+        Object[] f = appFaces.get(pkg);
+        if (f != null) return f;
+        PackageManager pm = act.getPackageManager();
+        try {
+            f = new Object[]{String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0))), pm.getApplicationIcon(pkg)};
+        } catch (Exception e) {
+            f = new Object[]{pkg, null};
+        }
+        if (appFaces.size() > 40) appFaces.clear();
+        appFaces.put(pkg, f);
+        return f;
+    }
+
+    private void refreshNotes() {
+        List<MediaWatch.Note> list = MediaWatch.notes(act, noteRows.length);
+        notesShown.clear();
+        notesShown.addAll(list);
+        long now = System.currentTimeMillis();
+        for (int k = 0; k < noteRows.length; k++) {
+            Pad row = noteRows[k];
+            if (k >= list.size()) {
+                if (row.hasFocus()) wifi.requestFocus();
+                row.setVisibility(View.GONE);
+                continue;
+            }
+            MediaWatch.Note n = list.get(k);
+            Object[] f = face(n.pkg);
+            String app = (String) f[0];
+            android.graphics.drawable.Drawable icon = (android.graphics.drawable.Drawable) f[1];
+            if (noteIcons[k].getDrawable() != icon) noteIcons[k].setImageDrawable(icon);
+            // an app that gave no time (or a clock not yet set after a restart) shows just its name
+            boolean dated = n.when > 0 && now - n.when >= 0 && now - n.when < 30L * 86_400_000L;
+            noteKicks[k].setText((dated ? app + "  ·  " + Habits.ago(now - n.when) : app).toUpperCase(Locale.getDefault()));
+            noteTitles[k].setText(n.title);
+            noteBodies[k].setText(n.text);
+            noteBodies[k].setVisibility(n.text.isEmpty() ? View.GONE : View.VISIBLE);
+            row.setVisibility(View.VISIBLE);
+        }
+        notesBox.setVisibility(list.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    /** What the notification leads to, as the TV's own panel would open it. */
+    private void openNote(int k) {
+        if (k >= notesShown.size()) return;
+        MediaWatch.Note n = notesShown.get(k);
+        if (n.open != null) {
+            try {
+                host.closeCc(false);
+                n.open.send();
+                return;
+            } catch (android.app.PendingIntent.CanceledException ignored) {
+                // the app took it back: open the app instead
+            }
+        }
+        Intent i = Vpn.launch(act, n.pkg);
+        if (i != null) launch(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), noteRows[k]);
+    }
+
+    private void dismissNote(int k) {
+        if (k >= notesShown.size()) return;
+        MediaWatch.Note n = notesShown.get(k);
+        if (!n.clearable) {
+            host.hud(R.drawable.ic_info, "This one stays until its app clears it");
+            return;
+        }
+        MediaWatch.dismiss(n.key);
+        host.hud(R.drawable.ic_check, "Dismissed");
+    }
+
     private static Pad button(Context c, int iconRes, String label) {
         Pad p = new Pad(c, null, 26, 0f);
         p.plainColor = MODULE;
@@ -483,7 +834,27 @@ final class ControlCenter {
 
     void top(boolean on) {
         top = on;
-        header.setVisibility(on ? View.GONE : View.VISIBLE);
+        // the tvOS style keeps the board up in the top right corner, the clock already there: the
+        // column beside it carries only what's live (the song, the VPN, notifications), never the
+        // big time or Tonight's pick. It used to be hidden whole, and with it the song and notifications
+        for (View v : new View[]{headTitle, time, date, info}) v.setVisibility(on ? View.GONE : View.VISIBLE);
+        if (on) pick.setVisibility(View.GONE);
+        FrameLayout.LayoutParams hl = (FrameLayout.LayoutParams) header.getLayoutParams();
+        hl.gravity = on ? Gravity.END | Gravity.TOP : Gravity.START | Gravity.CENTER_VERTICAL;
+        hl.leftMargin = on ? 0 : Ui.dp(112);
+        hl.rightMargin = on ? Ui.dp(40 + 4 * U + 3 * G + 22) : 0;
+        hl.topMargin = on ? Ui.dp(84) : 0;
+        header.setLayoutParams(hl);
+        LinearLayout.LayoutParams vl = (LinearLayout.LayoutParams) vpnPill.getLayoutParams();
+        vl.topMargin = on ? 0 : Ui.dp(12);
+        vl.bottomMargin = on ? Ui.dp(10) : 0;
+        vpnPill.setLayoutParams(vl);
+        LinearLayout.LayoutParams nl = (LinearLayout.LayoutParams) nowCard.getLayoutParams();
+        nl.topMargin = on ? 0 : Ui.dp(22);
+        nowCard.setLayoutParams(nl);
+        LinearLayout.LayoutParams xl = (LinearLayout.LayoutParams) notesBox.getLayoutParams();
+        xl.topMargin = on ? Ui.dp(12) : Ui.dp(18);
+        notesBox.setLayoutParams(xl);
         for (View v : new View[]{board, wifiSheet, btSheet}) {
             FrameLayout.LayoutParams l = (FrameLayout.LayoutParams) v.getLayoutParams();
             l.gravity = Gravity.END | (on ? Gravity.TOP : Gravity.CENTER_VERTICAL);
@@ -495,17 +866,26 @@ final class ControlCenter {
 
     // ---- open / close / keys -----------------------------------------------------------------
 
+    private boolean isOpen;
+    private final Runnable delayedRefresh = this::refresh, delayedBt = this::showBt;
+
     void open(boolean inputs) {
+        isOpen = true;
+        panel.removeCallbacks(delayedRefresh);
+        panel.removeCallbacks(delayedBt);
         // readings are kept warm while the home screen idles; opening only refreshes them once the
         // board has settled, so no system lookups land on the first frames of the animation
         if (segmentsSig == null) {
             refresh();
         } else {
             volume.sync(); // the remote's volume keys may have moved it while the board was closed
-            panel.postDelayed(this::refresh, 700);
+            panel.postDelayed(delayedRefresh, 700);
         }
         tick(Calendar.getInstance());
         showPick();
+        board.animate().cancel();
+        board.setVisibility(View.VISIBLE);
+        board.setAlpha(1f);
         panel.animate().cancel();
         panel.setAlpha(1f);
         panel.setVisibility(View.VISIBLE);
@@ -529,10 +909,14 @@ final class ControlCenter {
     }
 
     void close(boolean animate, Runnable done) {
+        isOpen = false;
+        panel.removeCallbacks(delayedRefresh);
+        panel.removeCallbacks(delayedBt);
         if (wifiSheet.isOpen()) hideWifi(false);
         if (btSheet.isOpen()) hideBt(false);
         panel.animate().alpha(0f).setStartDelay(0).setDuration(animate ? 240 : 0).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
+                    if (isOpen) return;
                     panel.setVisibility(View.GONE);
                     panel.setAlpha(1f);
                     if (done != null) done.run();
@@ -541,8 +925,16 @@ final class ControlCenter {
 
     /** The Wi-Fi sheet slides over the board; the board stops taking focus until it closes. */
     private void showWifi() {
+        if (!isOpen) return;
+        if (!wifiSheet.present()) {
+            // a wired-only box: its own network settings, rather than a sheet with nothing to ask
+            host.guarded(() -> launch(new android.content.Intent(android.provider.Settings.ACTION_SETTINGS), wifi));
+            return;
+        }
         board.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
-                .withEndAction(() -> board.setVisibility(View.INVISIBLE)).start();
+                .withEndAction(() -> {
+                    if (wifiSheet.isOpen()) board.setVisibility(View.INVISIBLE);
+                }).start();
         wifiSheet.open();
     }
 
@@ -556,9 +948,18 @@ final class ControlCenter {
     }
 
     /** Back steps out of the Wi-Fi sheet before it closes Control Center. Returns true if it was used. */
+    /** Straight to the Bluetooth sheet, once the board has settled (the stack's low-battery card). */
+    void showBluetoothSoon() {
+        panel.removeCallbacks(delayedBt);
+        panel.postDelayed(delayedBt, 500);
+    }
+
     private void showBt() {
+        if (!isOpen) return;
         board.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
-                .withEndAction(() -> board.setVisibility(View.INVISIBLE)).start();
+                .withEndAction(() -> {
+                    if (btSheet.isOpen()) board.setVisibility(View.INVISIBLE);
+                }).start();
         btSheet.open();
     }
 
@@ -619,6 +1020,11 @@ final class ControlCenter {
     void refresh() {
         buildSegments();
         volume.sync();
+        // what the picture and the sound are doing now, under their buttons
+        caption(picture, pictureLine());
+        caption(sound, soundLine());
+        refreshVpn();
+        refreshNotes();
         boolean online = Compat.onWifi(Compat.svc(act, ConnectivityManager.class), true);
         wifi.setOn(online);
         wifiCap.setText(online ? "Wi-Fi" : "Offline");
@@ -654,7 +1060,7 @@ final class ControlCenter {
 
     /** Sky and day, read off-thread: sun times, the light outside, time spent in apps. */
     private void refreshDay() {
-        new Thread(() -> {
+        new SafeThread(() -> {
             long now = System.currentTimeMillis();
             Calendar c = Calendar.getInstance();
             c.set(Calendar.HOUR_OF_DAY, 0);
@@ -722,7 +1128,8 @@ final class ControlCenter {
         pickKicker.setText("TONIGHT'S PICK  ·  " + p.src.toUpperCase(Locale.ROOT));
         pickAbout.setText(p.about);
         pickAbout.setVisibility(p.about.isEmpty() ? View.GONE : View.VISIBLE);
-        pick.setVisibility(View.VISIBLE);
+        // a song on takes its place, and the tvOS style has no room for it
+        pick.setVisibility(top || nowCard.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
         nextPick = null;
         nextPoster = null;
     }
@@ -747,6 +1154,16 @@ final class ControlCenter {
     }
 
     private void buildSegments() {
+        try {
+            buildSegmentsNow();
+        } catch (RuntimeException e) {
+            // the TV's input service not answering: Control Center opens without the input buttons
+            // (a stick without one, like a Fire TV Stick, simply has none: nothing to report)
+            if (!Compat.noTvInputs(act)) Trouble.caught("Control Center inputs", e);
+        }
+    }
+
+    private void buildSegmentsNow() {
         TvInputManager tim = (TvInputManager) act.getSystemService(Context.TV_INPUT_SERVICE);
         if (tim == null) return;
         List<TvInputInfo> list = new ArrayList<>();
@@ -1030,8 +1447,13 @@ final class ControlCenter {
         @Override
         public boolean onKeyDown(int code, KeyEvent e) {
             if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
-                audio.adjustStreamVolume(AudioManager.STREAM_MUSIC,
-                        code == KeyEvent.KEYCODE_DPAD_UP ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER, 0);
+                try {
+                    audio.adjustStreamVolume(AudioManager.STREAM_MUSIC,
+                            code == KeyEvent.KEYCODE_DPAD_UP ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER, 0);
+                } catch (RuntimeException ex) {
+                    // volume kept by the TV or a soundbar over HDMI: nothing to change from here
+                    Trouble.caught("volume", ex);
+                }
                 sync();
                 return true;
             }
@@ -1042,11 +1464,15 @@ final class ControlCenter {
         public boolean onKeyUp(int code, KeyEvent e) {
             if (Pad.isConfirm(code)) {
                 if (!e.isCanceled()) {
-                    if (android.os.Build.VERSION.SDK_INT >= 23) {
-                        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, 0);
-                    } else {
-                        //noinspection deprecation
-                        audio.setStreamMute(AudioManager.STREAM_MUSIC, !muted);
+                    try {
+                        if (android.os.Build.VERSION.SDK_INT >= 23) {
+                            audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, 0);
+                        } else {
+                            //noinspection deprecation
+                            audio.setStreamMute(AudioManager.STREAM_MUSIC, !muted);
+                        }
+                    } catch (RuntimeException ex) {
+                        Trouble.caught("mute", ex);
                     }
                     sync();
                 }

@@ -6,7 +6,9 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Resources;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
@@ -14,9 +16,17 @@ import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +42,8 @@ final class AppRepo {
         Bitmap art;
         /** Installed since Aura was set up and not opened yet: its tile wears a small dot. */
         boolean fresh;
+        /** Its category and activity, and where its package lives (a new path after each update): for the saved copy. */
+        String category, cls, src;
     }
 
     private static final List<String> DEFAULT_DOCK = Arrays.asList(
@@ -40,13 +52,55 @@ final class AppRepo {
 
     private AppRepo() { }
 
+    /**
+     * Every app with a home-screen entry (its TV entry when it has one), each with its name, its
+     * sharpest banner and icon, and its colour. Reading an app's pictures from its own package is
+     * the slow part, worst just after the TV starts, when every app's files are cold: it's done on a
+     * few threads at once, behind the screen. An app whose package can't be read is left out, rather
+     * than leaving the whole grid empty. Off the main thread.
+     */
     static List<App> load(Context c) {
         PackageManager pm = c.getPackageManager();
         int maxDensity = bannerDensity(c);
-        Map<String, App> apps = new LinkedHashMap<>();
-        collect(pm, apps, Intent.CATEGORY_LEANBACK_LAUNCHER, c.getPackageName(), maxDensity);
-        collect(pm, apps, Intent.CATEGORY_LAUNCHER, c.getPackageName(), maxDensity);
-        List<App> list = new ArrayList<>(apps.values());
+        Map<String, ResolveInfo> found = new LinkedHashMap<>();
+        Map<String, String> category = new HashMap<>();
+        for (String cat : new String[]{Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER}) {
+            for (ResolveInfo ri : pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(cat), 0)) {
+                String pkg = ri.activityInfo.packageName;
+                if (pkg.equals(c.getPackageName()) || found.containsKey(pkg)) continue;
+                found.put(pkg, ri);
+                category.put(pkg, cat);
+            }
+        }
+        int threads = Math.max(1, Math.min(3, Runtime.getRuntime().availableProcessors() - 1));
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads, r -> new SafeThread(() -> {
+            // the grid waits on this: at background priority Android gave it a sliver of a TV
+            // that's still starting everything else, and the dock stood empty for seconds
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT);
+            r.run();
+        }, "apps"));
+        List<java.util.concurrent.Future<App>> made = new ArrayList<>();
+        for (Map.Entry<String, ResolveInfo> e : found.entrySet()) {
+            final ResolveInfo ri = e.getValue();
+            final String cat = category.get(e.getKey());
+            made.add(pool.submit(() -> make(pm, ri, cat, maxDensity)));
+        }
+        List<App> list = new ArrayList<>();
+        try {
+            for (java.util.concurrent.Future<App> f : made) {
+                try {
+                    App a = f.get();
+                    if (a != null) list.add(a);
+                } catch (java.util.concurrent.ExecutionException e) {
+                    // one app's package couldn't be read (being updated, or broken): the rest still come
+                    Trouble.caught("reading an app", e.getCause());
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            pool.shutdownNow();
+        }
         for (App a : list) a.art = Art.load(c, a.pkg);
         NewApps.mark(c, list);
         Collator col = Collator.getInstance();
@@ -63,22 +117,189 @@ final class AppRepo {
         return DisplayMetrics.DENSITY_XXXHIGH;
     }
 
-    private static void collect(PackageManager pm, Map<String, App> out, String category, String self, int maxDensity) {
-        Intent q = new Intent(Intent.ACTION_MAIN).addCategory(category);
-        for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
-            ActivityInfo ai = ri.activityInfo;
-            if (ai.packageName.equals(self) || out.containsKey(ai.packageName)) continue;
-            App a = new App();
-            a.pkg = ai.packageName;
-            a.label = String.valueOf(ri.loadLabel(pm)).trim();
-            a.banner = loadBannerHighRes(pm, ai, maxDensity);
-            a.icon = loadIconHighRes(pm, ri, ai);
-            a.color = colorOf(a.banner != null ? a.banner : a.icon);
-            a.launch = new Intent(Intent.ACTION_MAIN).addCategory(category)
-                    .setClassName(ai.packageName, ai.name)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-            out.put(a.pkg, a);
+    private static App make(PackageManager pm, ResolveInfo ri, String category, int maxDensity) {
+        ActivityInfo ai = ri.activityInfo;
+        App a = new App();
+        a.pkg = ai.packageName;
+        a.label = String.valueOf(ri.loadLabel(pm)).trim();
+        a.banner = loadBannerHighRes(pm, ai, maxDensity);
+        a.icon = loadIconHighRes(pm, ri, ai);
+        a.color = colorOf(a.banner != null ? a.banner : a.icon);
+        a.category = category;
+        a.cls = ai.name;
+        // never null, so a list read now and the saved one compare alike
+        a.src = ai.applicationInfo.sourceDir != null ? ai.applicationInfo.sourceDir : "";
+        a.launch = launchFor(a.pkg, a.cls, category);
+        return a;
+    }
+
+    private static Intent launchFor(String pkg, String cls, String category) {
+        return new Intent(Intent.ACTION_MAIN).addCategory(category).setClassName(pkg, cls)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+    }
+
+    // ---- the saved copy, for the moment after the TV starts ----------------------------------
+
+    private static final String SAVED = "apps";
+
+    /**
+     * The app list as it was last read, with each banner and icon as a picture of its own: read
+     * back in a fraction of the time it takes to open every app's package, which is slowest just
+     * after the TV starts, when they're all cold. The grid is shown from it at once and the real
+     * list follows. Null when there's none, or it can't be read. Off the main thread.
+     */
+    static List<App> saved(Context c) {
+        File dir = new File(c.getFilesDir(), SAVED);
+        try {
+            JSONArray a = new JSONArray(read(new File(dir, "index.json")));
+            android.content.res.Resources res = c.getResources();
+            List<App> out = new ArrayList<>();
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                App x = new App();
+                x.pkg = o.getString("pkg");
+                x.label = o.getString("label");
+                x.cls = o.getString("cls");
+                x.category = o.getString("cat");
+                x.src = o.optString("src", "");
+                x.color = o.getInt("color");
+                x.launch = launchFor(x.pkg, x.cls, x.category);
+                x.banner = picture(res, new File(dir, x.pkg + ".b.png"), o.optInt("bd", 0));
+                x.icon = picture(res, new File(dir, x.pkg + ".i.png"), o.optInt("id", 0));
+                if (x.banner == null && x.icon == null) return null;
+                x.art = Art.load(c, x.pkg);
+                out.add(x);
+            }
+            if (out.isEmpty()) return null;
+            NewApps.flag(c, out);
+            return out;
+        } catch (IOException | JSONException | RuntimeException | OutOfMemoryError e) {
+            return null;
         }
+    }
+
+    /** What the saved copy was made from: when this changes, it's made again. */
+    private static String signature(List<App> list) {
+        StringBuilder s = new StringBuilder();
+        for (App a : list) {
+            s.append(a.pkg).append('|').append(a.label).append('|').append(a.cls).append('|').append(a.src)
+                    .append('|').append(a.banner != null).append('\n');
+        }
+        return Integer.toHexString(s.toString().hashCode()) + ":" + s.length();
+    }
+
+    /** Keeps {@code list} for the next start, unless it's what's kept already. Off the main thread, at low priority. */
+    static void save(Context c, List<App> list) {
+        if (list == null || list.isEmpty()) return;
+        File dir = new File(c.getFilesDir(), SAVED);
+        String sig = signature(list);
+        File index = new File(dir, "index.json");
+        try {
+            if (index.isFile() && sig.equals(new JSONObject(read(new File(dir, "sig.json"))).optString("sig"))) return;
+        } catch (IOException | JSONException ignored) {
+            // made again below
+        }
+        if (!dir.isDirectory() && !dir.mkdirs()) return;
+        try {
+            JSONArray a = new JSONArray();
+            java.util.Set<String> keep = new java.util.HashSet<>();
+            for (App x : list) {
+                if (x.cls == null || x.category == null) continue;
+                JSONObject o = new JSONObject().put("pkg", x.pkg).put("label", x.label).put("cls", x.cls)
+                        .put("cat", x.category).put("src", x.src != null ? x.src : "").put("color", x.color);
+                int bd = write(x.banner, new File(dir, x.pkg + ".b.png"), 640, 360);
+                int id = write(x.icon, new File(dir, x.pkg + ".i.png"), 256, 256);
+                if (bd < 0 && id < 0) continue;
+                if (bd >= 0) {
+                    o.put("bd", bd);
+                    keep.add(x.pkg + ".b.png");
+                }
+                if (id >= 0) {
+                    o.put("id", id);
+                    keep.add(x.pkg + ".i.png");
+                }
+                a.put(o);
+            }
+            writeText(index, a.toString());
+            writeText(new File(dir, "sig.json"), new JSONObject().put("sig", sig).toString());
+            File[] files = dir.listFiles();
+            //noinspection ResultOfMethodCallIgnored
+            if (files != null) for (File f : files) if (f.getName().endsWith(".png") && !keep.contains(f.getName())) f.delete();
+        } catch (IOException | JSONException | RuntimeException | OutOfMemoryError e) {
+            // no copy this time: the next start reads the apps as before
+            //noinspection ResultOfMethodCallIgnored
+            index.delete();
+        }
+    }
+
+    /**
+     * {@code d} as a picture: a bitmap's own pixels as they are (an xxxhdpi icon keeps every one),
+     * anything else drawn at up to {@code maxW}×{@code maxH}. Returns the density to read it back
+     * at (0 for the screen's), or -1 when there's nothing to keep.
+     */
+    private static int write(Drawable d, File f, int maxW, int maxH) throws IOException {
+        if (d == null) return -1;
+        Bitmap b;
+        int density = 0;
+        boolean own = false;
+        if (d instanceof android.graphics.drawable.BitmapDrawable && ((android.graphics.drawable.BitmapDrawable) d).getBitmap() != null) {
+            b = ((android.graphics.drawable.BitmapDrawable) d).getBitmap();
+            density = b.getDensity() > 0 ? b.getDensity() : 0;
+        } else {
+            int w = d.getIntrinsicWidth(), h = d.getIntrinsicHeight();
+            if (w <= 0 || h <= 0) {
+                w = maxW;
+                h = maxH;
+            }
+            // vectors and adaptive icons: drawn twice their size (capped), sharp on the tiles
+            float k = Math.min(Math.min(2f, maxW / (float) w), maxH / (float) h);
+            w = Math.max(1, Math.round(w * k));
+            h = Math.max(1, Math.round(h * k));
+            b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Drawable copy = d.getConstantState() != null ? d.getConstantState().newDrawable().mutate() : d;
+            copy.setBounds(0, 0, w, h);
+            copy.draw(new Canvas(b));
+            density = Math.round(DisplayMetrics.DENSITY_DEFAULT * k * Resources.getSystem().getDisplayMetrics().density);
+            own = true;
+        }
+        if (b.isRecycled()) return -1;
+        File part = new File(f.getPath() + ".part");
+        try (FileOutputStream out = new FileOutputStream(part)) {
+            b.compress(Bitmap.CompressFormat.PNG, 100, out);
+        } finally {
+            if (own) b.recycle();
+        }
+        if (!part.renameTo(f)) {
+            //noinspection ResultOfMethodCallIgnored
+            part.delete();
+            return -1;
+        }
+        return density;
+    }
+
+    private static Drawable picture(android.content.res.Resources res, File f, int density) {
+        if (!f.isFile()) return null;
+        Bitmap b = BitmapFactory.decodeFile(f.getPath());
+        if (b == null) return null;
+        if (density > 0) b.setDensity(density);
+        return new android.graphics.drawable.BitmapDrawable(res, b);
+    }
+
+    private static String read(File f) throws IOException {
+        try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+            return out.toString("UTF-8");
+        }
+    }
+
+    private static void writeText(File f, String s) throws IOException {
+        File part = new File(f.getPath() + ".part");
+        try (FileOutputStream out = new FileOutputStream(part)) {
+            out.write(s.getBytes("UTF-8"));
+        }
+        if (!part.renameTo(f)) throw new IOException("couldn't keep " + f.getName());
     }
 
     /** Loads the highest-density banner the screen needs, without enlarging lower-density assets. */

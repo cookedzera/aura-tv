@@ -86,7 +86,7 @@ final class WifiSheet extends GlassFrame {
         host = h;
         wifi = Compat.svc(a.getApplicationContext(), WifiManager.class);
         scan = () -> {
-            if (wifi.isWifiEnabled()) wifi.startScan();
+            if (wifi != null && wifi.isWifiEnabled()) wifi.startScan();
         };
         setClipContent(false);
 
@@ -191,6 +191,11 @@ final class WifiSheet extends GlassFrame {
 
     boolean isOpen() {
         return getVisibility() == View.VISIBLE;
+    }
+
+    /** False on a box with no Wi-Fi at all (wired only): Android has no Wi-Fi service to ask. */
+    boolean present() {
+        return wifi != null;
     }
 
     void open() {
@@ -422,7 +427,7 @@ final class WifiSheet extends GlassFrame {
         }
         if (!looking && Compat.granted(act, "android.permission.DUMP")) {
             looking = true;
-            new Thread(() -> {
+            new SafeThread(() -> {
                 String[] found = fromReport();
                 act.runOnUiThread(() -> {
                     looking = false;
@@ -521,7 +526,7 @@ final class WifiSheet extends GlassFrame {
         speed = new SpeedTest();
         final SpeedTest t = speed;
         showSpeed("Measuring…");
-        new Thread(() -> t.run((phase, ping, down, up, done) -> act.runOnUiThread(() -> {
+        new SafeThread(() -> t.run((phase, ping, down, up, done) -> act.runOnUiThread(() -> {
             String p = ping < 0 ? "" : "  ·  " + ping + " ms";
             String text;
             if (done) text = ping < 0 ? "No connection" : "↓ " + mbps(down) + "   ↑ " + mbps(up) + " Mbps" + p;

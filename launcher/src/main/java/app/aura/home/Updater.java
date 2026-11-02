@@ -31,6 +31,8 @@ final class Updater {
     static final class Release {
         final String version, notes, apk;
         final long size;
+        /** The APK's SHA-256 as GitHub publishes it (lower-case hex), or null when it gives none. */
+        String sha256;
 
         Release(String version, String notes, String apk, long size) {
             this.version = version;
@@ -39,6 +41,10 @@ final class Updater {
             this.size = size;
         }
     }
+
+    /** When the installer last answered (elapsed time), and why it refused, if it did: Settings reads both. */
+    static volatile long answeredAt;
+    static volatile String refused;
 
     interface Progress {
         void onProgress(long done, long total);
@@ -59,8 +65,11 @@ final class Updater {
             for (int i = 0; assets != null && i < assets.length(); i++) {
                 JSONObject a = assets.getJSONObject(i);
                 if (a.optString("name").endsWith(".apk")) {
-                    return new Release(r.optString("tag_name").replaceFirst("^[vV]", ""), plain(r.optString("body")),
+                    Release rel = new Release(r.optString("tag_name").replaceFirst("^[vV]", ""), plain(r.optString("body")),
                             a.optString("browser_download_url"), a.optLong("size"));
+                    String digest = a.optString("digest", "");
+                    if (digest.startsWith("sha256:") && digest.length() == 71) rel.sha256 = digest.substring(7).toLowerCase(java.util.Locale.ROOT);
+                    return rel;
                 }
             }
             return null;
@@ -139,7 +148,7 @@ final class Updater {
         try (InputStream in = con.getInputStream()) {
             long len = android.os.Build.VERSION.SDK_INT >= 24 ? con.getContentLengthLong() : con.getContentLength();
             long total = len > 0 ? len : r.size;
-            stream(c, in, total, c.getPackageName(), p);
+            stream(c, in, total, c.getPackageName(), r.sha256, p);
         } finally {
             con.disconnect();
         }
@@ -151,6 +160,21 @@ final class Updater {
      * such as one sent from a phone. Nothing is written to storage first.
      */
     static void stream(Context c, InputStream in, long total, String pkg, Progress p) throws IOException {
+        stream(c, in, total, pkg, null, p);
+    }
+
+    /**
+     * As above; with {@code sha256}, the bytes are checked against it as they pass, and a download
+     * that doesn't match (cut, or changed on the way) never reaches the installer.
+     */
+    static void stream(Context c, InputStream in, long total, String pkg, String sha256, Progress p) throws IOException {
+        java.security.MessageDigest md = null;
+        if (sha256 != null) {
+            try {
+                md = java.security.MessageDigest.getInstance("SHA-256");
+            } catch (java.security.NoSuchAlgorithmException ignored) {
+            }
+        }
         PackageInstaller pi = c.getPackageManager().getPackageInstaller();
         PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
         if (pkg != null) params.setAppPackageName(pkg);
@@ -166,11 +190,15 @@ final class Updater {
                         break;
                     }
                     out.write(buf, 0, n);
+                    if (md != null) md.update(buf, 0, n);
                     done += n;
                     p.onProgress(done, total);
                 }
                 s.fsync(out);
             }
+            if (md != null && !hex(md.digest()).equals(sha256)) throw new IOException("the download doesn't match the release (damaged on the way)");
+            answeredAt = 0;
+            refused = null;
             s.commit(PendingIntent.getBroadcast(c, id, new Intent(c, Done.class), PendingIntent.FLAG_UPDATE_CURRENT).getIntentSender());
         } catch (IOException | RuntimeException e) {
             pi.abandonSession(id);
@@ -197,6 +225,11 @@ final class Updater {
         @Override
         public void onReceive(Context c, Intent i) {
             int status = i.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
+            answeredAt = android.os.SystemClock.elapsedRealtime();
+            // every answer is kept: "it wouldn't install" then says why (Settings → Problem reports)
+            Trouble.note("INSTALLER", "status " + status + " (" + statusName(status) + ")"
+                    + (i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) != null ? ": " + i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) : "")
+                    + (i.getStringExtra(PackageInstaller.EXTRA_PACKAGE_NAME) != null ? " for " + i.getStringExtra(PackageInstaller.EXTRA_PACKAGE_NAME) : ""));
             if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
                 Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);
                 if (confirm == null) return;
@@ -218,9 +251,30 @@ final class Updater {
                 // a build signed with someone else's key can't replace this one
                 boolean key = why != null && why.toUpperCase(java.util.Locale.ROOT).contains("SIGNATURE");
                 boolean cancelled = status == PackageInstaller.STATUS_FAILURE_ABORTED;
+                if (!cancelled) refused = key ? "it's signed with a different key than the Aura on this TV" : why != null ? why : statusName(status);
                 if (!cancelled) Toast.makeText(c, key ? "Signed with a different key than the installed app: uninstall that first"
                         : "It didn't install" + (why != null ? ": " + why : ""), Toast.LENGTH_LONG).show();
             }
+        }
+    }
+
+    private static String hex(byte[] b) {
+        StringBuilder sb = new StringBuilder();
+        for (byte x : b) sb.append(String.format(java.util.Locale.ROOT, "%02x", x));
+        return sb.toString();
+    }
+
+    private static String statusName(int status) {
+        switch (status) {
+            case PackageInstaller.STATUS_PENDING_USER_ACTION: return "asking to confirm";
+            case PackageInstaller.STATUS_SUCCESS: return "installed";
+            case PackageInstaller.STATUS_FAILURE_ABORTED: return "cancelled";
+            case PackageInstaller.STATUS_FAILURE_BLOCKED: return "blocked";
+            case PackageInstaller.STATUS_FAILURE_CONFLICT: return "conflict";
+            case PackageInstaller.STATUS_FAILURE_INCOMPATIBLE: return "incompatible";
+            case PackageInstaller.STATUS_FAILURE_INVALID: return "invalid";
+            case PackageInstaller.STATUS_FAILURE_STORAGE: return "no space";
+            default: return "failed";
         }
     }
 

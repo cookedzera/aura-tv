@@ -214,10 +214,32 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         return new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
     }
 
+    /**
+     * The home screen's way to make room while the screensaver plays, set while it exists (see
+     * HomeActivity): two sets of full-screen photographs at once is more than a small TV can hold.
+     */
+    static volatile Runnable makeRoom;
+
+    /**
+     * A TV where the screensaver's photographs and the home screen's shouldn't be held at once:
+     * Android 7 and older (photographs count against Aura's own memory limit there, which is how
+     * the screensaver ran out of memory on Fire OS 6), or 2 GB of memory or less.
+     */
+    static boolean tight(Context c) {
+        if (android.os.Build.VERSION.SDK_INT < 26 || Perf.lowEnd(c)) return true;
+        android.app.ActivityManager am = Compat.svc(c, android.app.ActivityManager.class);
+        if (am == null) return false;
+        android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+        am.getMemoryInfo(mi);
+        return mi.totalMem > 0 && mi.totalMem <= (2048L << 20);
+    }
+
     @Override
     public void onDreamingStarted() {
         super.onDreamingStarted();
         dreaming = true;
+        Runnable room = makeRoom;
+        if (room != null && tight(this)) room.run();
         startScene();
         registerReceiver(tick, new IntentFilter(Intent.ACTION_TIME_TICK));
         ticking = true;
