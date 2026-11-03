@@ -251,9 +251,9 @@ final class Updater {
                 // a build signed with someone else's key can't replace this one
                 boolean key = why != null && why.toUpperCase(java.util.Locale.ROOT).contains("SIGNATURE");
                 boolean cancelled = status == PackageInstaller.STATUS_FAILURE_ABORTED;
-                if (!cancelled) refused = key ? "it's signed with a different key than the Aura on this TV" : why != null ? why : statusName(status);
-                if (!cancelled) Toast.makeText(c, key ? "Signed with a different key than the installed app: uninstall that first"
-                        : "It didn't install" + (why != null ? ": " + why : ""), Toast.LENGTH_LONG).show();
+                if (!cancelled) refused = key ? c.getString(R.string.signed_with_a_different_key_than_aura) : why != null ? why : statusName(status);
+                if (!cancelled) Toast.makeText(c, key ? c.getString(R.string.signed_with_a_different_key)
+                        : why != null ? c.getString(R.string.it_didnt_install_why, why) : c.getString(R.string.it_didnt_install), Toast.LENGTH_LONG).show();
             }
         }
     }

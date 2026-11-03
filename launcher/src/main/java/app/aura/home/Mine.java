@@ -111,7 +111,7 @@ final class Mine {
             String id = Long.toString(System.currentTimeMillis(), 36) + Integer.toString(RND.nextInt(1296), 36);
             boolean gif = isGif(part);
             Bitmap still = decode(part);
-            if (still == null) throw new Unsupported("Not a photo the TV can read");
+            if (still == null) throw new Unsupported(c.getString(R.string.not_a_photo_the_tv_can_read));
             File out = new File(dir(c), id + (gif ? ".gif" : ".jpg"));
             Bitmap shown = gif ? still : compose(rotate(still, orientation(part)));
             if (gif) {
@@ -129,8 +129,7 @@ final class Mine {
             e.put("day", Daily.today());
             e.put("added", System.currentTimeMillis());
             e.put("place", headline(title, name));
-            e.put("region", (gif ? "Your GIF" : "Your photo") + " · "
-                    + new SimpleDateFormat("d MMMM", Locale.getDefault()).format(new Date()));
+            e.put("region", c.getString(gif ? R.string.your_gif : R.string.your_photo) + " · " + Words.date("d MMMM", System.currentTimeMillis()));
             e.put("line", "");
             e.put("mood", "day");
             e.put("accent", String.format(Locale.ROOT, "#%06X",
@@ -201,7 +200,7 @@ final class Mine {
                     || t.matches(".*\\d{4,}.*") || t.length() < 2) t = "";
         }
         if (t.length() > 40) t = t.substring(0, t.lastIndexOf(' ', 40) > 20 ? t.lastIndexOf(' ', 40) : 40).trim();
-        return t.isEmpty() ? "From your phone" : t;
+        return t.isEmpty() ? Words.get(R.string.from_your_phone) : t;
     }
 
     // ---- pictures ----------------------------------------------------------------------------

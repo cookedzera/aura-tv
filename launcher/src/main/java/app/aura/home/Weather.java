@@ -134,16 +134,16 @@ final class Weather {
     }
 
     static String condition(int code, boolean day) {
-        if (code == 0) return day ? "Sunny" : "Clear";
-        if (code <= 2) return "Partly cloudy";
-        if (code == 3) return "Cloudy";
-        if (code == 45 || code == 48) return "Fog";
-        if (code <= 57) return "Drizzle";
-        if (code <= 67) return code <= 61 ? "Light rain" : "Rain";
-        if (code <= 77) return "Snow";
-        if (code <= 82) return "Showers";
-        if (code <= 86) return "Snow showers";
-        return "Thunderstorm";
+        if (code == 0) return Words.get(day ? R.string.wx_sunny : R.string.wx_clear);
+        if (code <= 2) return Words.get(R.string.wx_partly_cloudy);
+        if (code == 3) return Words.get(R.string.wx_cloudy);
+        if (code == 45 || code == 48) return Words.get(R.string.wx_fog);
+        if (code <= 57) return Words.get(R.string.wx_drizzle);
+        if (code <= 67) return Words.get(code <= 61 ? R.string.wx_light_rain : R.string.wx_rain);
+        if (code <= 77) return Words.get(R.string.wx_snow);
+        if (code <= 82) return Words.get(R.string.wx_showers);
+        if (code <= 86) return Words.get(R.string.wx_snow_showers);
+        return Words.get(R.string.wx_thunderstorm);
     }
 
     static int icon(int code, boolean day) {

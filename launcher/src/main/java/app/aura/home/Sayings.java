@@ -384,7 +384,7 @@ final class Sayings extends Scene {
             small.setTypeface(Ui.regular);
             small.setTextSize(15 * s);
             small.setColor(Ui.withAlpha(0xFFFFFFFF, Math.round(95 * a)));
-            c.drawText("Quotes from zenquotes.io", x + 2 * s, below - small.ascent(), small);
+            c.drawText(getContext().getString(R.string.quotes_from_zenquotes_io), x + 2 * s, below - small.ascent(), small);
         }
         return t < n + 1;
     }

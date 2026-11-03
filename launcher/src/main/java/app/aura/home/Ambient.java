@@ -203,11 +203,11 @@ public class Ambient extends DreamService implements Backdrop.Listener {
 
     /** "15 minutes", "2 hours", "Never". */
     static String span(int ms) {
-        if (ms < 0) return "Never";
+        if (ms < 0) return Words.get(R.string.never);
         int min = ms / 60_000;
-        if (min < 60) return min + (min == 1 ? " minute" : " minutes");
+        if (min < 60) return Words.count(R.plurals.n_minutes, min);
         int h = min / 60;
-        return h + (h == 1 ? " hour" : " hours");
+        return Words.count(R.plurals.n_hours, h);
     }
 
     private static FrameLayout.LayoutParams full() {

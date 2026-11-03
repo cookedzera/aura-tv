@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Aura</string>
-    <string name="home_keys_about">Lets Home twice open the Aura app switcher straight over the app in front. It sees only the Home key and which app is open, never what is on screen.</string>
 
     <style name="Aura" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
         <item name="android:windowBackground">@android:color/black</item>

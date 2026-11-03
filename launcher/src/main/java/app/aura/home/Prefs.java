@@ -12,6 +12,8 @@ import java.util.Set;
 final class Prefs {
     /** The Smart Stack's optional cards: new releases from TVmaze's schedule, and suggested apps. */
     static final String STACK_NEW = "set_stack_new", STACK_APPS = "set_stack_apps";
+    /** Phones and computers on the network may play on the TV over DLNA ({@link Renderer}). */
+    static final String DLNA = "set_dlna";
     static final String GLASS_TILES = "set_glass_tiles", NAMES_ALWAYS = "set_names_always", STACK_AUTO = "set_stack_auto",
             MOMENTS = "set_moments", PICKS = "set_picks", WEATHER = "set_weather", DAILY = "set_daily", HIDDEN = "set_hidden",
             MINE_ONLY = "set_mine_only", BLACK = "set_black", TOP_SHELF = "set_top_shelf", PARALLAX = "set_parallax",
@@ -51,14 +53,16 @@ final class Prefs {
 
     static final String TILE_STYLE = "set_tile_style";
     static final String[] TILE_STYLES = {"tvos", "glass", "vivid", "midnight", "original"};
-    static final String[] TILE_NAMES = {"Apple TV", "Glass", "Vivid", "Midnight", "Original banners"};
+    static final int[] TILE_NAMES = {R.string.tile_apple_tv, R.string.tile_glass, R.string.tile_vivid, R.string.tile_midnight, R.string.tile_original};
+    /** The same, short enough for the welcome's small tiles. */
+    static final int[] TILE_SHORT_NAMES = {R.string.tile_apple_tv, R.string.tile_glass, R.string.tile_vivid, R.string.tile_midnight, R.string.tile_original_short};
 
     /** Apps a row holds: large tiles, or more of your apps on screen at once, as on tvOS. */
     static final String GRID = "set_grid";
     /** Two rows of apps with the rest on pages to the side (on), or one long grid scrolling down. */
     static final String GRID_PAGES = "set_grid_pages";
     static final int[] GRID_COLS = {5, 6, 7};
-    static final String[] GRID_NAMES = {"Large · 5 a row", "Compact · 6 a row", "Dense · 7 a row"};
+    static final int[] GRID_NAMES = {R.string.grid_large, R.string.grid_compact, R.string.grid_dense};
 
     static int gridCols(Context c) {
         int n = of(c).getInt(GRID, 5);
@@ -74,7 +78,7 @@ final class Prefs {
     /** The screensaver's scene: the photographs, famous quotes over them, or Auto, the two by turns (see Ambient). */
     static final String SAVER = "set_saver";
     static final String[] SAVERS = {"auto", "photos", "sayings"};
-    static final String[] SAVER_NAMES = {"Auto", "Photographs", "Famous quotes"};
+    static final int[] SAVER_NAMES = {R.string.saver_auto, R.string.photographs, R.string.saver_sayings};
 
     static String saver(Context c) {
         String s = of(c).getString(SAVER, "auto");
@@ -102,7 +106,7 @@ final class Prefs {
 
     static final String NAME_MODE = "set_name_mode";
     static final String[] NAME_MODES = {"tvos", "focus", "always", "hidden"};
-    static final String[] NAME_LABELS = {"Hidden on dock · tvOS", "On focus", "Always", "Hidden"};
+    static final int[] NAME_LABELS = {R.string.names_tvos, R.string.names_focus, R.string.names_always, R.string.hidden};
 
     static String nameMode(Context c) {
         String m = of(c).getString(NAME_MODE, null);

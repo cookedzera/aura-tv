@@ -130,7 +130,7 @@ final class Continue {
                 if (episode != null && !episode.isEmpty()) parts.add("E" + episode);
                 if (dur > 0 && pos > 0) {
                     long left = Math.max(1, (dur - pos) / 60_000);
-                    parts.add(left < 60 ? left + " min left" : String.format(Locale.ROOT, "%d h %d min left", left / 60, left % 60));
+                    parts.add(left < 60 ? Words.get(R.string.min_left, left) : Words.get(R.string.h_min_left, left / 60, left % 60));
                 } else if (cur.getString(1) != null && !cur.getString(1).isEmpty()) {
                     parts.add(cur.getString(1));
                 }
@@ -231,7 +231,7 @@ final class Continue {
                 if (episode != null && !episode.isEmpty()) parts.add("E" + episode);
                 if (it.progress > 0f) {
                     long left = Math.max(1, (dur - pos) / 60_000);
-                    parts.add(left < 60 ? left + " min left" : String.format(Locale.ROOT, "%d h %d min left", left / 60, left % 60));
+                    parts.add(left < 60 ? Words.get(R.string.min_left, left) : Words.get(R.string.h_min_left, left / 60, left % 60));
                 } else if (desc != null && !desc.isEmpty()) {
                     parts.add(desc);
                 } else if (author != null && !author.isEmpty()) {
@@ -398,13 +398,13 @@ final class Continue {
                 if (episode != null && !episode.isEmpty()) parts.add("E" + episode);
                 if (it.progress > 0f) {
                     long left = Math.max(1, (dur - pos) / 60_000);
-                    parts.add(left < 60 ? left + " min left" : String.format(Locale.ROOT, "%d h %d min left", left / 60, left % 60));
+                    parts.add(left < 60 ? Words.get(R.string.min_left, left) : Words.get(R.string.h_min_left, left / 60, left % 60));
                 } else if (parts.isEmpty() && cur.getString(3) != null) {
                     parts.add(cur.getString(3));
                 }
                 it.sub = TextUtils.join("  ·  ", parts);
                 // what the row is called says what it is, even when the app leaves out the progress
-                if (it.progress <= 0f) it.kicker = rank == 3 ? "CONTINUE WATCHING" : rank == 2 ? "ON YOUR LIST" : null;
+                if (it.progress <= 0f) it.kicker = rank == 3 ? Words.get(R.string.continue_watching_caps) : rank == 2 ? Words.get(R.string.on_your_list) : null;
                 best.put(pkg, it);
                 bestRank.put(pkg, rank);
                 pictures.put(pkg, picture);

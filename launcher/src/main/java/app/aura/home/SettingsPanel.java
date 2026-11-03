@@ -135,7 +135,7 @@ final class SettingsPanel {
         city.setSingleLine(true);
         city.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
         city.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
-        city.setHint("Type a city, then OK");
+        city.setHint(act.getString(R.string.type_a_city_then_ok));
         city.setTextColor(0xFFFFFFFF);
         city.setHintTextColor(0x66FFFFFF);
         city.setTextSize(13);
@@ -369,8 +369,8 @@ final class SettingsPanel {
         help.setVisibility(page.equals("updates") ? View.GONE : View.VISIBLE);
         help.setText("");
         if (page.equals("apps")) {
-            Ui.fit(title, "Apps", Ui.dp(300), 52, 30);
-            note.setText("Hidden apps leave your grid. They stay installed, and you can bring them back here.");
+            Ui.fit(title, act.getString(R.string.apps), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.hidden_apps_leave_your_grid));
             // inputs hidden from home first (hold OK on an input's tile), by their name on this TV
             android.media.tv.TvInputManager tim = (android.media.tv.TvInputManager) act.getSystemService(android.content.Context.TV_INPUT_SERVICE);
             for (String h : Prefs.hidden(act)) {
@@ -381,8 +381,8 @@ final class SettingsPanel {
                 } catch (RuntimeException e) {
                     info = null;
                 }
-                String name = info != null ? String.valueOf(info.loadLabel(act)) : "An input";
-                add(name, "Hidden · OK shows it", h, () -> {
+                String name = info != null ? String.valueOf(info.loadLabel(act)) : act.getString(R.string.an_input);
+                add(name, act.getString(R.string.hidden_ok_shows_it), h, () -> {
                     Prefs.hide(act, h, false);
                     host.applied("inputs");
                     build();
@@ -390,32 +390,32 @@ final class SettingsPanel {
             }
             for (AppRepo.App a : host.apps()) {
                 boolean hidden = Prefs.hidden(act).contains(a.pkg);
-                add(a.label, hidden ? "Hidden" : "Shown", "app:" + a.pkg, () -> {
+                add(a.label, hidden ? act.getString(R.string.hidden) : act.getString(R.string.shown), "app:" + a.pkg, () -> {
                     Prefs.hide(act, a.pkg, !Prefs.hidden(act).contains(a.pkg));
                     host.applied("apps");
                     build();
                 });
             }
         } else if (page.equals("home")) {
-            Ui.fit(title, "Home screen", Ui.dp(300), 52, 30);
-            note.setText("How your apps look and what moves on the home screen.");
+            Ui.fit(title, act.getString(R.string.home_screen), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.how_your_apps_look_and));
             boolean tvos = Prefs.tvos(act);
-            section("LOOK");
+            section(act.getString(R.string.look));
             // the two styles: Aura's own (sidebar, widgets, apps) or Apple TV's (apps alone on a dock)
-            add("Style", tvos ? "tvOS · apps on a dock" : "Aura · widgets and sidebar", "layout", () -> {
+            add(act.getString(R.string.style), tvos ? act.getString(R.string.tvos_apps_on_a_dock) : act.getString(R.string.aura_widgets_and_sidebar), "layout", () -> {
                 Prefs.of(act).edit().putString(Prefs.LAYOUT, Prefs.tvos(act) ? "aura" : "tvos").remove(Prefs.TILE_STYLE).remove(Prefs.NAME_MODE).apply();
                 host.applied("layout");
                 build();
                 focusTag("layout");
             });
-            if (tvos) add("Sidebar", Prefs.dockSidebar(act) ? "Slides in from the left" : "Hidden · Up for the top buttons", "dockside", () -> {
+            if (tvos) add(act.getString(R.string.sidebar), Prefs.dockSidebar(act) ? act.getString(R.string.slides_in_from_the_left) : act.getString(R.string.hidden_up_for_the_top), "dockside", () -> {
                 Prefs.of(act).edit().putBoolean(Prefs.DOCK_SIDEBAR, !Prefs.dockSidebar(act)).apply();
                 host.applied("layout");
                 build();
                 focusTag("dockside");
             });
             int si = java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act));
-            add("Tiles", Prefs.TILE_NAMES[Math.max(0, si)], "tiles", () -> {
+            add(act.getString(R.string.tiles), act.getString(Prefs.TILE_NAMES[Math.max(0, si)]), "tiles", () -> {
                 // OK steps through the styles; the grid changes straight away behind the panel
                 String next = Prefs.TILE_STYLES[(Math.max(0, si) + 1) % Prefs.TILE_STYLES.length];
                 Prefs.of(act).edit().putString(Prefs.TILE_STYLE, next).apply();
@@ -424,30 +424,30 @@ final class SettingsPanel {
                 focusTag("tiles");
             });
             int gi = Math.max(0, Prefs.gridCols(act) - 5);
-            add("App size", Prefs.GRID_NAMES[gi], "grid", () -> {
+            add(act.getString(R.string.app_size), act.getString(Prefs.GRID_NAMES[gi]), "grid", () -> {
                 // OK steps through the sizes; the grid is laid out again behind the panel
                 Prefs.of(act).edit().putInt(Prefs.GRID, Prefs.GRID_COLS[(gi + 1) % Prefs.GRID_COLS.length]).apply();
                 host.applied("apps");
                 build();
                 focusTag("grid");
             });
-            toggle("Apps beyond two rows", Prefs.GRID_PAGES, "Pages to the side", "Scroll down", "apps");
+            toggle(act.getString(R.string.apps_beyond_two_rows), Prefs.GRID_PAGES, act.getString(R.string.pages_to_the_side), act.getString(R.string.scroll_down), "apps");
             int ni = Math.max(0, java.util.Arrays.asList(Prefs.NAME_MODES).indexOf(Prefs.nameMode(act)));
-            add("App names", Prefs.NAME_LABELS[ni], "names", () -> {
+            add(act.getString(R.string.app_names), act.getString(Prefs.NAME_LABELS[ni]), "names", () -> {
                 String next = Prefs.NAME_MODES[(ni + 1) % Prefs.NAME_MODES.length];
                 Prefs.of(act).edit().putString(Prefs.NAME_MODE, next).putBoolean(Prefs.NAMES_ALWAYS, "always".equals(next)).apply();
                 host.applied("names");
                 build();
                 focusTag("names");
             });
-            toggle("Parallax icons", Prefs.PARALLAX, "On", "Off", "parallax");
-            section("WHAT SHOWS");
+            toggle(act.getString(R.string.parallax_icons), Prefs.PARALLAX, act.getString(R.string.on), act.getString(R.string.off), "parallax");
+            section(act.getString(R.string.what_shows));
             int hiddenW = Prefs.hiddenWidgets(act).size();
             boolean wShown = (!tvos || Prefs.dockWidgets(act)) && hiddenW < 3;
             // the plainest home: your apps and the wall, no widgets and no app cards (continue
             // watching, an app's rows); the two rows below still change each on its own
             boolean only = !wShown && !Prefs.on(act, Prefs.TOP_SHELF);
-            add("Only apps", only ? "On · nothing but your apps" : "Off", "onlyapps", () -> {
+            add(act.getString(R.string.only_apps), only ? act.getString(R.string.on_nothing_but_your_apps) : act.getString(R.string.off), "onlyapps", () -> {
                 boolean on = !only;
                 android.content.SharedPreferences.Editor e = Prefs.of(act).edit().putBoolean(Prefs.TOP_SHELF, !on);
                 if (tvos) e.putBoolean(Prefs.DOCK_WIDGETS, !on);
@@ -462,26 +462,26 @@ final class SettingsPanel {
                 build();
                 focusTag("onlyapps");
             });
-            add("Widgets", !wShown ? "Hidden · clean" : hiddenW == 0 ? "All shown" : (3 - hiddenW) + " of 3 shown", "widgets", () -> go("widgets"));
+            add(act.getString(R.string.widgets), !wShown ? act.getString(R.string.hidden_clean) : hiddenW == 0 ? act.getString(R.string.all_shown) : act.getString(R.string.n_of_3_shown, 3 - hiddenW), "widgets", () -> go("widgets"));
             // an app's own cards above it when it has focus (JioHotstar's rows, YouTube's videos); off for only apps
-            toggle(tvos ? "App cards" : "Top Shelf", Prefs.TOP_SHELF, "On", "Hidden · clean", "shelf");
-            toggle("Tonight's pick", Prefs.PICKS, "Shown", "Hidden · clean", "picks");
-            toggle("Live picture on input tiles", Prefs.INPUT_PREVIEW, "On", "Off", "inputs");
-            section("SPEED");
+            toggle(tvos ? act.getString(R.string.app_cards) : act.getString(R.string.top_shelf), Prefs.TOP_SHELF, act.getString(R.string.on), act.getString(R.string.hidden_clean), "shelf");
+            toggle(act.getString(R.string.tonights_pick), Prefs.PICKS, act.getString(R.string.shown), act.getString(R.string.hidden_clean), "picks");
+            toggle(act.getString(R.string.live_picture_on_input_tiles), Prefs.INPUT_PREVIEW, act.getString(R.string.on), act.getString(R.string.off), "inputs");
+            section(act.getString(R.string.speed));
             // stillness for slow TVs; Auto decides from the TV's memory and chip
             String lm = Perf.mode(act);
-            add("Light mode", lm.equals("auto") ? "Auto · " + (Perf.lowEnd(act) ? "on for this TV" : "off for this TV") : lm.equals("on") ? "On" : "Off", "light", () -> {
+            add(act.getString(R.string.light_mode), lm.equals("auto") ? act.getString(R.string.auto_value, Perf.lowEnd(act) ? act.getString(R.string.on_for_this_tv) : act.getString(R.string.off_for_this_tv)) : lm.equals("on") ? act.getString(R.string.on) : act.getString(R.string.off), "light", () -> {
                 String next = Perf.MODES[(java.util.Arrays.asList(Perf.MODES).indexOf(Perf.mode(act)) + 1) % Perf.MODES.length];
                 Prefs.device(act).edit().putString(Perf.KEY, next).apply();
                 host.applied("light");
                 build();
                 focusTag("light");
             });
-            section("REMOTE");
+            section(act.getString(R.string.remote));
             // switched by Aura where setup allowed it; elsewhere, Android's own Accessibility screen does it
             // how late the TV hands over remote releases while Aura watches the keys: some firmware adds a lot
             int lag = Prefs.device(act).getInt("keys_lag", 0);
-            add("Home button in apps", HomeKeys.on(act) ? "Twice: switcher · hold: Control Center" + (lag >= 150 ? " · remote " + lag + " ms late" : "") : "Off", "homekeys", () -> {
+            add(act.getString(R.string.home_button_in_apps), HomeKeys.on(act) ? act.getString(R.string.homekeys_on) + (lag >= 150 ? " · " + act.getString(R.string.remote_ms_late, lag) : "") : act.getString(R.string.off), "homekeys", () -> {
                 if (!HomeKeys.set(act, !HomeKeys.on(act))) {
                     host.open(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS), panel);
                     return;
@@ -491,7 +491,7 @@ final class SettingsPanel {
             });
             // where Android sends Home to another launcher, the service can send it to Aura instead
             if (HomeKeys.on(act) && !HomeRole.held(act)) {
-                add("Home goes to", HomeKeys.takeover(act) ? "Aura" : HomeRole.other(act), "takeover", () -> {
+                add(act.getString(R.string.home_goes_to), HomeKeys.takeover(act) ? "Aura" : HomeRole.other(act), "takeover", () -> {
                     HomeKeys.setTakeover(act, !HomeKeys.takeover(act));
                     build();
                     focusTag("takeover");
@@ -499,34 +499,34 @@ final class SettingsPanel {
             }
             // pictures need the service above, and Android 11
             if (android.os.Build.VERSION.SDK_INT >= 30 && HomeKeys.on(act)) {
-                add("Pictures in the switcher", Previews.on(act) ? "Apps as you left them" : "Off", "previews", () -> {
+                add(act.getString(R.string.pictures_in_the_switcher), Previews.on(act) ? act.getString(R.string.apps_as_you_left_them) : act.getString(R.string.off), "previews", () -> {
                     Previews.set(act, !Previews.on(act));
-                    host.hud(R.drawable.ic_check, Previews.on(act) ? "Kept only on this TV, two days at most" : "Pictures deleted");
+                    host.hud(R.drawable.ic_check, Previews.on(act) ? act.getString(R.string.kept_only_on_this_tv) : act.getString(R.string.pictures_deleted));
                     build();
                     focusTag("previews");
                 });
             }
             if (HomeKeys.on(act)) {
                 int n = HomeKeys.keys(act).size();
-                add("Remote buttons", n == 0 ? "Give a button an app" : n + (n == 1 ? " button with an app" : " buttons with apps"), "keys", () -> go("keys"));
+                add(act.getString(R.string.remote_buttons), n == 0 ? act.getString(R.string.give_a_button_an_app) : act.getResources().getQuantityString(R.plurals.buttons_with_apps, n, n), "keys", () -> go("keys"));
             }
         } else if (page.equals("profiles")) {
-            Ui.fit(title, "Profiles", Ui.dp(300), 52, 30);
-            note.setText("Everyone gets their own app order, folders, tiles, widgets and wallpaper. OK switches to a profile.");
+            Ui.fit(title, act.getString(R.string.profiles), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.everyone_gets_their_own_app));
             String cur = Profiles.current(act);
             for (Profiles.Profile pr : Profiles.all(act)) {
-                add(pr.name, pr.id.equals(cur) ? "In use" : "Switch", "pr:" + pr.id, () -> {
+                add(pr.name, pr.id.equals(cur) ? act.getString(R.string.in_use) : act.getString(R.string.switch_word), "pr:" + pr.id, () -> {
                     if (pr.id.equals(Profiles.current(act))) return;
                     Profiles.use(act, pr.id);
-                    host.hud(R.drawable.ic_check, "Hello, " + pr.name);
+                    host.hud(R.drawable.ic_check, act.getString(R.string.hello_name, pr.name));
                     host.applied("profile");
                 });
             }
-            if (Profiles.all(act).size() < Profiles.MAX) add("Add a profile", "Type a name", "pr:add", this::askProfile);
+            if (Profiles.all(act).size() < Profiles.MAX) add(act.getString(R.string.add_a_profile), act.getString(R.string.type_a_name), "pr:add", this::askProfile);
             // a profile for kids: grown-up things (Settings, hiding, uninstalling) ask for the parents' PIN
             for (Profiles.Profile pr : Profiles.all(act)) {
                 if (Profiles.MAIN.equals(pr.id)) continue;
-                add(pr.name + " is for kids", pr.kids ? "On · PIN for grown-up things" : "Off", "pr:kids:" + pr.id, () -> {
+                add(act.getString(R.string.name_is_for_kids, pr.name), pr.kids ? act.getString(R.string.on_pin_for_grown_up) : act.getString(R.string.off), "pr:kids:" + pr.id, () -> {
                     if (!pr.kids && !Profiles.hasPin(act)) {
                         pinFor = pr.id;
                         askPin();
@@ -537,13 +537,13 @@ final class SettingsPanel {
                     focusTag("pr:kids:" + pr.id);
                 });
             }
-            if (Profiles.hasPin(act)) add("Parents' PIN", "Change", "pr:pin", () -> {
+            if (Profiles.hasPin(act)) add(act.getString(R.string.parents_pin), act.getString(R.string.change), "pr:pin", () -> {
                 pinFor = null;
                 askPin();
             });
             for (Profiles.Profile pr : Profiles.all(act)) {
                 if (Profiles.MAIN.equals(pr.id)) continue;
-                add("Remove " + pr.name, ("pr:del:" + pr.id).equals(confirmProfile) ? "Press OK again" : "", "pr:del:" + pr.id, () -> {
+                add(act.getString(R.string.remove_name, pr.name), ("pr:del:" + pr.id).equals(confirmProfile) ? act.getString(R.string.press_ok_again) : "", "pr:del:" + pr.id, () -> {
                     String tag = "pr:del:" + pr.id;
                     if (!tag.equals(confirmProfile)) {
                         confirmProfile = tag;
@@ -553,7 +553,7 @@ final class SettingsPanel {
                     confirmProfile = null;
                     boolean wasCurrent = pr.id.equals(Profiles.current(act));
                     Profiles.remove(act, pr.id);
-                    host.hud(R.drawable.ic_check, pr.name + " removed");
+                    host.hud(R.drawable.ic_check, act.getString(R.string.name_removed, pr.name));
                     if (wasCurrent) host.applied("profile");
                     else {
                         build();
@@ -562,13 +562,13 @@ final class SettingsPanel {
                 });
             }
         } else if (page.equals("widgets")) {
-            Ui.fit(title, "Widgets", Ui.dp(300), 52, 30);
-            note.setText("Hide the ones you don't use and the rest widen to fill the row. Holding OK on a widget moves or hides it too. "
-                    + "The Smart Stack always deals what you're watching first; the cards below are extras.");
+            Ui.fit(title, act.getString(R.string.widgets), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.widgets_note_1) + " "
+                    + act.getString(R.string.widgets_note_2));
             boolean tvos = Prefs.tvos(act);
             java.util.Set<String> hidden = Prefs.hiddenWidgets(act);
             boolean anyOn = (!tvos || Prefs.dockWidgets(act)) && hidden.size() < HomeActivity.WIDGET_IDS.length;
-            add("Show widgets", anyOn ? "On" : "Hidden · clean", "w:all", () -> {
+            add(act.getString(R.string.show_widgets), anyOn ? act.getString(R.string.on) : act.getString(R.string.hidden_clean), "w:all", () -> {
                 if (tvos) {
                     boolean turnOn = !anyOn;
                     Prefs.of(act).edit().putBoolean(Prefs.DOCK_WIDGETS, turnOn).apply();
@@ -587,7 +587,7 @@ final class SettingsPanel {
             for (int i : Prefs.widgetOrder(act)) {
                 String id = HomeActivity.WIDGET_IDS[i];
                 boolean shown = (!tvos || Prefs.dockWidgets(act)) && !hidden.contains(id);
-                add(HomeActivity.WIDGET_NAMES[i], shown ? "Shown" : "Hidden", "w:" + id, () -> {
+                add(act.getString(HomeActivity.WIDGET_NAMES[i]), shown ? act.getString(R.string.shown) : act.getString(R.string.hidden), "w:" + id, () -> {
                     if (tvos && !Prefs.dockWidgets(act)) {
                         Prefs.of(act).edit().putBoolean(Prefs.DOCK_WIDGETS, true).apply();
                         Prefs.hideWidget(act, id, false);
@@ -599,54 +599,54 @@ final class SettingsPanel {
                     focusTag("w:" + id);
                 });
             }
-            toggle("Stack pages", Prefs.STACK_AUTO, "Turn on their own", "Stay put", "stack");
+            toggle(act.getString(R.string.stack_pages), Prefs.STACK_AUTO, act.getString(R.string.turn_on_their_own), act.getString(R.string.stay_put), "stack");
             // the stack's extras: today's releases come from the country's schedule, not your account
-            toggle("New today on your apps", Prefs.STACK_NEW, "In the stack", "Left out", "cards");
-            toggle("Suggested apps", Prefs.STACK_APPS, "In the stack", "Left out", "cards");
+            toggle(act.getString(R.string.new_today_on_your_apps), Prefs.STACK_NEW, act.getString(R.string.in_the_stack), act.getString(R.string.left_out), "cards");
+            toggle(act.getString(R.string.suggested_apps), Prefs.STACK_APPS, act.getString(R.string.in_the_stack), act.getString(R.string.left_out), "cards");
             // cards turned down from the stack (hold OK on a card): all back at once
             int declined = Taste.declinedCount(act);
-            if (declined > 0) add("Cards you turned down", declined + " · OK brings them back", "w:forgive", () -> {
+            if (declined > 0) add(act.getString(R.string.cards_you_turned_down), act.getString(R.string.n_ok_brings_them_back, declined), "w:forgive", () -> {
                 Taste.forgive(act);
                 host.applied("widgets");
-                host.hud(R.drawable.ic_check, "They're back in the stack");
+                host.hud(R.drawable.ic_check, act.getString(R.string.theyre_back_in_the_stack));
                 build();
             });
-            add("Original order", "", "w:reset", () -> {
+            add(act.getString(R.string.original_order), "", "w:reset", () -> {
                 Prefs.setWidgetOrder(act, java.util.Arrays.asList(0, 1, 2));
                 host.applied("widgets");
                 build();
             });
         } else if (page.equals("shield")) {
-            Ui.fit(title, "Block ads", Ui.dp(300), 52, 30);
-            note.setText("Ad and tracker servers get no answer across apps and menus (YouTube's own video stream ads come from the video server itself). Pick a filter, or find the fastest one from this TV.");
-            add("Block ads", shieldNote != null ? shieldNote : Shield.on(act) ? "On" : "Off", "shield:on", this::toggleShield);
+            Ui.fit(title, act.getString(R.string.block_ads), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.ad_and_tracker_servers_get));
+            add(act.getString(R.string.block_ads), shieldNote != null ? shieldNote : Shield.on(act) ? act.getString(R.string.on) : act.getString(R.string.off), "shield:on", this::toggleShield);
             String current = Shield.host(act);
             boolean custom = true;
             for (String[] f : Shield.FILTERS) {
                 if (f[0].equals(current)) custom = false;
-                add(f[1], filterValue(f[0], f[2], current), "dns:" + f[0], () -> pickFilter(f[0], f[1]));
+                add(f[1], filterValue(f[0], Shield.about(act, f[0]), current), "dns:" + f[0], () -> pickFilter(f[0], f[1]));
             }
-            add("Your own DNS", custom ? filterValue(current, current, current) : "Type a hostname", "dns:custom", this::askDns);
-            add("Find the fastest", probing ? "Measuring…" : "", "dns:probe", this::findFastest);
-            add("Wi-Fi DNS settings", "If this TV ignores Private DNS · use 94.140.14.14", "dns:wifi",
+            add(act.getString(R.string.your_own_dns), custom ? filterValue(current, current, current) : act.getString(R.string.type_a_hostname), "dns:custom", this::askDns);
+            add(act.getString(R.string.find_the_fastest), probing ? act.getString(R.string.measuring) : "", "dns:probe", this::findFastest);
+            add(act.getString(R.string.wi_fi_dns_settings), act.getString(R.string.if_this_tv_ignores_private), "dns:wifi",
                     () -> host.open(new Intent(Settings.ACTION_WIFI_SETTINGS), panel));
         } else if (page.equals("wallpaper")) {
-            Ui.fit(title, "Wallpaper", Ui.dp(300), 52, 30);
-            note.setText("Photographs that follow the sky, or pure black for OLED. The screensaver shows the photographs with a few lines about each, or famous quotes over them. Auto moves between the two.");
-            toggle("Wallpaper", Prefs.BLACK, "Pure black", "Photographs", "photos");
+            Ui.fit(title, act.getString(R.string.wallpaper), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.photographs_that_follow_the_sky));
+            toggle(act.getString(R.string.wallpaper), Prefs.BLACK, act.getString(R.string.pure_black), act.getString(R.string.photographs), "photos");
             if (!Prefs.on(act, Prefs.BLACK)) {
-                toggle("Fresh HD photographs", Prefs.DAILY, "On", "Off", "daily");
+                toggle(act.getString(R.string.fresh_hd_photographs), Prefs.DAILY, act.getString(R.string.on), act.getString(R.string.off), "daily");
                 if (Prefs.on(act, Prefs.DAILY)) {
                     List<String> on = Gallery.sources(act);
-                    add("Photo sources", on.isEmpty() ? "None · Northern lights only" : on.size() + " on", "sources", () -> go("sources"));
+                    add(act.getString(R.string.photo_sources), on.isEmpty() ? act.getString(R.string.none_northern_lights_only) : act.getString(R.string.n_on, on.size()), "sources", () -> go("sources"));
                 }
-                toggle("Sky moments", Prefs.MOMENTS, "On", "Off", "moments");
+                toggle(act.getString(R.string.sky_moments), Prefs.MOMENTS, act.getString(R.string.on), act.getString(R.string.off), "moments");
             }
             // the screensaver's scene: the photographs, the quotes, or both by turns
             final List<String> modes = java.util.Arrays.asList(Prefs.SAVERS);
             String mode = Prefs.saver(act);
-            add("Screensaver", Prefs.SAVER_NAMES[modes.indexOf(mode)]
-                    + (mode.equals("auto") ? " · photographs and quotes by turns" : ""), Prefs.SAVER, () -> {
+            add(act.getString(R.string.screensaver), act.getString(Prefs.SAVER_NAMES[modes.indexOf(mode)])
+                    + (mode.equals("auto") ? " · " + act.getString(R.string.photographs_and_quotes_by_turns) : ""), Prefs.SAVER, () -> {
                 String next = modes.get((modes.indexOf(Prefs.saver(act)) + 1) % modes.size());
                 Prefs.of(act).edit().putString(Prefs.SAVER, next).apply();
                 build();
@@ -655,26 +655,26 @@ final class SettingsPanel {
             // the TV's own screensaver settings, here instead of three menus deep in Android's
             if (Ambient.canSet(act)) {
                 boolean mine = Ambient.chosen(act);
-                add("Aura as the screensaver", mine ? "On" : "Off · another one is chosen", "saver:use", () -> {
-                    if (!Ambient.choose(act, !Ambient.chosen(act))) host.hud(R.drawable.ic_info, "The TV didn't allow that change");
+                add(act.getString(R.string.aura_as_the_screensaver), mine ? act.getString(R.string.on) : act.getString(R.string.off_another_one_is_chosen), "saver:use", () -> {
+                    if (!Ambient.choose(act, !Ambient.chosen(act))) host.hud(R.drawable.ic_info, act.getString(R.string.the_tv_didnt_allow_that));
                     build();
                     focusTag("saver:use");
                 });
                 if (mine) {
-                    add("Starts after", Ambient.span(Ambient.startMs(act)), "saver:start", () -> {
+                    add(act.getString(R.string.starts_after), Ambient.span(Ambient.startMs(act)), "saver:start", () -> {
                         Ambient.next(act, true, Ambient.startMs(act));
                         build();
                         focusTag("saver:start");
                     });
                 }
                 int off = Ambient.offMs(act);
-                add("TV turns off after", Ambient.span(off) + (mine && off >= 0 && off < Ambient.startMs(act) ? " · before the screensaver" : " without use"), "saver:off", () -> {
+                add(act.getString(R.string.tv_turns_off_after), (mine && off >= 0 && off < Ambient.startMs(act) ? act.getString(R.string.span_before_the_screensaver, Ambient.span(off)) : act.getString(R.string.span_without_use, Ambient.span(off))), "saver:off", () -> {
                     Ambient.next(act, false, Ambient.offMs(act));
                     build();
                     focusTag("saver:off");
                 });
             } else {
-                add("Aura as the screensaver", Ambient.chosen(act) ? "On" : "Choose it in Android's settings", "saver:use", () -> {
+                add(act.getString(R.string.aura_as_the_screensaver), Ambient.chosen(act) ? act.getString(R.string.on) : act.getString(R.string.choose_it_in_androids_settings), "saver:use", () -> {
                     try {
                         host.open(new Intent(Settings.ACTION_DREAM_SETTINGS), panel);
                     } catch (RuntimeException e) {
@@ -682,64 +682,64 @@ final class SettingsPanel {
                     }
                 });
             }
-            add("Preview the screensaver", "", "saver:preview", () -> {
+            add(act.getString(R.string.preview_the_screensaver), "", "saver:preview", () -> {
                 try {
                     act.startActivity(new Intent(Intent.ACTION_MAIN).setClassName("com.android.systemui", "com.android.systemui.Somnambulator")
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 } catch (RuntimeException e) {
-                    host.hud(R.drawable.ic_info, "This TV can't preview it; it starts after a while of rest");
+                    host.hud(R.drawable.ic_info, act.getString(R.string.this_tv_cant_preview_it));
                 }
             });
         } else if (page.equals("updates")) {
-            Ui.fit(title, "Updates", Ui.dp(300), 52, 30);
+            Ui.fit(title, act.getString(R.string.updates), Ui.dp(300), 52, 30);
             String mine = Updater.installed(act);
             switch (updateState) {
                 case "checking":
-                    note.setText("Looking for a newer Aura on GitHub…");
+                    note.setText(act.getString(R.string.looking_for_a_newer_aura));
                     break;
                 case "available":
                 case "downloading":
                     note.setText((installHint != null && !Updater.allowed(act) ? installHint + "\n\n" : "")
-                            + "Aura " + release.version + " is out.\n\n" + release.notes);
+                            + act.getString(R.string.aura_version_is_out, release.version) + "\n\n" + release.notes);
                     break;
                 case "error":
                     note.setText(updateNote);
                     break;
                 default:
-                    note.setText("You have the latest Aura. Updates come from the project's releases on GitHub.");
+                    note.setText(act.getString(R.string.you_have_the_latest_aura));
             }
-            add("Installed", mine, "u:mine", () -> { });
+            add(act.getString(R.string.installed), mine, "u:mine", () -> { });
             if (release != null && (updateState.equals("available") || updateState.equals("downloading"))) {
-                add("Install " + release.version, updateState.equals("downloading") ? updateNote
+                add(act.getString(R.string.install_name, release.version), updateState.equals("downloading") ? updateNote
                         : String.format(java.util.Locale.ROOT, "%.1f MB", release.size / 1048576f), "u:install", this::installUpdate);
             }
-            if (!updateState.equals("checking") && !updateState.equals("downloading")) add("Check again", "", "u:check", this::checkUpdate);
+            if (!updateState.equals("checking") && !updateState.equals("downloading")) add(act.getString(R.string.check_again), "", "u:check", this::checkUpdate);
             // the way round a TV whose installer won't take Aura's own updates (seen on Fire TV)
             final Intent downloader = updateState.equals("error")
                     ? act.getPackageManager().getLaunchIntentForPackage("com.esaba.downloader") : null;
-            if (downloader != null) add("Open Downloader", "Type the code 4172997", "u:downloader",
+            if (downloader != null) add(act.getString(R.string.open_downloader), act.getString(R.string.type_the_code_4172997), "u:downloader",
                     () -> host.open(downloader.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), panel));
         } else if (page.equals("drop")) {
-            Ui.fit(title, "From your phone", Ui.dp(300), 52, 30);
-            note.setText("Point your phone's camera at the code to type on the TV, or send photos, GIFs and apps. Photos land on your wall; an app asks here before it installs.");
+            Ui.fit(title, act.getString(R.string.from_your_phone), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.point_your_phones_camera_at));
             LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200));
             cl.bottomMargin = Ui.dp(8);
             rows.addView(dropCard, cl);
-            toggle("Show", Prefs.MINE_ONLY, "Only your photos", "Everything", "photos");
+            toggle(act.getString(R.string.show), Prefs.MINE_ONLY, act.getString(R.string.only_your_photos), act.getString(R.string.everything), "photos");
             int n = Mine.count(act);
-            if (n > 0) add("Your photos", n + " on the TV", "photos", () -> {
+            if (n > 0) add(act.getString(R.string.your_photos), act.getString(R.string.n_on_the_tv, n), "photos", () -> {
                 confirmPhoto = null;
                 confirmClear = false;
                 go("photos");
             });
         } else if (page.equals("photos")) {
-            Ui.fit(title, "Your photos", Ui.dp(300), 52, 30);
-            note.setText("Everything sent from your phone. OK on one removes it, after a second OK to be sure.");
+            Ui.fit(title, act.getString(R.string.your_photos), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.everything_sent_from_your_phone));
             org.json.JSONArray list = Mine.list(act);
             for (int i = 0; i < list.length(); i++) {
                 org.json.JSONObject o = list.optJSONObject(i);
                 final String id = o.optString("id");
-                add(o.optString("title") + (o.optBoolean("gif") ? "  ·  GIF" : ""), id.equals(confirmPhoto) ? "Press OK again" : "Remove",
+                add(o.optString("title") + (o.optBoolean("gif") ? "  ·  GIF" : ""), id.equals(confirmPhoto) ? act.getString(R.string.press_ok_again) : act.getString(R.string.remove),
                         "p:" + id, photoThumb(id), () -> {
                             if (!id.equals(confirmPhoto)) {
                                 confirmPhoto = id;
@@ -755,7 +755,7 @@ final class SettingsPanel {
                             else if (act.getCurrentFocus() == null || act.getCurrentFocus().getParent() != rows) go("photos");
                         });
             }
-            if (list.length() > 1) add("Remove all", confirmClear ? "Press OK again" : list.length() + " photos", "clear", () -> {
+            if (list.length() > 1) add(act.getString(R.string.remove_all), confirmClear ? act.getString(R.string.press_ok_again) : act.getResources().getQuantityString(R.plurals.n_photos, list.length(), list.length()), "clear", () -> {
                 if (!confirmClear) {
                     confirmClear = true;
                     build();
@@ -770,15 +770,15 @@ final class SettingsPanel {
         } else if (page.equals("picks")) {
             buildPicks();
         } else if (page.equals("genres")) {
-            Ui.fit(title, "Genres", Ui.dp(300), 52, 30);
-            note.setText("Picks come from any of the genres switched on here. With none on, any genre will do.");
+            Ui.fit(title, act.getString(R.string.genres), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.picks_come_from_any_of));
             java.util.Set<String> g = Picks.genres(act);
-            add("Any genre", g.isEmpty() ? "On" : "", "g:any", () -> {
+            add(act.getString(R.string.any_genre), g.isEmpty() ? act.getString(R.string.on) : "", "g:any", () -> {
                 Picks.setGenres(act, new java.util.HashSet<>());
                 tasteChanged();
             });
             for (Picks.Genre x : Picks.GENRES) {
-                add(x.name, g.contains(x.id) ? "On" : "Off", "g:" + x.id, () -> {
+                add(act.getString(x.name), g.contains(x.id) ? act.getString(R.string.on) : act.getString(R.string.off), "g:" + x.id, () -> {
                     java.util.Set<String> now = Picks.genres(act);
                     if (!now.remove(x.id)) now.add(x.id);
                     Picks.setGenres(act, now);
@@ -786,19 +786,19 @@ final class SettingsPanel {
                 });
             }
         } else if (page.equals("pair")) {
-            Ui.fit(title, "Wireless debugging", Ui.dp(300), 52, 30);
-            note.setText("In Developer options, switch on Wireless debugging and choose Pair device with pairing code. Leave it open, scan this with your phone, and type the six digits it shows.");
+            Ui.fit(title, act.getString(R.string.wireless_debugging), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.in_developer_options_switch_on));
             if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
-            add("Developer options", "", "pair:dev", () -> host.open(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS), panel));
+            add(act.getString(R.string.developer_options), "", "pair:dev", () -> host.open(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS), panel));
         } else if (page.equals("backup")) {
-            Ui.fit(title, "Your setup", Ui.dp(300), 52, 30);
-            note.setText("Save your profiles, app order, folders, tiles and choices to your phone, and bring them back after a reinstall or on another TV. Photos stay on your phone.");
+            Ui.fit(title, act.getString(R.string.your_setup), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.save_your_profiles_app_order));
             if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
         } else if (page.equals("trouble")) {
-            Ui.fit(title, "Problem reports", Ui.dp(300), 52, 30);
-            note.setText("When something goes wrong, Aura keeps a note: the error, and what TV this is. Nothing is sent by itself. Scan the code to read it on your phone, then copy it into a GitHub issue or a message.");
+            Ui.fit(title, act.getString(R.string.problem_reports), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.when_something_goes_wrong_aura));
             if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
-            if (Trouble.count(act) > 0) add("Clear them", confirmClearTrouble ? "Press OK again" : "", "trouble:clear", () -> {
+            if (Trouble.count(act) > 0) add(act.getString(R.string.clear_them), confirmClearTrouble ? act.getString(R.string.press_ok_again) : "", "trouble:clear", () -> {
                 if (!confirmClearTrouble) {
                     confirmClearTrouble = true;
                     build();
@@ -807,87 +807,89 @@ final class SettingsPanel {
                 }
                 confirmClearTrouble = false;
                 Trouble.clear(act);
-                host.hud(R.drawable.ic_check, "Problem reports cleared");
+                host.hud(R.drawable.ic_check, act.getString(R.string.problem_reports_cleared));
                 build();
             });
         } else if (page.equals("art")) {
             Ui.fit(title, artLabel, Ui.dp(300), 52, 30);
-            note.setText("Your own picture for its tile: a photo, a poster, a banner. Scan the code and choose one on your phone; it's cropped to fit.");
+            note.setText(act.getString(R.string.your_own_picture_for_its));
             if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
-            if (Art.has(act, artPkg)) add("Use the app's own", "", "art:reset", () -> {
+            if (Art.has(act, artPkg)) add(act.getString(R.string.use_the_apps_own), "", "art:reset", () -> {
                 Art.remove(act, artPkg);
-                host.hud(R.drawable.ic_check, artLabel + " has its own art again");
+                host.hud(R.drawable.ic_check, act.getString(R.string.name_has_its_own_art_again, artLabel));
                 host.applied("art");
                 build();
             });
         } else if (page.equals("sources")) {
-            Ui.fit(title, "Photo sources", Ui.dp(300), 52, 30);
-            note.setText("Where the wall's photographs come from. Each one on takes its turn, and no photograph is shown twice. Unsplash needs your own free key: send it from your phone.");
-            toggle("Windows Spotlight", Prefs.SRC_SPOTLIGHT, "On", "Off", "sources");
-            toggle("Bing", Prefs.SRC_BING, "On", "Off", "sources");
-            toggle("Wikimedia Commons", Prefs.SRC_WIKIMEDIA, "On", "Off", "sources");
-            toggle("Wallhaven · nature", Prefs.SRC_WALLHAVEN, "On", "Off", "sources");
+            Ui.fit(title, act.getString(R.string.photo_sources), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.where_the_walls_photographs_come));
+            toggle("Windows Spotlight", Prefs.SRC_SPOTLIGHT, act.getString(R.string.on), act.getString(R.string.off), "sources");
+            toggle("Bing", Prefs.SRC_BING, act.getString(R.string.on), act.getString(R.string.off), "sources");
+            toggle("Wikimedia Commons", Prefs.SRC_WIKIMEDIA, act.getString(R.string.on), act.getString(R.string.off), "sources");
+            toggle(act.getString(R.string.wallhaven_nature), Prefs.SRC_WALLHAVEN, act.getString(R.string.on), act.getString(R.string.off), "sources");
             if (Gallery.unsplashKey(act).isEmpty()) {
-                add("Unsplash", "Needs a key · send it from your phone", "src:unsplash", this::openUnsplashDrop);
+                add("Unsplash", act.getString(R.string.needs_a_key_send_it), "src:unsplash", this::openUnsplashDrop);
             } else {
-                toggle("Unsplash", Prefs.SRC_UNSPLASH, "On", "Off", "sources");
-                add("Unsplash key", "Saved · send a new one", "src:key", this::openUnsplashDrop);
+                toggle("Unsplash", Prefs.SRC_UNSPLASH, act.getString(R.string.on), act.getString(R.string.off), "sources");
+                add(act.getString(R.string.unsplash_key), act.getString(R.string.saved_send_a_new_one), "src:key", this::openUnsplashDrop);
             }
         } else if (page.equals("unsplashphone")) {
-            Ui.fit(title, "Unsplash key", Ui.dp(300), 52, 30);
-            note.setText("Scan the code, then paste the Access Key of an app you create at unsplash.com (Your apps). It's free with an Unsplash account.");
+            Ui.fit(title, act.getString(R.string.unsplash_key), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.scan_the_code_then_paste));
             if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
         } else if (page.equals("tmdbphone")) {
-            Ui.fit(title, "TMDB key", Ui.dp(300), 52, 30);
-            note.setText("Scan the code, then paste your key from themoviedb.org (Settings, API) into the page that opens. It's free with a TMDB account.");
+            Ui.fit(title, act.getString(R.string.tmdb_key), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.scan_the_code_then_paste_2));
             if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
         } else if (page.equals("tmdbauth")) {
-            Ui.fit(title, "TMDB account", Ui.dp(300), 52, 30);
-            note.setText("Scan the code, sign in to TMDB if it asks, and choose Approve. Your watchlist then becomes Tonight's pick. Aura keeps only the sign-in, on this TV.");
+            Ui.fit(title, act.getString(R.string.tmdb_account), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.scan_the_code_sign_in));
             if (authCard != null) rows.addView(authCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
         } else if (page.equals("tv")) {
             buildTv();
         } else if (page.equals("keys")) {
             buildKeys();
         } else {
-            Ui.fit(title, "Settings", Ui.dp(300), 52, 30);
+            Ui.fit(title, act.getString(R.string.settings), Ui.dp(300), 52, 30);
             Weather.Now w = Weather.now(act);
-            note.setText("Changes apply at once. Everything here can be undone the same way.");
+            note.setText(act.getString(R.string.changes_apply_at_once_everything));
             // only while Android still sends Home to another launcher: Android asks, or (Google TV,
             // Fire TV, which keep Home whatever is chosen) the Home button service takes it over
             if (!HomeRole.held(act)) {
                 boolean taken = HomeKeys.on(act) && HomeKeys.takeover(act);
-                add("Home button", taken ? "Opens Aura" : "Opens " + HomeRole.other(act) + " · OK to change", "role", () -> {
+                add(act.getString(R.string.home_button), taken ? act.getString(R.string.opens_aura) : act.getString(R.string.opens_name_ok_to_change, HomeRole.other(act)), "role", () -> {
                     // where only setup can take Home over, straight to the page that does it
                     if (HomeRole.needsSetup(act) && !HomeKeys.set(act, true) && !HomeRole.byHand(act)) {
                         go("tv");
                         return;
                     }
                     String m = HomeRole.make(act);
-                    if (m != null) host.hud(m.startsWith("Home") ? R.drawable.ic_check : R.drawable.ic_info, m);
+                    if (m != null) host.hud(m.equals(act.getString(R.string.home_now_opens_aura)) || m.equals(act.getString(R.string.home_already_opens_aura))
+                            ? R.drawable.ic_check : R.drawable.ic_info, m);
                     build();
                     focusTag("role");
                 });
             }
-            section("YOU");
-            add("Profile", Profiles.name(act), "profiles", host::whoIsWatching);
-            add("Wallpaper", Prefs.on(act, Prefs.BLACK) ? "Pure black" : "Photographs", "wallpaper", () -> go("wallpaper"));
+            section(act.getString(R.string.you));
+            add(act.getString(R.string.profile), Profiles.name(act), "profiles", host::whoIsWatching);
+            add(act.getString(R.string.wallpaper), Prefs.on(act, Prefs.BLACK) ? act.getString(R.string.pure_black) : act.getString(R.string.photographs), "wallpaper", () -> go("wallpaper"));
             int mine = Mine.count(act);
-            add("From your phone", mine > 0 ? mine + (mine == 1 ? " photo" : " photos") : "Photos, GIFs, apps", "drop", this::openDrop);
-            section("HOME SCREEN");
-            add("Home screen", Prefs.TILE_NAMES[Math.max(0, java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act)))]
-                    + " tiles", "home", () -> go("home"));
-            add("Hidden apps", String.valueOf(Prefs.hidden(act).size()), "hidden", () -> go("apps"));
-            add("Tonight's pick", !Prefs.on(act, Prefs.PICKS) ? "Off" : Picks.tmdb(act) ? picksSummary() : "Shows · " + Picks.genreSummary(act),
+            add(act.getString(R.string.from_your_phone), mine > 0 ? act.getResources().getQuantityString(R.plurals.n_photos, mine, mine) : act.getString(R.string.photos_gifs_apps), "drop", this::openDrop);
+            toggle(act.getString(R.string.play_from_phones_pcs), Prefs.DLNA, act.getString(R.string.on_dlna), act.getString(R.string.off), "dlna");
+            section(act.getString(R.string.home_screen_2));
+            add(act.getString(R.string.home_screen), act.getString(R.string.name_tiles, act.getString(Prefs.TILE_NAMES[Math.max(0, java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act)))]
+                    )), "home", () -> go("home"));
+            add(act.getString(R.string.hidden_apps), String.valueOf(Prefs.hidden(act).size()), "hidden", () -> go("apps"));
+            add(act.getString(R.string.tonights_pick), !Prefs.on(act, Prefs.PICKS) ? act.getString(R.string.off) : Picks.tmdb(act) ? picksSummary() : act.getString(R.string.shows_value, Picks.genreSummary(act)),
                     "picks", () -> go("picks"));
-            toggle("Weather", Prefs.WEATHER, "On", "Off", "weather");
+            toggle(act.getString(R.string.weather), Prefs.WEATHER, act.getString(R.string.on), act.getString(R.string.off), "weather");
             boolean manual = Prefs.device(act).getBoolean("geo_manual", false);
-            String place = w != null && !w.city.isEmpty() ? w.city : "Not found yet";
-            add("Weather city", (manual ? "" : "Auto · ") + place, "city", this::askCity);
+            String place = w != null && !w.city.isEmpty() ? w.city : act.getString(R.string.not_found_yet);
+            add(act.getString(R.string.weather_city), manual ? place : act.getString(R.string.auto_value, place), "city", this::askCity);
             // Auto by the TV's country, or set: OK goes round the three
             String u = Weather.unit(act);
-            add("Temperature", u.equals("c") ? "Celsius · °C" : u.equals("f") ? "Fahrenheit · °F"
-                    : "Auto · " + (Weather.fahrenheit(act) ? "°F" : "°C"), "wx:unit", () -> {
+            add(act.getString(R.string.temperature), u.equals("c") ? act.getString(R.string.celsius_c) : u.equals("f") ? act.getString(R.string.fahrenheit_f)
+                    : act.getString(R.string.auto_value, Weather.fahrenheit(act) ? "°F" : "°C"), "wx:unit", () -> {
                 String next = Weather.UNITS[(java.util.Arrays.asList(Weather.UNITS).indexOf(Weather.unit(act)) + 1) % Weather.UNITS.length];
                 Prefs.device(act).edit().putString(Weather.UNIT, next).apply();
                 // fetched again in the new unit straight away (temperatures and wind alike)
@@ -895,24 +897,24 @@ final class SettingsPanel {
                 build();
                 focusTag("wx:unit");
             });
-            if (manual) add("Use my connection's city", "", "auto", () -> {
+            if (manual) add(act.getString(R.string.use_my_connections_city), "", "auto", () -> {
                 Prefs.device(act).edit().putBoolean("geo_manual", false).putLong("geo_at", 0).putLong("wx_at", 0).apply();
                 host.applied("weather");
                 build();
             });
-            section("THIS TV");
+            section(act.getString(R.string.this_tv));
             // Private DNS arrived with Android 9: older TVs don't get the row at all
-            if (android.os.Build.VERSION.SDK_INT >= 28) add("Block ads", Shield.on(act) ? "On · " + Shield.name(act) : "Off", "shield", () -> go("shield"));
-            add("Animations", animLabel(), "anim", this::cycleAnim);
-            add("Set up on this TV", Adb.on(act) ? Adb.unguarded(act) ? "Connected · open to your Wi-Fi" : "Connected" : "No computer needed", "tv", () -> go("tv"));
-            add("Android settings", "", "android", () -> host.open(new Intent(Settings.ACTION_SETTINGS), panel));
+            if (android.os.Build.VERSION.SDK_INT >= 28) add(act.getString(R.string.block_ads), Shield.on(act) ? act.getString(R.string.on_value, Shield.name(act)) : act.getString(R.string.off), "shield", () -> go("shield"));
+            add(act.getString(R.string.animations), animLabel(), "anim", this::cycleAnim);
+            add(act.getString(R.string.set_up_on_this_tv), Adb.on(act) ? Adb.unguarded(act) ? act.getString(R.string.connected_open_to_your_wi) : act.getString(R.string.connected) : act.getString(R.string.no_computer_needed), "tv", () -> go("tv"));
+            add(act.getString(R.string.android_settings), "", "android", () -> host.open(new Intent(Settings.ACTION_SETTINGS), panel));
             section("AURA");
-            add("Your setup", "Save to your phone, or bring it back", "backup", this::openBackup);
+            add(act.getString(R.string.your_setup), act.getString(R.string.save_to_your_phone_or), "backup", this::openBackup);
             int problems = Trouble.count(act);
-            add("Problem reports", problems == 0 ? "None lately" : problems + (problems == 1 ? " note" : " notes") + " · read on your phone",
+            add(act.getString(R.string.problem_reports), problems == 0 ? act.getString(R.string.none_lately) : act.getResources().getQuantityString(R.plurals.n_notes_read_on_your_phone, problems, problems),
                     "trouble", this::openTrouble);
             String waiting = Updater.pending(act);
-            add("Updates", waiting != null ? "Aura " + waiting + " is ready" : "Version " + Updater.installed(act), "updates", () -> {
+            add(act.getString(R.string.updates), waiting != null ? act.getString(R.string.aura_version_is_ready, waiting) : act.getString(R.string.version_name, Updater.installed(act)), "updates", () -> {
                 // opening it counts as seen: the red dots go
                 Updater.seen(act);
                 host.applied("update");
@@ -926,7 +928,7 @@ final class SettingsPanel {
                 dl.leftMargin = Ui.dp(5);
                 ((FrameLayout) rows.getChildAt(rows.getChildCount() - 1)).addView(dot, dl);
             }
-            add("Remove Aura", confirmRemove ? "Press OK again" : "Puts the TV back first", "remove", this::removeAura);
+            add(act.getString(R.string.remove_aura), confirmRemove ? act.getString(R.string.press_ok_again) : act.getString(R.string.puts_the_tv_back_first), "remove", this::removeAura);
         }
         if (keep != null) {
             boolean kept = false;
@@ -945,18 +947,18 @@ final class SettingsPanel {
     /** "Trending this week · films and shows", "Your TMDB watchlist", "Top rated · shows". */
     private String picksSummary() {
         String src = Picks.source(act);
-        if (src.equals("watchlist")) return "Your TMDB watchlist";
-        String what = Picks.KIND_NAMES[java.util.Arrays.asList(Picks.KINDS).indexOf(Picks.kind(act))].toLowerCase(java.util.Locale.ROOT);
-        return Picks.SOURCE_NAMES[java.util.Arrays.asList(Picks.SOURCES).indexOf(src)] + " · " + what;
+        if (src.equals("watchlist")) return act.getString(R.string.your_tmdb_watchlist);
+        String what = act.getString(Picks.KIND_WORDS[java.util.Arrays.asList(Picks.KINDS).indexOf(Picks.kind(act))]);
+        return act.getString(Picks.SOURCE_NAMES[java.util.Arrays.asList(Picks.SOURCES).indexOf(src)]) + " · " + what;
     }
 
     /** Where picks come from, what kind, which genres, how good, how new: OK on each changes it. */
     private void buildPicks() {
-        Ui.fit(title, "Tonight's pick", Ui.dp(300), 52, 30);
+        Ui.fit(title, act.getString(R.string.tonights_pick), Ui.dp(300), 52, 30);
         boolean tmdb = Picks.tmdb(act), on = Prefs.on(act, Prefs.PICKS);
-        note.setText(tmdb ? "Films and shows from TMDB with your own key, to your taste. This product uses the TMDB API but is not endorsed or certified by TMDB."
-                : "Top-rated shows from TVmaze, to your taste. Add your own free TMDB key for films, what's trending, only what's on your apps, and your TMDB watchlist.");
-        add("Tonight's pick", on ? "On" : "Off", Prefs.PICKS, () -> {
+        note.setText(tmdb ? act.getString(R.string.films_and_shows_from_tmdb)
+                : act.getString(R.string.top_rated_shows_from_tvmaze));
+        add(act.getString(R.string.tonights_pick), on ? act.getString(R.string.on) : act.getString(R.string.off), Prefs.PICKS, () -> {
             Prefs.set(act, Prefs.PICKS, !Prefs.on(act, Prefs.PICKS));
             host.applied("picks");
             build();
@@ -964,25 +966,25 @@ final class SettingsPanel {
         if (on) {
             String src = Picks.source(act);
             if (tmdb) {
-                add("From", Picks.SOURCE_NAMES[java.util.Arrays.asList(Picks.SOURCES).indexOf(src)], "pk:src", () -> {
+                add(act.getString(R.string.from), act.getString(Picks.SOURCE_NAMES[java.util.Arrays.asList(Picks.SOURCES).indexOf(src)]), "pk:src", () -> {
                     List<String> can = new java.util.ArrayList<>(java.util.Arrays.asList("top", "trending"));
                     if (Picks.signedIn(act)) can.add("watchlist");
                     Prefs.device(act).edit().putString(Picks.SOURCE, can.get((can.indexOf(Picks.source(act)) + 1) % can.size())).apply();
                     tasteChanged();
                 });
                 int k = java.util.Arrays.asList(Picks.KINDS).indexOf(Picks.kind(act));
-                add("Films or shows", Picks.KIND_NAMES[k], "pk:kind", () -> {
+                add(act.getString(R.string.films_or_shows), act.getString(Picks.KIND_NAMES[k]), "pk:kind", () -> {
                     Prefs.device(act).edit().putString(Picks.KIND, Picks.KINDS[(k + 1) % Picks.KINDS.length]).apply();
                     tasteChanged();
                 });
             }
             // your watchlist is yours as it is: no filters on it
             if (!src.equals("watchlist")) {
-                add("Genres", Picks.genreSummary(act), "pk:genres", () -> go("genres"));
+                add(act.getString(R.string.genres), Picks.genreSummary(act), "pk:genres", () -> go("genres"));
                 // trending is what's popular this week, whatever it's rated
                 if (src.equals("top")) {
                     float r = Picks.rating(act);
-                    add("Rated at least", String.format(java.util.Locale.getDefault(), "★ %.1f", r), "pk:rating", () -> {
+                    add(act.getString(R.string.rated_at_least), String.format(java.util.Locale.getDefault(), "★ %.1f", r), "pk:rating", () -> {
                         int at = 0;
                         for (int i = 0; i < Picks.RATINGS.length; i++) if (Math.abs(Picks.RATINGS[i] - r) < 0.01f) at = i;
                         Prefs.device(act).edit().putFloat(Picks.RATING, Picks.RATINGS[(at + 1) % Picks.RATINGS.length]).apply();
@@ -990,26 +992,26 @@ final class SettingsPanel {
                     });
                 }
                 int e = java.util.Arrays.asList(Picks.ERAS).indexOf(Picks.era(act));
-                add("Years", Picks.ERA_NAMES[e], "pk:era", () -> {
+                add(act.getString(R.string.years), act.getString(Picks.ERA_NAMES[e]), "pk:era", () -> {
                     Prefs.device(act).edit().putString(Picks.ERA, Picks.ERAS[(e + 1) % Picks.ERAS.length]).apply();
                     tasteChanged();
                 });
                 if (tmdb && src.equals("top")) {
-                    add("Only what's on my apps", Picks.myApps(act) ? "On" : "Off", "pk:apps", () -> {
+                    add(act.getString(R.string.only_whats_on_my_apps), Picks.myApps(act) ? act.getString(R.string.on) : act.getString(R.string.off), "pk:apps", () -> {
                         Prefs.device(act).edit().putBoolean(Picks.MY_APPS, !Picks.myApps(act)).apply();
                         tasteChanged();
                     });
                 }
             }
             int n = Picks.count(act);
-            add("Find new picks", picksBusy ? "Finding…" : n == 0 ? "None match · try fewer limits" : n > 0 ? n + " ready" : "",
+            add(act.getString(R.string.find_new_picks), picksBusy ? act.getString(R.string.finding) : n == 0 ? act.getString(R.string.none_match_try_fewer_limits) : n > 0 ? act.getString(R.string.n_ready, n) : "",
                     "pk:now", this::refreshPicks);
         }
-        add("TMDB key", tmdb ? "Set · OK to change" : "Optional · free at themoviedb.org", "pk:key", this::askTmdb);
-        add("Paste the key from your phone", "", "pk:phone", this::openKeyDrop);
+        add(act.getString(R.string.tmdb_key), tmdb ? act.getString(R.string.set_ok_to_change) : act.getString(R.string.optional_free_at_themoviedb_org), "pk:key", this::askTmdb);
+        add(act.getString(R.string.paste_the_key_from_your), "", "pk:phone", this::openKeyDrop);
         if (tmdb) {
-            add("TMDB account", !Picks.signedIn(act) ? "Sign in for your watchlist"
-                    : confirmSignOut ? "Press OK again to sign out" : "Signed in as " + Picks.user(act), "pk:auth", () -> {
+            add(act.getString(R.string.tmdb_account), !Picks.signedIn(act) ? act.getString(R.string.sign_in_for_your_watchlist)
+                    : confirmSignOut ? act.getString(R.string.press_ok_again_to_sign) : act.getString(R.string.signed_in_as, Picks.user(act)), "pk:auth", () -> {
                 if (!Picks.signedIn(act)) {
                     signIn();
                     return;
@@ -1021,7 +1023,7 @@ final class SettingsPanel {
                 }
                 confirmSignOut = false;
                 Picks.signOut(act);
-                host.hud(R.drawable.ic_check, "Signed out of TMDB");
+                host.hud(R.drawable.ic_check, act.getString(R.string.signed_out_of_tmdb));
                 tasteChanged();
             });
         }
@@ -1062,8 +1064,8 @@ final class SettingsPanel {
                 host.applied("picks");
                 int n = Picks.count(act);
                 host.hud(done && n > 0 ? R.drawable.ic_check : R.drawable.ic_info, !done
-                        ? "Couldn't reach " + (Picks.tmdb(act) ? "TMDB" : "TVmaze") + " · try again in a moment"
-                        : n == 0 ? "Nothing matches all that · try fewer genres or a lower rating" : n + " picks, to your taste");
+                        ? act.getString(R.string.couldnt_reach_try_again, Picks.tmdb(act) ? "TMDB" : "TVmaze")
+                        : n == 0 ? act.getString(R.string.nothing_matches_all_that_try) : act.getResources().getQuantityString(R.plurals.n_picks_to_your_taste, n, n));
                 if (isOpen() && (page.equals("picks") || page.equals("genres"))) build();
             });
         }, "picks").start();
@@ -1071,7 +1073,7 @@ final class SettingsPanel {
 
     private void askTmdb() {
         inputFor = "tmdb";
-        city.setHint("Your TMDB API key, then OK · empty removes it");
+        city.setHint(act.getString(R.string.your_tmdb_api_key_then));
         city.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
         city.setText(Picks.key(act));
         city.selectAll();
@@ -1088,23 +1090,23 @@ final class SettingsPanel {
         if (k.isEmpty() || k.equals(Picks.key(act))) {
             if (k.isEmpty() && Picks.tmdb(act)) {
                 Picks.setKey(act, "");
-                host.hud(R.drawable.ic_check, "TMDB key removed · shows from TVmaze again");
+                host.hud(R.drawable.ic_check, act.getString(R.string.tmdb_key_removed_shows_from));
                 tasteChanged();
             }
             build();
             return;
         }
-        host.hud(R.drawable.ic_info, "Checking the key with TMDB…");
+        host.hud(R.drawable.ic_info, act.getString(R.string.checking_the_key_with_tmdb));
         new SafeThread(() -> {
             boolean ok = Picks.check(k);
             act.runOnUiThread(() -> {
                 if (!ok) {
-                    host.hud(R.drawable.ic_info, "TMDB didn't accept that key · copy it again from Settings, API");
+                    host.hud(R.drawable.ic_info, act.getString(R.string.tmdb_didnt_accept_that_key));
                     build();
                     return;
                 }
                 Picks.setKey(act, k);
-                host.hud(R.drawable.ic_check, "TMDB key works · films, trending and more are on");
+                host.hud(R.drawable.ic_check, act.getString(R.string.tmdb_key_works_films_trending));
                 if (page.equals("tmdbphone")) {
                     stopDrop();
                     go("picks");
@@ -1128,25 +1130,25 @@ final class SettingsPanel {
         drop.unsplashKey = true;
         drop.only("/key");
         String url = drop.start();
-        keyCard = qrCard(url == null ? null : url + "/key", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
-                url != null ? "Paste your Unsplash key" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
+        keyCard = qrCard(url == null ? null : url + "/key", url != null ? act.getString(R.string.scan_with_your_phone) : act.getString(R.string.not_connected),
+                url != null ? act.getString(R.string.paste_your_unsplash_key) : act.getString(R.string.no_network), url != null ? act.getString(R.string.same_wi_fi_no_app) : act.getString(R.string.connect_the_tv_to_wi));
         go("unsplashphone");
     }
 
     /** Checks the key with Unsplash, then keeps it on this TV and switches Unsplash on. */
     private void setUnsplashKey(String k) {
-        host.hud(R.drawable.ic_info, "Checking the key with Unsplash…");
+        host.hud(R.drawable.ic_info, act.getString(R.string.checking_the_key_with_unsplash));
         final android.content.Context app = act.getApplicationContext();
         new SafeThread(() -> {
             boolean ok = Gallery.checkUnsplash(k);
             act.runOnUiThread(() -> {
                 if (!ok) {
-                    host.hud(R.drawable.ic_info, "Unsplash didn't accept that key · copy the Access Key again");
+                    host.hud(R.drawable.ic_info, act.getString(R.string.unsplash_didnt_accept_that_key));
                     return;
                 }
                 Prefs.device(app).edit().putString(Prefs.UNSPLASH_KEY, k).apply();
                 Prefs.set(act, Prefs.SRC_UNSPLASH, true);
-                host.hud(R.drawable.ic_check, "Unsplash key works · its photographs join the wall");
+                host.hud(R.drawable.ic_check, act.getString(R.string.unsplash_key_works_its_photographs));
                 host.applied("sources");
                 if (page.equals("unsplashphone")) {
                     stopDrop();
@@ -1169,8 +1171,8 @@ final class SettingsPanel {
         });
         drop.only("/key");
         String url = drop.start();
-        keyCard = qrCard(url == null ? null : url + "/key", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
-                url != null ? "Paste your TMDB key" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
+        keyCard = qrCard(url == null ? null : url + "/key", url != null ? act.getString(R.string.scan_with_your_phone) : act.getString(R.string.not_connected),
+                url != null ? act.getString(R.string.paste_your_tmdb_key) : act.getString(R.string.no_network), url != null ? act.getString(R.string.same_wi_fi_no_app) : act.getString(R.string.connect_the_tv_to_wi));
         go("tmdbphone");
     }
 
@@ -1181,14 +1183,14 @@ final class SettingsPanel {
         drop = new Drop(act, new Drop.Quiet() {
             @Override
             public void onPairCode(String code) {
-                host.hud(R.drawable.ic_info, "Pairing with the TV…");
+                host.hud(R.drawable.ic_info, act.getString(R.string.pairing_with_the_tv));
                 new SafeThread(() -> {
                     String r = Adb.pair(act, code);
                     act.runOnUiThread(() -> {
                         adbState = r;
                         host.hud(r.equals(Adb.OK) || r.equals(Adb.OPEN_DOOR) ? R.drawable.ic_check : R.drawable.ic_info,
-                                r.equals(Adb.OK) || r.equals(Adb.OPEN_DOOR) ? "Paired and connected" : r.equals(Adb.DENIED)
-                                        ? "That code didn't match · send the new one" : "No pairing dialog found · open it and keep it open");
+                                r.equals(Adb.OK) || r.equals(Adb.OPEN_DOOR) ? act.getString(R.string.paired_and_connected) : r.equals(Adb.DENIED)
+                                        ? act.getString(R.string.that_code_didnt_match_send) : act.getString(R.string.no_pairing_dialog_found_open));
                         if (Adb.on(act) && page.equals("pair")) {
                             stopDrop();
                             go("tv");
@@ -1200,8 +1202,8 @@ final class SettingsPanel {
         });
         drop.only("/pair");
         String url = drop.start();
-        keyCard = qrCard(url == null ? null : url + "/pair", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
-                url != null ? "Type the pairing code" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
+        keyCard = qrCard(url == null ? null : url + "/pair", url != null ? act.getString(R.string.scan_with_your_phone) : act.getString(R.string.not_connected),
+                url != null ? act.getString(R.string.type_the_pairing_code) : act.getString(R.string.no_network), url != null ? act.getString(R.string.same_wi_fi_no_app) : act.getString(R.string.connect_the_tv_to_wi));
         go("pair");
     }
 
@@ -1212,7 +1214,7 @@ final class SettingsPanel {
         drop = new Drop(act, new Drop.Quiet() {
             @Override
             public void onRestored(int count) {
-                host.hud(R.drawable.ic_check, "Your setup is back · " + count + " settings");
+                host.hud(R.drawable.ic_check, act.getResources().getQuantityString(R.plurals.setup_is_back, count, count));
                 stopDrop();
                 // every profile, order and choice read afresh
                 host.applied("profile");
@@ -1221,8 +1223,8 @@ final class SettingsPanel {
         });
         drop.only("/backup", "/backup.json", "/restore");
         String url = drop.start();
-        keyCard = qrCard(url == null ? null : url + "/backup", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
-                url != null ? "Save or bring back" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
+        keyCard = qrCard(url == null ? null : url + "/backup", url != null ? act.getString(R.string.scan_with_your_phone) : act.getString(R.string.not_connected),
+                url != null ? act.getString(R.string.save_or_bring_back) : act.getString(R.string.no_network), url != null ? act.getString(R.string.same_wi_fi_no_app) : act.getString(R.string.connect_the_tv_to_wi));
         go("backup");
     }
 
@@ -1236,8 +1238,8 @@ final class SettingsPanel {
         drop = new Drop(act, new Drop.Quiet());
         drop.only("/report", "/report.txt");
         String url = drop.start();
-        keyCard = qrCard(url == null ? null : url + "/report", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
-                url != null ? "Read the report" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
+        keyCard = qrCard(url == null ? null : url + "/report", url != null ? act.getString(R.string.scan_with_your_phone) : act.getString(R.string.not_connected),
+                url != null ? act.getString(R.string.read_the_report) : act.getString(R.string.no_network), url != null ? act.getString(R.string.same_wi_fi_no_app) : act.getString(R.string.connect_the_tv_to_wi));
         go("trouble");
     }
 
@@ -1252,7 +1254,7 @@ final class SettingsPanel {
         drop = new Drop(act, new Drop.Quiet() {
             @Override
             public void onArt(String p) {
-                host.hud(R.drawable.ic_check, "New picture for " + artLabel);
+                host.hud(R.drawable.ic_check, act.getString(R.string.new_picture_for, artLabel));
                 host.applied("art");
                 if (page.equals("art")) build();
             }
@@ -1260,15 +1262,15 @@ final class SettingsPanel {
         drop.artFor = pkg;
         drop.only("/art");
         String url = drop.start();
-        keyCard = qrCard(url == null ? null : url + "/art", url != null ? "SCAN WITH YOUR PHONE" : "NOT CONNECTED",
-                url != null ? "Choose a picture" : "No network", url != null ? "Same Wi-Fi, no app needed" : "Connect the TV to Wi-Fi first");
+        keyCard = qrCard(url == null ? null : url + "/art", url != null ? act.getString(R.string.scan_with_your_phone) : act.getString(R.string.not_connected),
+                url != null ? act.getString(R.string.choose_a_picture) : act.getString(R.string.no_network), url != null ? act.getString(R.string.same_wi_fi_no_app) : act.getString(R.string.connect_the_tv_to_wi));
         go("art");
     }
 
     /** Signing in to TMDB: a token, approved on the phone from a QR code, then a session kept on the TV. */
     private void signIn() {
         authToken = null;
-        authCard = qrCard(null, "ONE MOMENT", "Asking TMDB…", "");
+        authCard = qrCard(null, act.getString(R.string.one_moment), act.getString(R.string.asking_tmdb), "");
         go("tmdbauth");
         final android.content.Context app = act.getApplicationContext();
         new SafeThread(() -> {
@@ -1282,12 +1284,12 @@ final class SettingsPanel {
             act.runOnUiThread(() -> {
                 if (!page.equals("tmdbauth")) return;
                 if (token == null) {
-                    host.hud(R.drawable.ic_info, "Couldn't reach TMDB · check the key and the connection");
+                    host.hud(R.drawable.ic_info, act.getString(R.string.couldnt_reach_tmdb_check_the));
                     back();
                     return;
                 }
                 authToken = token;
-                authCard = qrCard(Picks.approveUrl(token), "SCAN WITH YOUR PHONE", "Approve Aura on TMDB", "Waiting for you to approve…");
+                authCard = qrCard(Picks.approveUrl(token), act.getString(R.string.scan_with_your_phone), act.getString(R.string.approve_aura_on_tmdb), act.getString(R.string.waiting_for_you_to_approve));
                 build();
                 waitForApproval(token, 0);
             });
@@ -1311,7 +1313,7 @@ final class SettingsPanel {
                     if (!token.equals(authToken)) return;
                     if (done) {
                         authToken = null;
-                        host.hud(R.drawable.ic_check, "Signed in as " + Picks.user(act) + " · picks from your watchlist");
+                        host.hud(R.drawable.ic_check, act.getString(R.string.signed_in_as, Picks.user(act)) + " · " + act.getString(R.string.picks_from_your_watchlist));
                         go("picks");
                         tasteChanged();
                         focusTag("pk:auth");
@@ -1361,7 +1363,7 @@ final class SettingsPanel {
     private void removeAura() {
         if (Safety.originalDisabled(act) && !Adb.on(act)) {
             confirmRemove = false;
-            host.hud(R.drawable.ic_info, "Connect in Set up on this TV first so the TV's own home screen can be turned back on");
+            host.hud(R.drawable.ic_info, act.getString(R.string.connect_in_set_up_on));
             go("tv");
             return;
         }
@@ -1379,7 +1381,7 @@ final class SettingsPanel {
         android.app.admin.DevicePolicyManager dpm = Compat.svc(app, android.app.admin.DevicePolicyManager.class);
         android.content.ComponentName admin = new android.content.ComponentName(app, SleepAdmin.class);
         if (dpm != null && dpm.isAdminActive(admin)) dpm.removeActiveAdmin(admin);
-        host.hud(R.drawable.ic_info, "Handing the TV back…");
+        host.hud(R.drawable.ic_info, act.getString(R.string.handing_the_tv_back));
         final String home = Safety.original(app);
         new SafeThread(() -> {
             if (Adb.on(app)) Safety.restoreHome(app);
@@ -1390,7 +1392,7 @@ final class SettingsPanel {
                     act.startActivity(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + act.getPackageName()))
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 } catch (RuntimeException e) {
-                    host.hud(R.drawable.ic_info, "Uninstall Aura in Android's settings, Apps");
+                    host.hud(R.drawable.ic_info, act.getString(R.string.uninstall_aura_in_androids_settings));
                 }
             });
         }, "remove").start();
@@ -1398,14 +1400,14 @@ final class SettingsPanel {
 
     /** Remote buttons: press one, pick an app; the list of those given so far, each removable. */
     private void buildKeys() {
-        Ui.fit(title, "Remote buttons", Ui.dp(300), 52, 30);
+        Ui.fit(title, act.getString(R.string.remote_buttons), Ui.dp(300), 52, 30);
         if (newKey != null) {
             final String id = HomeKeys.id(newKey[0], newKey[1]);
-            note.setText("Which app should " + HomeKeys.keyName(id) + " open?");
+            note.setText(act.getString(R.string.which_app_should_open, HomeKeys.keyName(id)));
             for (AppRepo.App a : host.apps()) {
                 add(a.label, "", "ka:" + a.pkg, () -> {
                     HomeKeys.give(act, newKey[0], newKey[1], a.pkg);
-                    host.hud(R.drawable.ic_check, HomeKeys.keyName(id) + " opens " + a.label);
+                    host.hud(R.drawable.ic_check, act.getString(R.string.key_opens_app, HomeKeys.keyName(id), a.label));
                     newKey = null;
                     build();
                     focusTag("key:" + id);
@@ -1413,11 +1415,11 @@ final class SettingsPanel {
             }
             return;
         }
-        note.setText(teachingKey ? "Press the button on the remote now."
-                : "Give any button on the remote an app: a shortcut button you never use, or a colour button. It works inside apps, and on this screen wherever Android lets the button through.");
+        note.setText(teachingKey ? act.getString(R.string.press_the_button_on_the)
+                : act.getString(R.string.give_any_button_on_the));
         for (java.util.Map.Entry<String, String> k : HomeKeys.keys(act).entrySet()) {
             final String tag = "key:" + k.getKey(), id = k.getKey();
-            add(HomeKeys.keyName(id), tag.equals(confirmKey) ? "Press OK again to remove" : appLabel(k.getValue()), tag, () -> {
+            add(HomeKeys.keyName(id), tag.equals(confirmKey) ? act.getString(R.string.press_ok_again_to_remove) : appLabel(k.getValue()), tag, () -> {
                 if (!tag.equals(confirmKey)) {
                     confirmKey = tag;
                     build();
@@ -1429,7 +1431,7 @@ final class SettingsPanel {
                 focusTag("keys:add");
             });
         }
-        add("Add a button", teachingKey ? "Press it now…" : "", "keys:add", this::teachKey);
+        add(act.getString(R.string.add_a_button), teachingKey ? act.getString(R.string.press_it_now) : "", "keys:add", this::teachKey);
     }
 
     private String appLabel(String pkg) {
@@ -1447,7 +1449,7 @@ final class SettingsPanel {
             if (page.equals("keys")) go("keys");
         }));
         if (!ok) {
-            host.hud(R.drawable.ic_info, "Switch on Home button in apps first");
+            host.hud(R.drawable.ic_info, act.getString(R.string.switch_on_home_button_in));
             return;
         }
         teachingKey = true;
@@ -1462,27 +1464,27 @@ final class SettingsPanel {
 
     /** Set up on this TV: connect to the TV's own debugging port, then grant what a PC would. */
     private void buildTv() {
-        Ui.fit(title, "Set up on this TV", Ui.dp(300), 52, 30);
+        Ui.fit(title, act.getString(R.string.set_up_on_this_tv), Ui.dp(300), 52, 30);
         note.setText(adbNote());
-        add("Connect", adbState.equals("asking") ? "Waiting for you…" : Adb.on(act) ? "Connected" : "Not connected", "adb:connect", this::adbConnect);
+        add(act.getString(R.string.connect), adbState.equals("asking") ? act.getString(R.string.waiting_for_you) : Adb.on(act) ? act.getString(R.string.connected) : act.getString(R.string.not_connected_2), "adb:connect", this::adbConnect);
         if (setupNote.isEmpty()) setupNote = Prefs.device(act).getString("setup_note", "");
-        if (Adb.on(act)) add("Switch everything on", setupNote.isEmpty() ? Adb.setup(act).length + " extras" : setupNote, "adb:setup", this::adbSetup);
+        if (Adb.on(act)) add(act.getString(R.string.switch_everything_on), setupNote.isEmpty() ? act.getResources().getQuantityString(R.plurals.n_extras, Adb.setup(act).length, Adb.setup(act).length) : setupNote, "adb:setup", this::adbSetup);
         if (Adb.on(act) && Safety.hasGoogleTvHome(act)) {
             if (Safety.googleTvHomeOn(act)) {
-                add("Retire Google TV Home", confirmRetire ? "Press OK again · voice search & side panel stop" : "Voice search, side panel & accounts stop",
+                add(act.getString(R.string.retire_google_tv_home), confirmRetire ? act.getString(R.string.press_ok_again_voice_search) : act.getString(R.string.voice_search_side_panel_accounts),
                         "adb:gtv", () -> retireGoogleHome(true));
             } else {
-                add("Bring back Google TV Home", "Restores voice search, side panel & accounts", "adb:gtv", () -> retireGoogleHome(false));
+                add(act.getString(R.string.bring_back_google_tv_home), act.getString(R.string.restores_voice_search_side_panel), "adb:gtv", () -> retireGoogleHome(false));
             }
         }
         // newer TVs without plain network debugging: wireless debugging, paired with a code typed on the phone
-        if (!Adb.on(act) && Adb.wireless()) add("Use wireless debugging", "Pair with a code", "adb:pair", this::openPair);
+        if (!Adb.on(act) && Adb.wireless()) add(act.getString(R.string.use_wireless_debugging), act.getString(R.string.pair_with_a_code), "adb:pair", this::openPair);
         // the open door shuts with a setting Aura may change once setup has granted it
         if (Adb.on(act) && Adb.unguarded(act) && Compat.granted(act, android.Manifest.permission.WRITE_SECURE_SETTINGS)) {
-            add("Turn network debugging off", confirmAdbOff ? "Press OK again" : "Closes the open door", "adb:off", this::adbOff);
+            add(act.getString(R.string.turn_network_debugging_off), confirmAdbOff ? act.getString(R.string.press_ok_again) : act.getString(R.string.closes_the_open_door), "adb:off", this::adbOff);
         }
         boolean dev = Settings.Global.getInt(act.getContentResolver(), Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 0;
-        add("Developer options", dev ? "USB debugging is here" : "Off · About, press Build 7 times", "adb:dev", () -> {
+        add(act.getString(R.string.developer_options), dev ? act.getString(R.string.usb_debugging_is_here) : act.getString(R.string.off_about_press_build_7), "adb:dev", () -> {
             try {
                 // not switched on yet: the About page, where pressing Build seven times does it
                 host.open(new Intent(dev ? Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS : Settings.ACTION_DEVICE_INFO_SETTINGS), panel);
@@ -1519,7 +1521,7 @@ final class SettingsPanel {
 
     private String animLabel() {
         float s = animScale();
-        return s <= 0f ? "Off" : s < 0.75f ? "Fast" : s > 1.25f ? "Slow" : "Normal";
+        return s <= 0f ? act.getString(R.string.off) : s < 0.75f ? act.getString(R.string.fast) : s > 1.25f ? act.getString(R.string.slow) : act.getString(R.string.normal);
     }
 
     /**
@@ -1528,7 +1530,7 @@ final class SettingsPanel {
      */
     private void cycleAnim() {
         if (!Shield.allowed(act)) {
-            host.hud(R.drawable.ic_info, "Connect in Set up on this TV once to let Aura change this");
+            host.hud(R.drawable.ic_info, act.getString(R.string.connect_in_set_up_on_2));
             go("tv");
             return;
         }
@@ -1536,10 +1538,10 @@ final class SettingsPanel {
         try {
             for (String k : ANIM_KEYS) Settings.Global.putFloat(act.getContentResolver(), k, next);
         } catch (SecurityException e) {
-            host.hud(R.drawable.ic_info, "The TV didn't allow that change");
+            host.hud(R.drawable.ic_info, act.getString(R.string.the_tv_didnt_allow_that));
             return;
         }
-        host.hud(R.drawable.ic_bolt, next == 0.5f ? "Everything moves twice as fast" : next == 0f ? "Animations off" : "Animations back to normal");
+        host.hud(R.drawable.ic_bolt, next == 0.5f ? act.getString(R.string.everything_moves_twice_as_fast) : next == 0f ? act.getString(R.string.animations_off) : act.getString(R.string.animations_back_to_normal));
         build();
     }
 
@@ -1561,13 +1563,13 @@ final class SettingsPanel {
             Boolean took = Safety.retireGoogleHome(app, retire);
             act.runOnUiThread(() -> {
                 if (took == null) {
-                    host.hud(R.drawable.ic_info, "Couldn't reach the TV's debugging service · Connect first");
+                    host.hud(R.drawable.ic_info, act.getString(R.string.couldnt_reach_the_tvs_debugging));
                 } else if (!took) {
-                    host.hud(R.drawable.ic_info, "Android didn't allow that change");
+                    host.hud(R.drawable.ic_info, act.getString(R.string.android_didnt_allow_that_change));
                 } else if (retire) {
-                    host.hud(R.drawable.ic_check, "Google TV Home retired · Bring back Google TV Home restores voice search & accounts");
+                    host.hud(R.drawable.ic_check, act.getString(R.string.google_tv_home_retired_bring));
                 } else {
-                    host.hud(R.drawable.ic_check, "Google TV Home is back · Voice search restored");
+                    host.hud(R.drawable.ic_check, act.getString(R.string.google_tv_home_is_back));
                 }
                 if (page.equals("tv")) {
                     build();
@@ -1579,25 +1581,25 @@ final class SettingsPanel {
 
     private String adbNote() {
         if (confirmRetire) {
-            return "Voice search (Google Assistant in YouTube & apps), Google TV's side panel, profiles and some account screens stop working while Google TV Home is retired. Press OK again to retire it, or bring it back here any time.";
+            return act.getString(R.string.voice_search_google_assistant_in);
         }
         String s = adbState.isEmpty() && Adb.on(act) ? Adb.unguarded(act) ? Adb.OPEN_DOOR : Adb.OK : adbState;
         switch (s) {
             case "asking":
-                return "If Android asks on the screen, choose Always allow from this computer, then OK.";
+                return act.getString(R.string.if_android_asks_on_the);
             case Adb.OK:
-                return "Aura is connected to this TV. Switch everything on grants what the PC setup grants, and closing an app in the switcher now stops it fully.";
+                return act.getString(R.string.aura_is_connected_to_this);
             case Adb.OPEN_DOOR:
-                return "Careful: this TV let Aura in without asking. Anything on your Wi-Fi can control it the same way. Switch everything on, then turn network debugging off.";
+                return act.getString(R.string.careful_this_tv_let_aura);
             case Adb.OFF:
-                return "Debugging is off. In Developer options switch on USB debugging (Network debugging on some TVs), then Connect again. No Developer options? Android settings, System, About: press OK on the build seven times.";
+                return act.getString(R.string.debugging_is_off_in_developer);
             case Adb.DENIED:
-                return "Android didn't let Aura in in time. If you chose Always allow, Connect again: it goes straight in now. Otherwise Connect, and choose Always allow when it asks.";
+                return act.getString(R.string.android_didnt_let_aura_in);
             case Adb.FAILED:
-                return "Couldn't reach the TV's debugging service. Try again in a moment.";
+                return act.getString(R.string.couldnt_reach_the_tvs_debugging_2);
             default:
-                return (HomeRole.stubborn(act) && !HomeRole.held(act) ? HomeRole.other(act) + " keeps the Home button for itself: setup hands it to Aura. " : "")
-                        + "Aura switches on its extras from the TV itself, no computer needed, through USB debugging, the way a PC would. Android asks once: choose Always allow.";
+                return (HomeRole.stubborn(act) && !HomeRole.held(act) ? act.getString(R.string.keeps_the_home_button, HomeRole.other(act)) + " " : "")
+                        + act.getString(R.string.aura_switches_on_its_extras);
         }
     }
 
@@ -1609,8 +1611,8 @@ final class SettingsPanel {
             String r = Adb.connect(act);
             act.runOnUiThread(() -> {
                 adbState = r;
-                if (r.equals(Adb.OK)) host.hud(R.drawable.ic_check, "Connected to this TV");
-                else if (r.equals(Adb.OPEN_DOOR)) host.hud(R.drawable.ic_info, "Connected, but the TV never asked");
+                if (r.equals(Adb.OK)) host.hud(R.drawable.ic_check, act.getString(R.string.connected_to_this_tv));
+                else if (r.equals(Adb.OPEN_DOOR)) host.hud(R.drawable.ic_info, act.getString(R.string.connected_but_the_tv_never));
                 if (page.equals("tv")) {
                     build();
                     focusTag(Adb.on(act) ? "adb:setup" : "adb:connect");
@@ -1623,12 +1625,12 @@ final class SettingsPanel {
     private void adbSetup() {
         if (setupRunning) return;
         setupRunning = true;
-        setupNote = "0 of " + Adb.setup(act).length;
+        setupNote = act.getString(R.string.n_of_m, 0, Adb.setup(act).length);
         build();
         Adb.runSetup(act, new Adb.Progress() {
             @Override
             public void step(int i, int n, String name) {
-                final String now = (i + 1) + " of " + n + (name.equals("Speed") ? " · compiling, about a minute" : " · " + name);
+                final String now = act.getString(R.string.n_of_m, i + 1, n) + " · " + (name.equals(act.getString(R.string.adb_speed)) ? act.getString(R.string.compiling_about_a_minute) : name);
                 act.runOnUiThread(() -> {
                     setupNote = now;
                     if (page.equals("tv")) build();
@@ -1637,17 +1639,17 @@ final class SettingsPanel {
 
             @Override
             public void restarting(int ok, int n, List<String> failed) {
-                Prefs.device(act).edit().putString("setup_note", failed.isEmpty() ? "Done · all " + n
-                        : ok + " of " + n + " · not " + TextUtils.join(", ", failed)).commit();
+                Prefs.device(act).edit().putString("setup_note", failed.isEmpty() ? act.getString(R.string.done_all_n, n)
+                        : act.getString(R.string.n_of_m, ok, n) + " · " + act.getString(R.string.not_list, TextUtils.join(", ", failed))).commit();
             }
 
             @Override
             public void done(int ok, int n, List<String> failed) {
                 act.runOnUiThread(() -> {
                     setupRunning = false;
-                    setupNote = ok == n ? "Done · all " + ok : ok + " of " + n + " · not " + TextUtils.join(", ", failed);
+                    setupNote = ok == n ? act.getString(R.string.done_all_n, ok) : act.getString(R.string.n_of_m, ok, n) + " · " + act.getString(R.string.not_list, TextUtils.join(", ", failed));
                     Prefs.device(act).edit().putString("setup_note", setupNote).apply();
-                    host.hud(R.drawable.ic_check, ok == n ? "Everything is switched on" : ok + " of " + n + " switched on");
+                    host.hud(R.drawable.ic_check, ok == n ? act.getString(R.string.everything_is_switched_on) : act.getString(R.string.n_of_m_switched_on, ok, n));
                     if (page.equals("tv")) {
                         build();
                         focusTag("adb:setup");
@@ -1668,12 +1670,12 @@ final class SettingsPanel {
         try {
             Settings.Global.putInt(act.getContentResolver(), Settings.Global.ADB_ENABLED, 0);
         } catch (SecurityException e) {
-            host.hud(R.drawable.ic_info, "The TV didn't allow that change");
+            host.hud(R.drawable.ic_info, act.getString(R.string.the_tv_didnt_allow_that));
             return;
         }
         Prefs.device(act).edit().putBoolean("adb_ok", false).putBoolean("adb_open", false).apply();
         adbState = "";
-        host.hud(R.drawable.ic_check, "Network debugging off · the door is shut");
+        host.hud(R.drawable.ic_check, act.getString(R.string.network_debugging_off_the_door));
         build();
         focusTag("adb:connect");
     }
@@ -1683,8 +1685,8 @@ final class SettingsPanel {
     /** "In use", else the speed measured here (and whether it blocks), else what it's for. */
     private String filterValue(String host, String about, String current) {
         Long ms = probed.get(host);
-        String speed = ms == null ? null : ms < 0 ? "Unreachable" : ms + " ms" + (blocksAds.contains(host) ? "" : " · no blocking");
-        if (host.equals(current)) return "In use" + (speed != null ? "  ·  " + speed : "");
+        String speed = ms == null ? null : ms < 0 ? act.getString(R.string.unreachable) : ms + " ms" + (blocksAds.contains(host) ? "" : " · " + act.getString(R.string.no_blocking));
+        if (host.equals(current)) return act.getString(R.string.in_use) + (speed != null ? "  ·  " + speed : "");
         return speed != null ? speed : about;
     }
 
@@ -1693,7 +1695,7 @@ final class SettingsPanel {
         boolean was = Shield.on(act);
         Shield.choose(act, hostname);
         if (!was) {
-            host.hud(R.drawable.ic_check, name + " chosen  ·  switch Block ads on to use it");
+            host.hud(R.drawable.ic_check, act.getString(R.string.name_chosen, name) + "  ·  " + act.getString(R.string.switch_block_ads_on_to_use));
             build();
             return;
         }
@@ -1703,7 +1705,7 @@ final class SettingsPanel {
 
     private void askDns() {
         inputFor = "dns";
-        city.setHint("A DNS-over-TLS hostname, e.g. dns.example.com");
+        city.setHint(act.getString(R.string.a_dns_over_tls_hostname));
         city.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         city.setText("");
         city.setVisibility(View.VISIBLE);
@@ -1717,12 +1719,12 @@ final class SettingsPanel {
         hideKeyboard();
         city.setVisibility(View.GONE);
         String h = hostname.replaceFirst("^(tls|https)://", "").replaceAll("/.*$", "").toLowerCase(java.util.Locale.ROOT);
-        host.hud(R.drawable.ic_info, "Trying " + h + "…");
+        host.hud(R.drawable.ic_info, act.getString(R.string.trying_name, h));
         new SafeThread(() -> {
             Shield.Probe p = Shield.probe(h);
             act.runOnUiThread(() -> {
                 if (p == null) {
-                    host.hud(R.drawable.ic_info, "Couldn't reach " + h + " for private DNS");
+                    host.hud(R.drawable.ic_info, act.getString(R.string.couldnt_reach_for_private_dns, h));
                     build();
                     return;
                 }
@@ -1760,7 +1762,7 @@ final class SettingsPanel {
             final long bm = bestMs;
             act.runOnUiThread(() -> {
                 probing = false;
-                host.hud(R.drawable.ic_check, b != null ? "Fastest from this TV: " + b + "  ·  " + bm + " ms" : "None of the filters answered");
+                host.hud(R.drawable.ic_check, b != null ? act.getString(R.string.fastest_from_this_tv, b) + "  ·  " + bm + " ms" : act.getString(R.string.none_of_the_filters_answered));
                 if (page.equals("shield")) build();
                 for (String[] f : Shield.FILTERS) if (f[1].equals(b)) focusTag("dns:" + f[0]);
             });
@@ -1770,18 +1772,18 @@ final class SettingsPanel {
     private void toggleShield() {
         if (shieldNote != null) return;
         if (!Shield.allowed(act)) {
-            host.hud(R.drawable.ic_info, "Connect in Set up on this TV once to let Aura block ads");
+            host.hud(R.drawable.ic_info, act.getString(R.string.connect_in_set_up_on_3));
             go("tv");
             return;
         }
         if (Shield.on(act)) {
             Shield.set(act, false);
-            host.hud(R.drawable.ic_check, "Ads are no longer blocked");
+            host.hud(R.drawable.ic_check, act.getString(R.string.ads_are_no_longer_blocked));
             build();
             return;
         }
         if (!Shield.set(act, true)) {
-            host.hud(R.drawable.ic_info, "This TV didn't allow it: set 94.140.14.14 as DNS in its Wi-Fi settings instead");
+            host.hud(R.drawable.ic_info, act.getString(R.string.this_tv_didnt_allow_it));
             build();
             return;
         }
@@ -1790,7 +1792,7 @@ final class SettingsPanel {
 
     /** Confirms the TV is online through the filter; if not, tries another reachable filter or switches back. */
     private void checkShield(String name) {
-        shieldNote = "Checking…";
+        shieldNote = act.getString(R.string.checking);
         build();
         new SafeThread(() -> {
             String used = name;
@@ -1819,9 +1821,9 @@ final class SettingsPanel {
             final String who = used;
             act.runOnUiThread(() -> {
                 shieldNote = null;
-                host.hud(done ? R.drawable.ic_check : R.drawable.ic_info, done ? "Blocking ads with " + who
-                        : dot ? "This TV ignores Private DNS · set 94.140.14.14 in Wi-Fi settings instead"
-                        : "Couldn't reach " + name + " (port 853 blocked), so blocking is off again");
+                host.hud(done ? R.drawable.ic_check : R.drawable.ic_info, done ? act.getString(R.string.blocking_ads_with, who)
+                        : dot ? act.getString(R.string.this_tv_ignores_private_dns)
+                        : act.getString(R.string.couldnt_reach_port_853, name));
                 build();
             });
         }, "shield").start();
@@ -1848,7 +1850,7 @@ final class SettingsPanel {
             act.runOnUiThread(() -> {
                 release = found;
                 updateState = s;
-                updateNote = "Couldn't reach GitHub. Check the connection, then try again.";
+                updateNote = act.getString(R.string.couldnt_reach_github_check_the);
                 if (page.equals("updates")) build();
             });
         }, "update-check").start();
@@ -1862,8 +1864,8 @@ final class SettingsPanel {
             boolean fire = Trouble.fireTv(act);
             // the update stays offered: back from allowing it, Install is right there
             installHint = fire
-                    ? "Fire TV asks once whether Aura may install updates: Settings → My Fire TV → Developer options → Install unknown apps → Aura, then On. Then come back here and choose Install."
-                    : "Android asks once whether Aura may install updates: allow it on the page that opens (Settings → Apps → Special app access → Install unknown apps), then come back here and choose Install.";
+                    ? act.getString(R.string.fire_tv_asks_once_whether)
+                    : act.getString(R.string.android_asks_once_whether_aura);
             build();
             boolean opened = false;
             for (Intent i : new Intent[]{
@@ -1878,17 +1880,17 @@ final class SettingsPanel {
                 } catch (RuntimeException ignored) {
                 }
             }
-            if (!opened) host.hud(R.drawable.ic_info, fire ? "My Fire TV → Developer options → Install unknown apps" : "Settings → Apps → Special app access");
+            if (!opened) host.hud(R.drawable.ic_info, fire ? act.getString(R.string.my_fire_tv_developer_options) : act.getString(R.string.settings_apps_special_app_access));
             return;
         }
         final Updater.Release r = release;
         updateState = "downloading";
-        updateNote = "Starting…";
+        updateNote = act.getString(R.string.starting);
         build();
         new SafeThread(() -> {
             try {
                 Updater.install(act, r, (done, total) -> {
-                    String t = total > 0 ? "Downloading " + Math.round(100f * done / total) + "%" : "Downloading…";
+                    String t = total > 0 ? act.getString(R.string.downloading_percent, Math.round(100f * done / total)) : act.getString(R.string.downloading);
                     act.runOnUiThread(() -> {
                         if (t.equals(updateNote)) return;
                         updateNote = t;
@@ -1908,7 +1910,7 @@ final class SettingsPanel {
                 Trouble.caught("update", e);
                 act.runOnUiThread(() -> {
                     updateState = "error";
-                    updateNote = "The download stopped part-way. Check the connection, then try again.";
+                    updateNote = act.getString(R.string.the_download_stopped_part_way);
                     if (page.equals("updates")) build();
                 });
             }
@@ -1923,8 +1925,10 @@ final class SettingsPanel {
         String why = Updater.refused;
         if (Updater.answeredAt != 0 && why == null) return;
         updateState = "error";
-        updateNote = (why != null ? "The TV wouldn't install it: " + why + "." : "The TV's installer didn't answer.")
-                + "\n\nInstall it with the free Downloader app instead: type the code 4172997 there. Your settings stay as they are.";
+        // a field's lambda: the panel's own act, set by the time this runs
+        Activity a = SettingsPanel.this.act;
+        updateNote = (why != null ? a.getString(R.string.tv_wouldnt_install_it, why) : a.getString(R.string.the_tvs_installer_didnt_answer))
+                + "\n\n" + a.getString(R.string.install_it_with_downloader);
         Trouble.note("UPDATE", why != null ? "refused: " + why : "the installer never answered");
         if (page.equals("updates")) build();
     };
@@ -1947,8 +1951,8 @@ final class SettingsPanel {
         drop = new Drop(act, new Drop.Listener() {
             @Override
             public void onProgress(String name, long done, long total, int index, int count) {
-                dropTitle.setText(count > 1 ? "Receiving " + (index + 1) + " of " + count : "Receiving " + shorten(name));
-                dropSub.setText(Math.round(100f * done / total) + "%  ·  " + mb(done) + " of " + mb(total));
+                dropTitle.setText(count > 1 ? act.getString(R.string.receiving_n_of_m, index + 1, count) : act.getString(R.string.receiving_name, shorten(name)));
+                dropSub.setText(Math.round(100f * done / total) + "%  ·  " + act.getString(R.string.x_of_y, mb(done), mb(total)));
                 dropMeter.setVisibility(View.VISIBLE);
                 dropMeter.set(done / (float) total);
             }
@@ -1956,9 +1960,9 @@ final class SettingsPanel {
             @Override
             public void onAdded(JSONObject e, int index, int count) {
                 host.backdrop().show(e.optString("path"));
-                dropTitle.setText("“" + e.optString("place") + "” is on your wall");
+                dropTitle.setText(act.getString(R.string.name_is_on_your_wall, e.optString("place")));
                 int n = Mine.count(act);
-                dropSub.setText(index + 1 < count ? "More on the way" : n + (n == 1 ? " photo" : " photos") + " from your phone");
+                dropSub.setText(index + 1 < count ? act.getString(R.string.more_on_the_way) : act.getResources().getQuantityString(R.plurals.n_photos_from_your_phone, n, n));
                 if (index + 1 >= count) dropMeter.setVisibility(View.INVISIBLE);
                 thumb(e.optString("id"));
                 build();
@@ -1966,7 +1970,7 @@ final class SettingsPanel {
 
             @Override
             public void onFailed(String name, String why) {
-                dropTitle.setText("Couldn't add " + shorten(name));
+                dropTitle.setText(act.getString(R.string.couldnt_add, shorten(name)));
                 dropSub.setText(why);
                 dropMeter.setVisibility(View.INVISIBLE);
             }
@@ -1980,8 +1984,8 @@ final class SettingsPanel {
                     if (id instanceof String && !Mine.thumb(act, (String) id).isFile()) dropThumbs.removeViewAt(i);
                 }
                 int n = Mine.count(act);
-                dropTitle.setText(n == 0 ? "Waiting for your phone" : "Removed from your wall");
-                dropSub.setText(n == 0 ? "Same Wi-Fi, no app needed" : n + (n == 1 ? " photo" : " photos") + " from your phone");
+                dropTitle.setText(n == 0 ? act.getString(R.string.waiting_for_your_phone) : act.getString(R.string.removed_from_your_wall));
+                dropSub.setText(n == 0 ? act.getString(R.string.same_wi_fi_no_app) : act.getResources().getQuantityString(R.plurals.n_photos_from_your_phone, n, n));
                 build();
             }
 
@@ -1992,16 +1996,16 @@ final class SettingsPanel {
                     rows.postDelayed(stopDropIdle, 10 * 60_000L);
                 }
                 if (dropTitle != null && isOpen() && page.equals("drop")) {
-                    dropTitle.setText("Typed from your phone");
-                    dropSub.setText("“" + shorten(text) + "”");
+                    dropTitle.setText(act.getString(R.string.typed_from_your_phone));
+                    dropSub.setText(act.getString(R.string.quoted, shorten(text)));
                 }
                 return host.type(text);
             }
 
             @Override
             public void onApk(String name) {
-                dropTitle.setText("Install " + shorten(name.replaceFirst("(?i)\\.apk$", "")) + "?");
-                dropSub.setText("Confirm on the TV to install it");
+                dropTitle.setText(act.getString(R.string.install_name_q, shorten(name.replaceFirst("(?i)\\.apk$", ""))));
+                dropSub.setText(act.getString(R.string.confirm_on_the_tv_to));
                 dropMeter.setVisibility(View.INVISIBLE);
             }
         });
@@ -2044,20 +2048,20 @@ final class SettingsPanel {
         LinearLayout col = new LinearLayout(act);
         col.setOrientation(LinearLayout.VERTICAL);
         TextView kicker = Ui.caps(act, 7.5f, 0x99FFFFFF, 0.28f);
-        kicker.setText(url != null ? "SCAN WITH YOUR CAMERA" : "NOT CONNECTED");
+        kicker.setText(url != null ? act.getString(R.string.scan_with_your_camera) : act.getString(R.string.not_connected));
         col.addView(kicker);
         TextView addr = Ui.text(act, 11.5f, Ui.medium, 0x8CFFFFFF);
-        addr.setText(url != null ? "or open " + url.replaceFirst("^http://", "") : "Connect the TV to Wi-Fi first");
+        addr.setText(url != null ? act.getString(R.string.or_open, url.replaceFirst("^http://", "")) : act.getString(R.string.connect_the_tv_to_wi));
         addr.setSingleLine(false);
         addr.setMaxLines(2);
         col.addView(addr, lp(0, 6));
         dropTitle = Ui.text(act, 15, Ui.semibold, 0xFFFFFFFF);
         dropTitle.setEllipsize(TextUtils.TruncateAt.END);
-        dropTitle.setText(url != null ? "Waiting for your phone" : "No network");
+        dropTitle.setText(url != null ? act.getString(R.string.waiting_for_your_phone) : act.getString(R.string.no_network));
         col.addView(dropTitle, lp(0, 22));
         dropSub = Ui.text(act, 12, Ui.regular, 0xA6FFFFFF);
         dropSub.setEllipsize(TextUtils.TruncateAt.END);
-        dropSub.setText(url != null ? "Same Wi-Fi, no app needed" : "");
+        dropSub.setText(url != null ? act.getString(R.string.same_wi_fi_no_app) : "");
         col.addView(dropSub, lp(0, 6));
         dropMeter = new HomeActivity.Meter(act);
         dropMeter.setVisibility(View.INVISIBLE);
@@ -2096,8 +2100,8 @@ final class SettingsPanel {
         iv.animate().alpha(1f).translationY(0f).setDuration(420).setInterpolator(Ui.EMPHASIZED).start();
     }
 
-    private static String shorten(String name) {
-        String n = name == null || name.isEmpty() ? "a photo" : name;
+    private String shorten(String name) {
+        String n = name == null || name.isEmpty() ? act.getString(R.string.a_photo) : name;
         return n.length() > 24 ? n.substring(0, 21) + "…" : n;
     }
 
@@ -2185,12 +2189,14 @@ final class SettingsPanel {
         }
         TextView name = p.tint(Ui.text(act, 13.5f, Ui.semibold, 0xFFFFFFFF), 1f);
         name.setText(label);
+        Ui.shrinkToWidth(name, 11f);
         r.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         if (!value.isEmpty()) {
             TextView v = p.tint(Ui.text(act, 12, Ui.medium, 0xFFFFFFFF), 0.7f);
             v.setText(value);
             v.setEllipsize(TextUtils.TruncateAt.END);
             v.setMaxWidth(Ui.dp(170));
+            Ui.shrinkToWidth(v, 10f);
             r.addView(v);
         }
         p.addView(r, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -2216,8 +2222,8 @@ final class SettingsPanel {
 
     /** The focused row's sentence beside the list, faded across; rows that need none leave it empty. */
     private void explain(String tag) {
-        String text = HELP.get(tag);
-        if (text == null) text = "";
+        Integer id = HELP.get(tag);
+        String text = id == null ? "" : act.getString(id);
         if (text.contentEquals(help.getText())) return;
         final String next = text;
         help.animate().cancel();
@@ -2227,48 +2233,48 @@ final class SettingsPanel {
         }).start();
     }
 
-    private static final java.util.Map<String, String> HELP = new java.util.HashMap<>();
+    private static final java.util.Map<String, Integer> HELP = new java.util.HashMap<>();
 
     static {
         // Settings
-        HELP.put("role", "Which home screen the remote's Home button opens. Aura can take it over from the TV's own.");
-        HELP.put("profiles", "Everyone gets their own app order, wallpaper and widgets. Opens Who's watching, to switch.");
-        HELP.put("wallpaper", "The picture behind your apps: fresh photographs every day, your own photos, or pure black.");
-        HELP.put("drop", "Scan a code with your phone to send photos, GIFs or apps to the TV. No cable, no account.");
-        HELP.put("home", "How your apps look, and what else is on the home screen: style, tiles, widgets, app cards.");
-        HELP.put("hidden", "Apps you've hidden from the home screen. Bring any of them back from here.");
-        HELP.put("picks", "A film or show worth your evening, chosen fresh each day. Pick genres, or use your TMDB watchlist.");
-        HELP.put(Prefs.WEATHER, "The temperature and the sky in the corner of the home screen.");
-        HELP.put("city", "Where the weather is for. Found from your internet connection, unless you type a city.");
-        HELP.put("auto", "Go back to finding your city from your internet connection.");
-        HELP.put("shield", "Blocks ads and trackers for the whole TV, in every app, through a private DNS filter.");
-        HELP.put("anim", "How fast every menu and app on the TV moves. Fast makes the whole TV feel quicker.");
-        HELP.put("tv", "Lets Aura switch on its extras itself (ad blocking, the Home button, a faster TV) through the TV's own debugging. Once, no computer.");
-        HELP.put("android", "The TV's own settings: network, picture, sound, accounts.");
-        HELP.put("w:forgive", "Cards you turned down from the Smart Stack, and ones it rested after you passed them by. OK lets them all come back.");
-        HELP.put("wx:unit", "Celsius or Fahrenheit for the weather, its forecast and the wind (km/h or mph). Auto follows the TV's country.");
-        HELP.put("trouble", "What went wrong lately, kept on this TV. Read it on your phone and send it along when you report a problem.");
-        HELP.put("backup", "Save your app order, folders and settings to your phone, and bring them back on any TV.");
-        HELP.put("updates", "Aura's version, and the new one when it's out. Updating keeps every setting.");
-        HELP.put("remove", "Hands the TV back to its own home screen first, then uninstalls Aura.");
+        HELP.put("role", R.string.help_role);
+        HELP.put("profiles", R.string.help_profiles);
+        HELP.put("wallpaper", R.string.help_wallpaper);
+        HELP.put("drop", R.string.help_drop);
+        HELP.put("home", R.string.help_home);
+        HELP.put("hidden", R.string.help_hidden);
+        HELP.put("picks", R.string.help_picks);
+        HELP.put(Prefs.WEATHER, R.string.help_weather);
+        HELP.put("city", R.string.help_city);
+        HELP.put("auto", R.string.help_auto);
+        HELP.put("shield", R.string.help_shield);
+        HELP.put("anim", R.string.help_anim);
+        HELP.put("tv", R.string.help_tv);
+        HELP.put("android", R.string.help_android);
+        HELP.put("w:forgive", R.string.help_w_forgive);
+        HELP.put("wx:unit", R.string.help_wx_unit);
+        HELP.put("trouble", R.string.help_trouble);
+        HELP.put("backup", R.string.help_backup);
+        HELP.put("updates", R.string.help_updates);
+        HELP.put("remove", R.string.help_remove);
         // Home screen
-        HELP.put("layout", "tvOS: your apps alone on a dock over the wallpaper. Aura: a sidebar and widgets beside your apps.");
-        HELP.put("dockside", "Whether a sidebar slides in from the left, or Up on the remote reaches the buttons at the top.");
-        HELP.put("tiles", "How each app's tile is drawn: Apple TV icons, frosted glass, bold colour, dark, or the app's own banner.");
-        HELP.put("grid", "How many apps fit across the screen: bigger tiles, or more of them.");
-        HELP.put(Prefs.GRID_PAGES, "Past two rows of apps: scroll down, or slide sideways a page at a time.");
-        HELP.put("names", "App names under the tiles: always, only on the one in focus, or never.");
-        HELP.put(Prefs.PARALLAX, "Tiles tilt toward you and catch the light as you move. Off is stiller, and lighter on older TVs.");
-        HELP.put("onlyapps", "The simplest home: your apps on the wallpaper, nothing else. Turns widgets and app cards off together.");
-        HELP.put("widgets", "The cards above your apps: the Smart Stack (continue watching, new episodes), Today, and the Sky.");
-        HELP.put(Prefs.TOP_SHELF, "Rest on an app and what you were watching in it, and its own picks, line up above it.");
-        HELP.put(Prefs.PICKS, "Whether Tonight's pick appears on the home screen at all.");
-        HELP.put(Prefs.INPUT_PREVIEW, "HDMI input tiles show a live picture of what's on. Some TVs draw it over the whole screen: switch it off there.");
-        HELP.put("light", "Keeps motion and blur to a minimum for slower TVs. Auto decides from this TV's memory and chip.");
-        HELP.put("homekeys", "From inside any app: Home twice opens your recent apps, Home held opens Control Center.");
-        HELP.put("takeover", "Where Home goes from inside apps: Aura, or the TV's own home screen.");
-        HELP.put("previews", "Recent apps show each app as you left it. The pictures stay on this TV, two days at most.");
-        HELP.put("keys", "Give a spare button on the remote an app to open: a colour button, or one you never use.");
+        HELP.put("layout", R.string.help_layout);
+        HELP.put("dockside", R.string.help_dockside);
+        HELP.put("tiles", R.string.help_tiles);
+        HELP.put("grid", R.string.help_grid);
+        HELP.put(Prefs.GRID_PAGES, R.string.help_grid_pages);
+        HELP.put("names", R.string.help_names);
+        HELP.put(Prefs.PARALLAX, R.string.help_parallax);
+        HELP.put("onlyapps", R.string.help_onlyapps);
+        HELP.put("widgets", R.string.help_widgets);
+        HELP.put(Prefs.TOP_SHELF, R.string.help_top_shelf);
+        HELP.put(Prefs.PICKS, R.string.help_picks_shown);
+        HELP.put(Prefs.INPUT_PREVIEW, R.string.help_input_preview);
+        HELP.put("light", R.string.help_light);
+        HELP.put("homekeys", R.string.help_homekeys);
+        HELP.put("takeover", R.string.help_takeover);
+        HELP.put("previews", R.string.help_previews);
+        HELP.put("keys", R.string.help_keys);
     }
 
     // ---- weather city ------------------------------------------------------------------------
@@ -2278,7 +2284,7 @@ final class SettingsPanel {
 
     private void askPin() {
         inputFor = "pin";
-        city.setHint("A PIN of 4 to 8 digits, then OK");
+        city.setHint(act.getString(R.string.a_pin_of_4_to));
         city.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         city.setText("");
         city.setVisibility(View.VISIBLE);
@@ -2290,13 +2296,13 @@ final class SettingsPanel {
         hideKeyboard();
         city.setVisibility(View.GONE);
         if (!pin.matches("[0-9]{4,8}")) {
-            host.hud(R.drawable.ic_info, "4 to 8 digits");
+            host.hud(R.drawable.ic_info, act.getString(R.string.n_4_to_8_digits));
             build();
             return;
         }
         Profiles.setPin(act, pin);
         if (pinFor != null) Profiles.setKids(act, pinFor, true);
-        host.hud(R.drawable.ic_check, pinFor != null ? "Kids' profile on · remember the PIN" : "PIN changed");
+        host.hud(R.drawable.ic_check, pinFor != null ? act.getString(R.string.kids_profile_on_remember_the) : act.getString(R.string.pin_changed));
         String tag = pinFor != null ? "pr:kids:" + pinFor : "pr:pin";
         pinFor = null;
         build();
@@ -2306,7 +2312,7 @@ final class SettingsPanel {
     /** The field again, this time for a new profile's name. */
     private void askProfile() {
         inputFor = "profile";
-        city.setHint("A name, then OK");
+        city.setHint(act.getString(R.string.a_name_then_ok));
         city.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
         city.setText("");
         city.setVisibility(View.VISIBLE);
@@ -2323,12 +2329,12 @@ final class SettingsPanel {
         }
         Profiles.Profile pr = Profiles.add(act, name.length() > 18 ? name.substring(0, 18) : name);
         if (pr == null) {
-            host.hud(R.drawable.ic_info, "Five profiles at most");
+            host.hud(R.drawable.ic_info, act.getString(R.string.five_profiles_at_most));
             build();
             return;
         }
         Profiles.use(act, pr.id);
-        host.hud(R.drawable.ic_check, "Hello, " + pr.name + "  ·  a fresh home screen, all yours");
+        host.hud(R.drawable.ic_check, act.getString(R.string.hello_name, pr.name) + "  ·  " + act.getString(R.string.a_fresh_home_screen));
         host.applied("profile");
         if (isOpen()) {
             build();
@@ -2338,7 +2344,7 @@ final class SettingsPanel {
 
     private void askCity() {
         inputFor = "city";
-        city.setHint("Type a city, then OK");
+        city.setHint(act.getString(R.string.type_a_city_then_ok));
         city.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
         city.setText("");
         city.setVisibility(View.VISIBLE);
@@ -2372,7 +2378,7 @@ final class SettingsPanel {
             final String f = found;
             act.runOnUiThread(() -> {
                 city.setVisibility(View.GONE);
-                host.hud(R.drawable.ic_place, f != null ? "Weather and the sun now follow " + f : "Couldn't find " + name);
+                host.hud(R.drawable.ic_place, f != null ? act.getString(R.string.weather_now_follows, f) : act.getString(R.string.couldnt_find, name));
                 if (f != null) host.applied("weather");
                 build();
                 // back on the row it was typed from, not the top of the list

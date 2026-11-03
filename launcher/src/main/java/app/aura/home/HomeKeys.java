@@ -72,6 +72,31 @@ public class HomeKeys extends AccessibilityService {
     private boolean waiting, released, taken, holding, own;
     /** Whether keys come here at all (the XML asks for it; changed as apps come and go). */
     private boolean filtering = true, pad;
+    /** A volume button held down (its key code), and since when; 0 when none. */
+    private int volumeHeld;
+    private long volumeSince;
+    /** As Android's own repeat: a pause after the press, then a step every 100 ms, never past 6 s (a lost release). */
+    private static final long VOLUME_WAIT_MS = 500, VOLUME_STEP_MS = 100, VOLUME_MAX_MS = 6000;
+    private final Runnable volumeRepeat = new Runnable() {
+        @Override
+        public void run() {
+            if (volumeHeld == 0 || SystemClock.uptimeMillis() - volumeSince > VOLUME_MAX_MS) {
+                volumeHeld = 0;
+                return;
+            }
+            android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am == null) return;
+            try {
+                am.adjustSuggestedStreamVolume(volumeHeld == KeyEvent.KEYCODE_VOLUME_UP ? android.media.AudioManager.ADJUST_RAISE
+                        : android.media.AudioManager.ADJUST_LOWER, android.media.AudioManager.USE_DEFAULT_STREAM_TYPE,
+                        android.media.AudioManager.FLAG_SHOW_UI);
+            } catch (RuntimeException ex) {
+                volumeHeld = 0;
+                return;
+            }
+            handler.postDelayed(this, VOLUME_STEP_MS);
+        }
+    };
     /** How late D-pad releases arrive, smoothed: the firmware's own delay, for Settings to show. */
     private long lag, lagN;
     private InputManager.InputDeviceListener devices;
@@ -463,6 +488,21 @@ public class HomeKeys extends AccessibilityService {
             Long last = shotOf.get(front);
             if (key == KeyEvent.KEYCODE_BACK || last == null || SystemClock.uptimeMillis() - last > REFRESH_MS) shoot(front);
         }
+        // held volume: Android re-sends every key that passes through here, and a re-sent key gets no
+        // repeats of its own, so holding Volume moved it one step (GitHub issue #1). The press goes
+        // on as before; while it stays held, the volume keeps stepping from here, as the repeats would
+        if (key == KeyEvent.KEYCODE_VOLUME_UP || key == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            handler.removeCallbacks(volumeRepeat);
+            if (!up && e.getRepeatCount() == 0) {
+                volumeHeld = key;
+                volumeSince = SystemClock.uptimeMillis();
+                handler.postDelayed(volumeRepeat, VOLUME_WAIT_MS);
+            } else {
+                // let go, or this TV passes Android's own repeats through: they carry on by themselves
+                volumeHeld = 0;
+            }
+            return false;
+        }
         // a button given an app
         String app = mapped(this, key, e.getScanCode());
         if (app != null) {
@@ -802,10 +842,10 @@ public class HomeKeys extends AccessibilityService {
         } catch (RuntimeException e) {
             return id;
         }
-        if (id.charAt(0) == 's') return "Button " + n;
+        if (id.charAt(0) == 's') return Words.get(R.string.button_n, String.valueOf(n));
         String s = KeyEvent.keyCodeToString(n);
         if (s.startsWith("KEYCODE_")) s = s.substring(8);
-        if (s.matches("\\d+")) return "Button " + s;
+        if (s.matches("\\d+")) return Words.get(R.string.button_n, s);
         s = s.replace('_', ' ').toLowerCase(Locale.ROOT);
         return Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }

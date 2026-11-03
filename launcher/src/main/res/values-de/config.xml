@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- German keeps its nouns capitalised mid-sentence: "12° und Nebel" -->
+    <bool name="lower_in_sentence">false</bool>
+</resources>

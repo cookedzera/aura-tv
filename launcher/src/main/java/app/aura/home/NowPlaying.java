@@ -310,9 +310,9 @@ final class NowPlaying extends FrameLayout {
         try {
             CharSequence name = act.getPackageManager().getApplicationLabel(
                     act.getPackageManager().getApplicationInfo(controller.getPackageName(), 0));
-            app.setText(("NOW PLAYING  ·  " + name).toUpperCase(Locale.getDefault()));
+            app.setText((act.getString(R.string.now_playing_caps) + "  ·  " + name).toUpperCase(Locale.getDefault()));
         } catch (Exception e) {
-            app.setText("NOW PLAYING");
+            app.setText(act.getString(R.string.now_playing_caps));
         }
         PlaybackState st = controller.getPlaybackState();
         boolean playing = st != null && st.getState() == PlaybackState.STATE_PLAYING;

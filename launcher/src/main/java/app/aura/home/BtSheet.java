@@ -164,7 +164,7 @@ final class BtSheet extends GlassFrame {
 
     /** The connected headphones' name for the Control Center caption, or "Bluetooth" when none is connected. */
     String connectedName() {
-        if (bt == null || !bt.isEnabled()) return "Bluetooth off";
+        if (bt == null || !bt.isEnabled()) return act.getString(R.string.bluetooth_off);
         try {
             if (a2dp != null) {
                 for (BluetoothDevice d : a2dp.getConnectedDevices()) {
@@ -209,7 +209,7 @@ final class BtSheet extends GlassFrame {
     private void rebuild() {
         boolean on = bt != null && bt.isEnabled();
         toggle.plainColor = on ? BLUE : 0x26FFFFFF;
-        toggleText.setText(on ? "On" : "Off");
+        toggleText.setText(on ? act.getString(R.string.on) : act.getString(R.string.off));
         toggle.invalidate();
 
         List<Dev> devs = new ArrayList<>();
@@ -245,16 +245,16 @@ final class BtSheet extends GlassFrame {
             return x.name.compareToIgnoreCase(y.name);
         });
 
-        if (!on) status.setText("Off");
-        else if (active != null) status.setText("Connected to " + active.name + (active.battery >= 0 ? "  ·  " + active.battery + "%" : ""));
-        else status.setText(devs.isEmpty() ? "No paired devices" : "Ready to connect");
+        if (!on) status.setText(act.getString(R.string.off));
+        else if (active != null) status.setText(act.getString(R.string.connected_to, active.name) + (active.battery >= 0 ? "  ·  " + active.battery + "%" : ""));
+        else status.setText(devs.isEmpty() ? act.getString(R.string.no_paired_devices) : act.getString(R.string.ready_to_connect));
 
         View focused = act.getCurrentFocus();
         String keep = focused != null && focused.getParent() == list ? (String) focused.getTag() : null;
         list.removeAllViews();
         for (Dev d : devs) list.addView(row(d), rowParams());
         if (on) {
-            list.addView(action("Pair new device…", "", false,
+            list.addView(action(act.getString(R.string.pair_new_device), "", false,
                     () -> host.openSettings(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS))), rowParams());
         }
         boolean kept = false;
@@ -289,8 +289,8 @@ final class BtSheet extends GlassFrame {
         LinearLayout.LayoutParams nl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         nl.leftMargin = Ui.dp(10);
         r.addView(name, nl);
-        String tag = d.connected ? "CONNECTED" + (d.battery >= 0 ? "  ·  " + d.battery + "%" : "")
-                : d.connecting ? "CONNECTING…" : d.audio ? "AUDIO" : "PAIRED";
+        String tag = d.connected ? act.getString(R.string.connected_caps) + (d.battery >= 0 ? "  ·  " + d.battery + "%" : "")
+                : d.connecting ? act.getString(R.string.connecting_2) : d.audio ? act.getString(R.string.audio) : act.getString(R.string.paired);
         TextView t = p.tint(Ui.caps(act, 6.5f, 0xFFFFFFFF, 0.2f), d.connected ? 1f : 0.6f);
         t.setShadowLayer(0, 0, 0, 0);
         t.setText(tag);
@@ -333,7 +333,7 @@ final class BtSheet extends GlassFrame {
                 host.openSettings(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
                 return;
             }
-            status.setText(on ? "Turning on…" : "Turning off…");
+            status.setText(on ? act.getString(R.string.turning_on) : act.getString(R.string.turning_off));
         } catch (SecurityException e) {
             host.openSettings(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
         }
@@ -345,8 +345,8 @@ final class BtSheet extends GlassFrame {
                 String method = d.connected ? "disconnect" : "connect";
                 Object ok = a2dp.getClass().getMethod(method, BluetoothDevice.class).invoke(a2dp, d.raw);
                 if (Boolean.TRUE.equals(ok)) {
-                    status.setText((d.connected ? "Disconnecting " : "Connecting to ") + d.name + "…");
-                    host.hud(R.drawable.ic_bluetooth, (d.connected ? "Disconnecting " : "Connecting to ") + d.name);
+                    status.setText(act.getString(d.connected ? R.string.disconnecting_ellipsis : R.string.connecting_to_ellipsis, d.name));
+                    host.hud(R.drawable.ic_bluetooth, act.getString(d.connected ? R.string.disconnecting : R.string.connecting_to, d.name));
                     return;
                 }
             } catch (Throwable ignored) {
@@ -378,7 +378,7 @@ final class BtSheet extends GlassFrame {
                 if (!isConnected(d)) continue;
                 int level = batteryLevel(d);
                 if (level <= 0 || level > 20) continue;
-                String name = d.getName() != null && !d.getName().trim().isEmpty() ? d.getName().trim() : "Your remote";
+                String name = d.getName() != null && !d.getName().trim().isEmpty() ? d.getName().trim() : c.getString(R.string.your_remote);
                 out.add(new String[]{name, String.valueOf(level), d.getAddress()});
             }
         } catch (RuntimeException ignored) {

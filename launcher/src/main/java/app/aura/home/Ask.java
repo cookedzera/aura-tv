@@ -96,7 +96,7 @@ final class Ask extends FrameLayout {
 
     /** A PIN: digits only, hidden as they're typed, no suggestions. */
     void showPin(String title, Done d) {
-        show(title, "", "The parents' PIN, then OK", java.util.Collections.emptyList(), d);
+        show(title, "", getContext().getString(R.string.the_parents_pin_then_ok), java.util.Collections.emptyList(), d);
         field.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         field.setFilters(new InputFilter[]{new InputFilter.LengthFilter(8)});
     }

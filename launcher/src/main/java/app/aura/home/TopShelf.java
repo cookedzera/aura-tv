@@ -106,13 +106,13 @@ final class TopShelf extends FrameLayout {
                         it.intent.setPackage(pkg);
                         it.pkg = pkg;
                     }
-                    if (it.progress > 0f) it.kicker = "▶  CONTINUE WATCHING";
+                    if (it.progress > 0f) it.kicker = "▶  " + Words.get(R.string.continue_watching_caps);
                     base.add(it);
                 }
             }
             for (Continue.Item it : Continue.previews(c, pkg, MAX * 2)) {
                 if (base.size() < MAX && !containsTitle(base, it.title)) {
-                    if (it.progress > 0f) it.kicker = "▶  CONTINUE WATCHING";
+                    if (it.progress > 0f) it.kicker = "▶  " + Words.get(R.string.continue_watching_caps);
                     else if ("com.google.android.youtube.tvmusic".equals(pkg)) it.kicker = "♪  YOUTUBE MUSIC";
                     base.add(it);
                 }
@@ -124,7 +124,7 @@ final class TopShelf extends FrameLayout {
                 for (Continue.Item it : base) have.add(Continue.key(it.title));
                 for (Continue.Item it : Watched.recent(c, have, MAX - base.size(), pkg)) {
                     if (it.art == null) continue;
-                    it.kicker = "▶  CONTINUE WATCHING";
+                    it.kicker = "▶  " + Words.get(R.string.continue_watching_caps);
                     base.add(it);
                 }
             }
@@ -133,8 +133,8 @@ final class TopShelf extends FrameLayout {
                     if (!pkg.equals(s.pkg) || base.size() >= MAX) continue;
                     Continue.Item it = new Continue.Item();
                     it.title = s.name;
-                    it.sub = s.episode.isEmpty() ? "New today" : "New today  ·  " + s.episode;
-                    it.kicker = "NEW EPISODE";
+                    it.sub = s.episode.isEmpty() ? Words.get(R.string.new_today) : Words.get(R.string.new_today_value, s.episode);
+                    it.kicker = Words.get(R.string.new_episode);
                     it.art = Fresh.art(s);
                     it.pkg = pkg;
                     if (it.art != null) base.add(it);
@@ -153,8 +153,8 @@ final class TopShelf extends FrameLayout {
             Continue.Item live = new Continue.Item();
             // the label already says playing or paused: under the song, only who it's by
             live.title = Ui.songTitle(mp.title);
-            live.sub = mp.by != null && !mp.by.isEmpty() ? mp.by : mp.playing ? "Playing now" : "Paused";
-            live.kicker = mp.playing ? "●  NOW PLAYING" : "▶  CONTINUE PLAYING";
+            live.sub = mp.by != null && !mp.by.isEmpty() ? mp.by : Words.get(mp.playing ? R.string.playing_now : R.string.paused_2);
+            live.kicker = mp.playing ? "●  " + Words.get(R.string.now_playing_caps) : "▶  " + Words.get(R.string.continue_playing);
             live.pkg = pkg;
             live.art = MediaWatch.resolveArt(c, mp);
             live.progress = mp.progress;
@@ -172,8 +172,8 @@ final class TopShelf extends FrameLayout {
             List<Continue.Item> out = new ArrayList<>();
             Continue.Item ym = new Continue.Item();
             ym.title = "YouTube Music";
-            ym.sub = "Your mixes, liked songs & playlists";
-            ym.kicker = "♪  PLAY NOW";
+            ym.sub = Words.get(R.string.your_mixes_liked_songs_playlists);
+            ym.kicker = "♪  " + Words.get(R.string.play_now);
             ym.pkg = pkg;
             ym.nowPlaying = true;
             ym.intent = c.getPackageManager().getLaunchIntentForPackage(pkg);
@@ -221,7 +221,7 @@ final class TopShelf extends FrameLayout {
             // a kids' profile isn't offered what it hides, as the Smart Stack already does
             if (it.pkg != null && !HomeKeys.allowed(c, it.pkg)) continue;
             if (it.art != null && !containsTitle(out, it.title)) {
-                it.kicker = "▶  CONTINUE WATCHING";
+                it.kicker = "▶  " + Words.get(R.string.continue_watching_caps);
                 out.add(it);
             }
         }
@@ -236,7 +236,7 @@ final class TopShelf extends FrameLayout {
                     Continue.Item it = new Continue.Item();
                     it.title = p.name;
                     it.sub = p.line;
-                    it.kicker = "★  TONIGHT'S PICK";
+                    it.kicker = "★  " + Words.get(R.string.tonights_pick_caps);
                     it.art = b;
                     it.intent = Picks.watch(c, p);
                     it.posterCard = true;
@@ -418,7 +418,7 @@ final class TopShelf extends FrameLayout {
             // laid out from the bottom up: how far in, the line under the name, the name (two lines
             // if it needs them, a little smaller, before anything is cut short), the label above
             float x = w * 0.07f, room = w * 0.86f;
-            String kicker = it.kicker != null ? it.kicker : it.progress > 0f ? "▶  CONTINUE WATCHING" : null;
+            String kicker = it.kicker != null ? it.kicker : it.progress > 0f ? "▶  " + Words.get(R.string.continue_watching_caps) : null;
             boolean hasSub = it.sub != null && !it.sub.isEmpty();
             android.text.TextPaint t = new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
             t.setTypeface(Ui.heavy);

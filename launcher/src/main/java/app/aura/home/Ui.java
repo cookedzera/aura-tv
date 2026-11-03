@@ -150,6 +150,31 @@ final class Ui {
         t.setText(s);
     }
 
+    /**
+     * A single line whose width comes from its place (a row, a button): once laid out, it shrinks
+     * from its size down to {@code minSp} until it fits, and only then is shortened at its end. Some
+     * languages need half as many letters again as English for the same words.
+     */
+    static void shrinkToWidth(TextView t, float minSp) {
+        final float maxSp = t.getTextSize() / scaled;
+        t.setSingleLine(true);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        t.addOnLayoutChangeListener((v, l, top, r, b, ol, ot, or, ob) -> {
+            int room = r - l - t.getCompoundPaddingLeft() - t.getCompoundPaddingRight();
+            CharSequence s = t.getText();
+            if (room <= 0 || s.length() == 0) return;
+            Paint p = new Paint(t.getPaint());
+            float sp = maxSp;
+            while (sp > minSp) {
+                p.setTextSize(sp * scaled);
+                if (p.measureText(s, 0, s.length()) <= room) break;
+                sp -= 0.5f;
+            }
+            final float want = Math.max(sp, minSp);
+            if (Math.abs(t.getTextSize() - want * scaled) > 0.5f) t.post(() -> t.setTextSize(TypedValue.COMPLEX_UNIT_SP, want));
+        });
+    }
+
     private static final java.util.regex.Pattern NOISE = java.util.regex.Pattern.compile(
             "\\s*(?:[-–—]\\s*(?:\\d{4}\\s+)?remaster(?:ed)?(?:\\s+(?:version|\\d{4}))*"
                     + "|[(\\[](?:official|remaster|lyric|audio|visuali[sz]er|hd|4k)[^)\\]]*[)\\]])\\s*$",

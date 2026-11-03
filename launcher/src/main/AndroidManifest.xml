@@ -30,6 +30,8 @@
     <!-- Wikimedia Picture of the Day, fetched in a background job that survives reboots -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- DLNA: phones and computers find the TV by multicast, which Wi-Fi drops unless asked to keep it -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -58,6 +60,16 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- what a phone or computer plays on the TV over DLNA: its own task, so Back returns to whatever was on -->
+        <activity
+            android:name=".Cast"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity="app.aura.home.cast"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale" />
 
         <!-- Aura in the TV's own app list, with an Open button after installing: without it a TV
              that keeps Home for its own launcher gave no way to open Aura at all -->

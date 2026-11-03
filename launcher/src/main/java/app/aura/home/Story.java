@@ -142,7 +142,7 @@ final class Story extends FrameLayout implements Backdrop.Tick {
         shown = w;
         String about = !w.line.isEmpty() ? w.line : w.region.replace(" · ", ", ");
         // who took it, its licence, and where it came from (Windows Spotlight, Bing, Unsplash…)
-        StringBuilder by = new StringBuilder(w.author.isEmpty() ? "" : "Photo by " + w.author);
+        StringBuilder by = new StringBuilder(w.author.isEmpty() ? "" : Words.get(R.string.photo_by, w.author));
         for (String part : new String[]{w.license, w.line.isEmpty() ? "" : w.region}) {
             if (part.isEmpty()) continue;
             if (by.length() > 0) by.append("  ·  ");

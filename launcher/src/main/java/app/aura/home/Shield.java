@@ -28,15 +28,23 @@ import javax.net.ssl.SSLSocketFactory;
  * back. Changing the setting needs WRITE_SECURE_SETTINGS, granted once at setup over ADB.
  */
 final class Shield {
-    /** hostname, name, what it blocks. Measured from India: the first is as strong as AdGuard and faster. */
+    /** hostname and name, with what it blocks in {@link #ABOUT}. Measured from India: the first is as strong as AdGuard and faster. */
     static final String[][] FILTERS = {
-            {"x-hagezi-proplus.freedns.controld.com", "Hagezi Pro++", "Strongest, and fast"},
-            {"dns.adguard-dns.com", "AdGuard", "Ads and trackers"},
-            {"x-hagezi-pro.freedns.controld.com", "Hagezi Pro", "Strong, fewer surprises"},
-            {"p2.freedns.controld.com", "Control D", "Ads, trackers, malware"},
-            {"adblock.dns.mullvad.net", "Mullvad", "Private, no logs"},
-            {"family.adguard-dns.com", "AdGuard Family", "Also hides adult sites"},
+            {"x-hagezi-proplus.freedns.controld.com", "Hagezi Pro++"},
+            {"dns.adguard-dns.com", "AdGuard"},
+            {"x-hagezi-pro.freedns.controld.com", "Hagezi Pro"},
+            {"p2.freedns.controld.com", "Control D"},
+            {"adblock.dns.mullvad.net", "Mullvad"},
+            {"family.adguard-dns.com", "AdGuard Family"},
     };
+    private static final int[] ABOUT = {R.string.filter_strongest, R.string.filter_adguard, R.string.filter_strong,
+            R.string.filter_controld, R.string.filter_mullvad, R.string.filter_family};
+
+    /** What the filter at {@code host} blocks, in a few words. */
+    static String about(Context c, String host) {
+        for (int i = 0; i < FILTERS.length; i++) if (FILTERS[i][0].equals(host)) return c.getString(ABOUT[i]);
+        return "";
+    }
     private static final String MODE = "private_dns_mode", SPECIFIER = "private_dns_specifier";
 
     /** One resolver's measured speed, and whether it answered an ad server with nothing. */

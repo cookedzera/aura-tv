@@ -212,11 +212,11 @@ final class Habits {
 
     static String ago(long ms) {
         long min = Math.max(1, ms / 60_000);
-        if (min < 60) return min + " min ago";
+        if (min < 60) return Words.get(R.string.min_ago, min);
         long h = min / 60;
-        if (h < 24) return h + (h == 1 ? " hour ago" : " hours ago");
+        if (h < 24) return Words.count(R.plurals.hours_ago, (int) h);
         long d = h / 24;
-        return d == 1 ? "yesterday" : d + " days ago";
+        return d == 1 ? Words.get(R.string.yesterday) : Words.count(R.plurals.days_ago, (int) d);
     }
 
     /** Foreground time in apps since midnight (Aura itself excluded), or -1 without access. */
@@ -344,7 +344,7 @@ final class Habits {
 
     static String duration(long ms) {
         long min = ms / 60_000;
-        if (min < 60) return min + " min";
-        return (min / 60) + " h " + (min % 60) + " min";
+        if (min < 60) return Words.get(R.string.duration_min, min);
+        return Words.get(R.string.duration_h_min, min / 60, min % 60);
     }
 }

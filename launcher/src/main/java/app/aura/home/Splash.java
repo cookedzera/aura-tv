@@ -36,7 +36,7 @@ final class Splash extends View {
     private final ValueAnimator loop;
     private RadialGradient warm;
     private float cx, sky, radius, target = 0.04f, shown, statusAlpha = 1f, creditAlpha, flare;
-    private String status = "WAKING UP", next;
+    private String status = Words.get(R.string.waking_up), next;
     private long last, landedAt;
     private boolean finishing, exiting;
     private Runnable onExit, onGone;

@@ -88,7 +88,7 @@ final class Find extends FrameLayout {
         field.setBackground(null);
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         field.setImeOptions(EditorInfo.IME_ACTION_GO);
-        field.setHint("Find an app");
+        field.setHint(getContext().getString(R.string.find_an_app));
         field.setTextColor(0xFFFFFFFF);
         field.setHintTextColor(0x73FFFFFF);
         field.setTextSize(20);
@@ -195,7 +195,7 @@ final class Find extends FrameLayout {
         List<AppRepo.App> found = new ArrayList<>();
         if (query.isEmpty()) {
             for (AppRepo.App a : host.suggested()) if (found.size() < MAX) found.add(a);
-            label.setText("SUGGESTED");
+            label.setText(getContext().getString(R.string.suggested));
         } else {
             List<Object[]> scored = new ArrayList<>();
             for (AppRepo.App a : host.apps()) {
@@ -205,7 +205,8 @@ final class Find extends FrameLayout {
             Collections.sort(scored, (x, y) -> (int) x[0] != (int) y[0] ? (int) x[0] - (int) y[0]
                     : ((AppRepo.App) x[1]).label.compareToIgnoreCase(((AppRepo.App) y[1]).label));
             for (Object[] s : scored) if (found.size() < MAX) found.add((AppRepo.App) s[1]);
-            label.setText(found.isEmpty() ? "NO APP BY THAT NAME" : found.size() == 1 ? "1 APP" : found.size() + " APPS");
+            label.setText(found.isEmpty() ? getContext().getString(R.string.no_app_by_that_name)
+                    : getContext().getResources().getQuantityString(R.plurals.n_apps_caps, found.size(), found.size()));
         }
         results.removeAllViews();
         first = found.isEmpty() ? null : found.get(0);
@@ -232,7 +233,7 @@ final class Find extends FrameLayout {
             results.addView(item, il);
         }
         everywhereRow.setVisibility(query.isEmpty() ? GONE : VISIBLE);
-        everywhere.setText("Search the TV for “" + q.trim() + "”");
+        everywhere.setText(getContext().getString(R.string.search_the_tv_for, q.trim()));
     }
 
     /** Lower case, accents folded: "Pokémon" is found by "pokemon". */

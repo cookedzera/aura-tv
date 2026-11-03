@@ -68,7 +68,7 @@ final class HomeRole {
     /** What Home opens instead of Aura, by name: "Google TV", "Fire TV" or the TV's own. */
     static String other(Context c) {
         String s = stubbornPackage(c);
-        return s == null ? "the TV's own home" : s.contains("amazon") ? "Fire TV" : "Google TV";
+        return s == null ? c.getString(R.string.the_tvs_own_home) : s.contains("amazon") ? "Fire TV" : "Google TV";
     }
 
     /**
@@ -119,25 +119,25 @@ final class HomeRole {
      * switched on by Aura itself once setup has allowed that, else on Android's Accessibility page.
      */
     static String make(Activity a) {
-        if (held(a)) return "Home already opens Aura";
+        if (held(a)) return a.getString(R.string.home_already_opens_aura);
         if (HomeKeys.on(a) && HomeKeys.live) {
             HomeKeys.setTakeover(a, true);
-            return "Home now opens Aura";
+            return a.getString(R.string.home_now_opens_aura);
         }
         if (stubborn(a) || !askable(a)) {
             HomeKeys.setTakeover(a, true);
-            if (HomeKeys.set(a, true)) return "Home now opens Aura";
+            if (HomeKeys.set(a, true)) return a.getString(R.string.home_now_opens_aura);
             // the message first, then Android's page, where it's switched on by hand; Google TV's
             // usual Accessibility link leads nowhere, so without its own page, setup does it
-            if (!byHand(a)) return restricted(a) ? "Android locks that switch for apps installed from a file · Settings, Set up on this TV"
-                    : "Settings, Set up on this TV makes Home open Aura";
+            if (!byHand(a)) return restricted(a) ? a.getString(R.string.android_locks_that_switch)
+                    : a.getString(R.string.setup_makes_home_open_aura);
             waiting = true;
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                 if (!openAccessibility(a)) waiting = false;
             }, 2200);
-            return "Next: Aura, switch it on, then Back · " + other(a) + " keeps Home otherwise";
+            return a.getString(R.string.next_aura_switch_it_on, other(a));
         }
-        return ask(a) ? null : "Press Home on the remote and choose Aura, then Always";
+        return ask(a) ? null : a.getString(R.string.press_home_on_the_remote);
     }
 
     /** Sent to Android's Accessibility page to switch the service on: Aura says so once it's running. */

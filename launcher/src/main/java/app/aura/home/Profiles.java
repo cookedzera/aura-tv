@@ -73,13 +73,13 @@ final class Profiles {
             }
         } catch (JSONException ignored) {
         }
-        if (out.isEmpty()) out.add(new Profile(MAIN, "Me", COLORS[0]));
+        if (out.isEmpty()) out.add(new Profile(MAIN, c.getString(R.string.me), COLORS[0]));
         return out;
     }
 
     static String name(Context c) {
         for (Profile p : all(c)) if (p.id.equals(current(c))) return p.name;
-        return "Me";
+        return c.getString(R.string.me);
     }
 
     private static void save(Context c, List<Profile> list) {

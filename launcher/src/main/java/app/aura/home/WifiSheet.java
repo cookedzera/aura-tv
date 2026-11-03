@@ -103,7 +103,7 @@ final class WifiSheet extends GlassFrame {
         titles.setOrientation(LinearLayout.VERTICAL);
         TextView title = Ui.text(a, 21, Ui.heavy, 0xFFFFFFFF);
         title.setIncludeFontPadding(true);
-        title.setText("Wi-Fi");
+        title.setText(act.getString(R.string.wi_fi));
         titles.addView(title);
         status = Ui.text(a, 11, Ui.regular, 0xB3FFFFFF);
         status.setEllipsize(TextUtils.TruncateAt.END);
@@ -133,7 +133,7 @@ final class WifiSheet extends GlassFrame {
         password.setImeOptions(EditorInfo.IME_ACTION_GO);
         password.setTextColor(0xFFFFFFFF);
         password.setHintTextColor(0x66FFFFFF);
-        password.setHint("Password");
+        password.setHint(act.getString(R.string.password));
         password.setTextSize(13);
         password.setTypeface(Ui.medium);
         password.setPadding(Ui.dp(12), Ui.dp(6), Ui.dp(12), Ui.dp(6));
@@ -154,7 +154,7 @@ final class WifiSheet extends GlassFrame {
         go.plainColor = BLUE;
         go.edgeLight = false;
         TextView gt = go.tint(Ui.text(a, 11, Ui.bold, 0xFFFFFFFF), 1f);
-        gt.setText("Join");
+        gt.setText(act.getString(R.string.join));
         gt.setGravity(Gravity.CENTER);
         go.addView(gt, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         go.onClick = this::joinWithPassword;
@@ -265,7 +265,7 @@ final class WifiSheet extends GlassFrame {
     private void rebuild() {
         boolean on = wifi.isWifiEnabled();
         toggle.plainColor = on ? BLUE : 0x26FFFFFF;
-        toggleText.setText(on ? "On" : "Off");
+        toggleText.setText(on ? act.getString(R.string.on) : act.getString(R.string.off));
         toggle.invalidate();
 
         WifiInfo info = wifi.getConnectionInfo();
@@ -279,12 +279,12 @@ final class WifiSheet extends GlassFrame {
         SupplicantState state = info != null ? info.getSupplicantState() : null;
         boolean onWifi = Compat.onWifi(cm, false);
         boolean connected = on && (onWifi || (info != null && info.getNetworkId() != -1 && state == SupplicantState.COMPLETED));
-        if (!on) status.setText("Off");
+        if (!on) status.setText(act.getString(R.string.off));
         // the name is on the network's own row below; the header carries the band and link speed
-        else if (connected) status.setText(knownLink != null ? "Connected  ·  " + knownLink : named ? "Connected to " + current : "Connected");
+        else if (connected) status.setText(knownLink != null ? act.getString(R.string.connected_value, knownLink) : named ? act.getString(R.string.connected_to, current) : act.getString(R.string.connected));
         else if (state == SupplicantState.ASSOCIATING || state == SupplicantState.AUTHENTICATING
-                || state == SupplicantState.FOUR_WAY_HANDSHAKE || state == SupplicantState.GROUP_HANDSHAKE) status.setText("Connecting…");
-        else status.setText("Not connected");
+                || state == SupplicantState.FOUR_WAY_HANDSHAKE || state == SupplicantState.GROUP_HANDSHAKE) status.setText(act.getString(R.string.connecting));
+        else status.setText(act.getString(R.string.not_connected_2));
 
         Map<String, Net> nets = new HashMap<>();
         if (on) {
@@ -340,20 +340,20 @@ final class WifiSheet extends GlassFrame {
             // Android lists nearby networks only while location is on. Without it (some TVs drop
             // Wi-Fi when location is switched on) the essentials still work from here.
             if (connected) {
-                list.addView(action(named ? current : "Disconnect", "CONNECTED", true, () -> {
+                list.addView(action(named ? current : act.getString(R.string.disconnect), act.getString(R.string.connected_caps), true, () -> {
                     wifi.disconnect();
-                    host.hud(R.drawable.ic_wifi, "Disconnected");
+                    host.hud(R.drawable.ic_wifi, act.getString(R.string.disconnected));
                 }), rowParams());
             } else {
-                list.addView(action("Reconnect", "", false, () -> {
+                list.addView(action(act.getString(R.string.reconnect), "", false, () -> {
                     wifi.reconnect();
-                    status.setText("Connecting…");
+                    status.setText(act.getString(R.string.connecting));
                 }), rowParams());
             }
         }
         if (connected) list.addView(speedRow(), rowParams());
         if (on) {
-            list.addView(action("Other networks…", "", false,
+            list.addView(action(act.getString(R.string.other_networks), "", false,
                     () -> host.openSettings(new Intent(Settings.ACTION_WIFI_SETTINGS))), rowParams());
         }
         boolean kept = false;
@@ -389,7 +389,7 @@ final class WifiSheet extends GlassFrame {
         LinearLayout.LayoutParams nl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         nl.leftMargin = Ui.dp(10);
         r.addView(name, nl);
-        String tag = n.connected ? "CONNECTED" : n.configId >= 0 ? "SAVED" : n.open() ? "OPEN" : "";
+        String tag = n.connected ? act.getString(R.string.connected_caps) : n.configId >= 0 ? act.getString(R.string.saved) : n.open() ? act.getString(R.string.open) : "";
         if (!tag.isEmpty()) {
             TextView t = p.tint(Ui.caps(act, 6.5f, 0xFFFFFFFF, 0.2f), n.connected ? 1f : 0.6f);
             t.setShadowLayer(0, 0, 0, 0);
@@ -457,7 +457,7 @@ final class WifiSheet extends GlassFrame {
                     java.util.regex.Matcher m = p.matcher(line);
                     if (m.find() && !m.group(1).isEmpty() && !"<unknown ssid>".equals(m.group(1))) {
                         int mhz = Integer.parseInt(m.group(3));
-                        return new String[]{m.group(1), (mhz >= 5900 ? "6 GHz" : mhz >= 4900 ? "5 GHz" : "2.4 GHz") + "  ·  " + m.group(2) + " Mbps link"};
+                        return new String[]{m.group(1), (mhz >= 5900 ? "6 GHz" : mhz >= 4900 ? "5 GHz" : "2.4 GHz") + "  ·  " + Words.get(R.string.mbps_link, m.group(2))};
                     }
                 }
             }
@@ -508,7 +508,7 @@ final class WifiSheet extends GlassFrame {
 
     /** "Test speed", with the live reading on the right: latency, then download, then upload. */
     private Pad speedRow() {
-        Pad p = action("Test speed", speedText.isEmpty() ? " " : speedText, false, this::runSpeed);
+        Pad p = action(act.getString(R.string.test_speed), speedText.isEmpty() ? " " : speedText, false, this::runSpeed);
         p.setTag("action:speed");
         // a reading, not a label: plain figures at a size that reads from the sofa
         TextView t = findTag(p);
@@ -525,12 +525,12 @@ final class WifiSheet extends GlassFrame {
         if (speed != null) return;
         speed = new SpeedTest();
         final SpeedTest t = speed;
-        showSpeed("Measuring…");
+        showSpeed(act.getString(R.string.measuring));
         new SafeThread(() -> t.run((phase, ping, down, up, done) -> act.runOnUiThread(() -> {
             String p = ping < 0 ? "" : "  ·  " + ping + " ms";
             String text;
-            if (done) text = ping < 0 ? "No connection" : "↓ " + mbps(down) + "   ↑ " + mbps(up) + " Mbps" + p;
-            else if (phase.equals("ping")) text = ping < 0 ? "No connection" : "Ping " + ping + " ms";
+            if (done) text = ping < 0 ? act.getString(R.string.no_connection) : "↓ " + mbps(down) + "   ↑ " + mbps(up) + " Mbps" + p;
+            else if (phase.equals("ping")) text = ping < 0 ? act.getString(R.string.no_connection) : act.getString(R.string.ping_ms, ping);
             else if (phase.equals("down")) text = "↓ " + mbps(down) + " Mbps";
             else text = "↓ " + mbps(down) + "   ↑ " + mbps(up) + " Mbps";
             showSpeed(text);
@@ -569,13 +569,13 @@ final class WifiSheet extends GlassFrame {
             host.openSettings(new Intent(Settings.ACTION_WIFI_SETTINGS));
             return;
         }
-        status.setText(on ? "Turning on…" : "Turning off…");
+        status.setText(on ? act.getString(R.string.turning_on) : act.getString(R.string.turning_off));
     }
 
     private void choose(Net n) {
         if (n.connected) {
             wifi.disconnect();
-            host.hud(R.drawable.ic_wifi, "Disconnected from " + n.ssid);
+            host.hud(R.drawable.ic_wifi, act.getString(R.string.disconnected_from, n.ssid));
         } else if (n.configId >= 0) {
             connect(n.configId, n.ssid);
         } else if (n.caps != null && n.caps.contains("EAP")) {
@@ -588,7 +588,7 @@ final class WifiSheet extends GlassFrame {
             connect(wifi.addNetwork(c), n.ssid);
         } else {
             joinSsid = n.ssid;
-            joinLabel.setText(("Password for " + n.ssid).toUpperCase(Locale.getDefault()));
+            joinLabel.setText(act.getString(R.string.password_for, n.ssid).toUpperCase(Locale.getDefault()));
             password.setText("");
             join.setVisibility(View.VISIBLE);
             password.requestFocus();
@@ -600,7 +600,7 @@ final class WifiSheet extends GlassFrame {
     private void joinWithPassword() {
         String pass = password.getText().toString();
         if (joinSsid == null || pass.length() < 8) {
-            host.hud(R.drawable.ic_info, "Wi-Fi passwords are at least 8 characters");
+            host.hud(R.drawable.ic_info, act.getString(R.string.wi_fi_passwords_are_at));
             return;
         }
         WifiConfiguration c = new WifiConfiguration();
@@ -615,12 +615,12 @@ final class WifiSheet extends GlassFrame {
 
     private void connect(int id, String ssid) {
         if (id < 0 || !wifi.enableNetwork(id, true)) {
-            host.hud(R.drawable.ic_info, "Couldn't join " + ssid);
+            host.hud(R.drawable.ic_info, act.getString(R.string.couldnt_join, ssid));
             return;
         }
         wifi.reconnect();
-        status.setText("Connecting to " + ssid + "…");
-        host.hud(R.drawable.ic_wifi, "Joining " + ssid);
+        status.setText(act.getString(R.string.connecting_to_ellipsis, ssid));
+        host.hud(R.drawable.ic_wifi, act.getString(R.string.joining, ssid));
     }
 
     private void hideKeyboard() {

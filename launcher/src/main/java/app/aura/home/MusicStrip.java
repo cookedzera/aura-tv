@@ -157,7 +157,7 @@ final class MusicStrip extends LinearLayout {
                     getContext().getPackageManager().getApplicationInfo(controller.getPackageName(), 0)));
         } catch (Exception ignored) {
         }
-        kicker.setText(("Now playing" + (app.isEmpty() ? "" : "  ·  " + app)).toUpperCase(Locale.getDefault()));
+        kicker.setText((getContext().getString(R.string.now_playing) + (app.isEmpty() ? "" : "  ·  " + app)).toUpperCase(Locale.getDefault()));
         Bitmap b = MediaWatch.extractBitmap(md);
         String uri = MediaWatch.extractArtUri(md);
         Bitmap cached = MediaWatch.cachedArt(uri);
@@ -200,7 +200,7 @@ final class MusicStrip extends LinearLayout {
         boolean on = st != null && st.getState() == PlaybackState.STATE_PLAYING;
         if (st == null || dur <= 0) {
             bar.setVisibility(GONE);
-            time.setText(on ? "" : "Paused");
+            time.setText(on ? "" : getContext().getString(R.string.paused_2));
             return;
         }
         long pos = st.getPosition();
@@ -208,7 +208,8 @@ final class MusicStrip extends LinearLayout {
         pos = Math.max(0, Math.min(dur, pos));
         bar.setVisibility(VISIBLE);
         bar.set(pos / (float) dur);
-        time.setText((on ? "" : "Paused  ·  ") + NowPlaying.clock(pos) + " / " + NowPlaying.clock(dur));
+        String clock = NowPlaying.clock(pos) + " / " + NowPlaying.clock(dur);
+        time.setText(on ? clock : getContext().getString(R.string.paused_value, clock));
     }
 
     private static LayoutParams lp(int left, int top) {

@@ -68,7 +68,7 @@ final class ProfilePicker extends FrameLayout {
         body.addView(kicker);
         TextView title = Ui.text(a, 40, Ui.light, 0xFFFFFFFF);
         title.setLetterSpacing(-0.03f);
-        title.setText("Who's watching?");
+        title.setText(act.getString(R.string.whos_watching));
         body.addView(title, lp(0, 6));
         row = new LinearLayout(a);
         row.setGravity(Gravity.TOP);
@@ -129,7 +129,7 @@ final class ProfilePicker extends FrameLayout {
         String cur = Profiles.current(act);
         for (Profiles.Profile p : Profiles.all(act)) {
             boolean now = p.id.equals(cur);
-            add(face(initial(p.name), p.color, now), p.name, now ? "WATCHING" : p.kids ? "KIDS" : "", () -> {
+            add(face(initial(p.name), p.color, now), p.name, now ? act.getString(R.string.watching) : p.kids ? act.getString(R.string.kids) : "", () -> {
                 if (p.id.equals(Profiles.current(act))) {
                     host.close();
                     return;
@@ -141,8 +141,8 @@ final class ProfilePicker extends FrameLayout {
             });
         }
         // a quiet way to the rest, kept to the end of the row
-        add(face("+", 0xFF8C93A6, false), Profiles.all(act).size() < Profiles.MAX ? "Add or edit" : "Edit", "", host::manage);
-        hint.setText("OK to switch  ·  Back to stay");
+        add(face("+", 0xFF8C93A6, false), Profiles.all(act).size() < Profiles.MAX ? act.getString(R.string.add_or_edit) : act.getString(R.string.edit), "", host::manage);
+        hint.setText(act.getString(R.string.ok_to_switch_back_to));
     }
 
     private void add(Face f, String name, String tag, Runnable run) {

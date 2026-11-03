@@ -97,13 +97,27 @@ final class Sun {
     static String label(Phase p) {
         switch (p) {
             case NIGHT:
-                return "NIGHT SKY";
+                return Words.get(R.string.sky_night);
             case DAWN:
-                return "FIRST LIGHT";
+                return Words.get(R.string.sky_dawn);
             case GOLDEN:
-                return "GOLDEN HOUR";
+                return Words.get(R.string.sky_golden);
             default:
-                return "DAYLIGHT";
+                return Words.get(R.string.sky_day);
+        }
+    }
+
+    /** "Photos follow the golden hour outside." */
+    static String photosFollow(Phase p) {
+        switch (p) {
+            case NIGHT:
+                return Words.get(R.string.photos_follow_night);
+            case DAWN:
+                return Words.get(R.string.photos_follow_dawn);
+            case GOLDEN:
+                return Words.get(R.string.photos_follow_golden);
+            default:
+                return Words.get(R.string.photos_follow_day);
         }
     }
 

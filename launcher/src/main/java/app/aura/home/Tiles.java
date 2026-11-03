@@ -76,7 +76,7 @@ final class Tiles {
             t.setLetterSpacing(0.28f);
             t.setColor(0xB3FFFFFF);
             t.setTextAlign(Paint.Align.CENTER);
-            c.drawText(count + " APPS", w / 2f, h * 0.80f, t);
+            c.drawText(Words.count(R.plurals.n_apps_caps, count), w / 2f, h * 0.80f, t);
         };
     }
 
@@ -545,12 +545,12 @@ final class Tiles {
             tag.setTypeface(Ui.bold);
             tag.setTextSize(h * 0.085f);
             tag.setLetterSpacing(0.18f);
-            float tw = tag.measureText("LIVE"), ph = h * 0.15f, pw = tw + h * 0.16f;
+            float tw = tag.measureText(Words.get(R.string.live)), ph = h * 0.15f, pw = tw + h * 0.16f;
             float px = w - pw - w * 0.06f, py = h * 0.1f;
             p.setColor(0xFFE5304A);
             c.drawRoundRect(px, py, px + pw, py + ph, ph / 2f, ph / 2f, p);
             tag.setColor(0xFFFFFFFF);
-            c.drawText("LIVE", px + h * 0.08f, py + ph * 0.72f, tag);
+            c.drawText(Words.get(R.string.live), px + h * 0.08f, py + ph * 0.72f, tag);
         };
     }
 

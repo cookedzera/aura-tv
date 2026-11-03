@@ -430,7 +430,7 @@ final class Drop {
             return;
         }
         if (len <= 0 || len > Mine.MAX_BYTES) {
-            fail(s, name, 413, len <= 0 ? "Nothing arrived" : "Too big for the TV (40 MB at most)");
+            fail(s, name, 413, len <= 0 ? app.getString(R.string.nothing_arrived) : app.getString(R.string.too_big_for_the_tv));
             return;
         }
         File part = Mine.part(app);
@@ -453,7 +453,7 @@ final class Drop {
         } catch (IOException e) {
             //noinspection ResultOfMethodCallIgnored
             part.delete();
-            main.post(() -> listener.onFailed(name, "The upload stopped part-way"));
+            main.post(() -> listener.onFailed(name, app.getString(R.string.the_upload_stopped_part_way)));
             throw e;
         }
         try {
@@ -472,11 +472,11 @@ final class Drop {
      */
     private void apk(Socket s, InputStream in, long len, String name, int index, int count) throws IOException, JSONException {
         if (len <= 0 || len > MAX_APK) {
-            fail(s, name, 413, len <= 0 ? "Nothing arrived" : "Too big (500 MB at most)");
+            fail(s, name, 413, len <= 0 ? app.getString(R.string.nothing_arrived) : app.getString(R.string.too_big_500_mb_at));
             return;
         }
         if (!Updater.allowed(app)) {
-            fail(s, name, 403, "The TV doesn't let Aura install apps yet: run setup-aura.ps1 once");
+            fail(s, name, 403, app.getString(R.string.the_tv_doesnt_let_aura));
             return;
         }
         final long[] shown = {0};
@@ -489,7 +489,7 @@ final class Drop {
                 }
             });
         } catch (IOException e) {
-            main.post(() -> listener.onFailed(name, "The upload stopped part-way"));
+            main.post(() -> listener.onFailed(name, app.getString(R.string.the_upload_stopped_part_way)));
             throw e;
         }
         main.post(() -> listener.onApk(name));

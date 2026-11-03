@@ -82,7 +82,7 @@ final class WeatherSheet extends FrameLayout {
         note.setVisibility(GONE);
         left.addView(note, lp(0, 10));
 
-        left.addView(heading(a, "SUN"), lp(0, 26));
+        left.addView(heading(a, act.getString(R.string.sun)), lp(0, 26));
         arc = new SkyArc(a);
         left.addView(arc, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(62)));
         LinearLayout feet = new LinearLayout(a);
@@ -100,7 +100,7 @@ final class WeatherSheet extends FrameLayout {
 
         hoursBlock = new LinearLayout(a);
         hoursBlock.setOrientation(LinearLayout.VERTICAL);
-        hoursBlock.addView(heading(a, "NEXT HOURS"));
+        hoursBlock.addView(heading(a, act.getString(R.string.next_hours)));
         hours = new LinearLayout(a);
         hoursBlock.addView(hours, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         // the full column's width: the hours share it equally
@@ -116,7 +116,7 @@ final class WeatherSheet extends FrameLayout {
         LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(Ui.hair(), ViewGroup.LayoutParams.MATCH_PARENT);
         rl.leftMargin = Ui.dp(44);
         rl.rightMargin = Ui.dp(40);
-        daysBlock.addView(heading(a, "7-DAY FORECAST"));
+        daysBlock.addView(heading(a, act.getString(R.string.n_7_day_forecast)));
         days = new LinearLayout(a);
         days.setOrientation(LinearLayout.VERTICAL);
         daysBlock.addView(days, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -157,15 +157,15 @@ final class WeatherSheet extends FrameLayout {
 
         Weather.Now w = weatherOn ? Weather.now(act) : null;
         Weather.Forecast f = w != null ? Weather.forecast(act) : null;
-        String place = w != null && w.city != null && !w.city.isEmpty() ? w.city : "Outside";
+        String place = w != null && w.city != null && !w.city.isEmpty() ? w.city : act.getString(R.string.outside);
         city.setText(place.toUpperCase(Locale.getDefault()));
         nowBlock.setVisibility(w != null ? VISIBLE : GONE);
         hoursBlock.setVisibility(f != null && !f.hours.isEmpty() ? VISIBLE : GONE);
         daysBlock.setVisibility(f != null && !f.days.isEmpty() ? VISIBLE : GONE);
         ((View) daysBlock.getParent()).setVisibility(daysBlock.getVisibility());
         note.setVisibility(w == null ? VISIBLE : GONE);
-        note.setText(weatherOn ? "The weather shows here once Aura has been online for a moment."
-                : "Weather is switched off. Settings → Weather turns it on.");
+        note.setText(weatherOn ? act.getString(R.string.the_weather_shows_here_once)
+                : act.getString(R.string.weather_is_switched_off_settings));
         if (w == null) return;
 
         String unit = "°";
@@ -173,11 +173,11 @@ final class WeatherSheet extends FrameLayout {
         temp.setText(w.temp + unit);
         condition.setText(w.condition());
         Weather.Day today = f != null && !f.days.isEmpty() ? f.days.get(0) : null;
-        range.setText(today != null ? "H " + today.max + unit + "   L " + today.min + unit : "");
+        range.setText(today != null ? act.getString(R.string.high_low, today.max + unit, today.min + unit) : "");
         StringBuilder d = new StringBuilder();
-        if (f != null && f.feels != Integer.MIN_VALUE) d.append("Feels like ").append(f.feels).append(unit);
-        if (f != null && f.humidity >= 0) d.append(d.length() > 0 ? "  ·  " : "").append("Humidity ").append(f.humidity).append('%');
-        if (f != null && f.wind >= 0) d.append(d.length() > 0 ? "  ·  " : "").append("Wind ").append(f.wind).append(Weather.fahrenheit(getContext()) ? " mph" : " km/h");
+        if (f != null && f.feels != Integer.MIN_VALUE) d.append(act.getString(R.string.feels_like, f.feels + unit));
+        if (f != null && f.humidity >= 0) d.append(d.length() > 0 ? "  ·  " : "").append(act.getString(R.string.humidity, f.humidity));
+        if (f != null && f.wind >= 0) d.append(d.length() > 0 ? "  ·  " : "").append(act.getString(R.string.wind, f.wind + (Weather.fahrenheit(getContext()) ? " mph" : " km/h")));
         details.setText(d);
         details.setVisibility(d.length() > 0 ? VISIBLE : GONE);
         if (f == null) return;
@@ -189,7 +189,7 @@ final class WeatherSheet extends FrameLayout {
             c.setOrientation(LinearLayout.VERTICAL);
             c.setGravity(Gravity.CENTER_HORIZONTAL);
             TextView t = Ui.text(act, 10.5f, Ui.semibold, i == 0 ? 0xFFFFFFFF : 0x99FFFFFF);
-            t.setText(i == 0 ? "Now" : hour(h.time));
+            t.setText(i == 0 ? act.getString(R.string.now) : hour(h.time));
             c.addView(t);
             // "Now" is the reading itself, so it never disagrees with the large one above
             ImageView iv = ControlCenter.icon(act, i == 0 ? w.icon() : Weather.icon(h.code, h.day));
@@ -218,7 +218,7 @@ final class WeatherSheet extends FrameLayout {
             LinearLayout r = new LinearLayout(act);
             r.setGravity(Gravity.CENTER_VERTICAL);
             TextView name = Ui.text(act, 14, i == 0 ? Ui.bold : Ui.medium, 0xFFFFFFFF);
-            name.setText(i == 0 ? "Today" : DateUtils.formatDateTime(act, day.date, DateUtils.FORMAT_SHOW_WEEKDAY | DateUtils.FORMAT_ABBREV_WEEKDAY));
+            name.setText(i == 0 ? act.getString(R.string.today) : DateUtils.formatDateTime(act, day.date, DateUtils.FORMAT_SHOW_WEEKDAY | DateUtils.FORMAT_ABBREV_WEEKDAY));
             r.addView(name, new LinearLayout.LayoutParams(Ui.dp(62), ViewGroup.LayoutParams.WRAP_CONTENT));
             LinearLayout sky = new LinearLayout(act);
             sky.setOrientation(LinearLayout.VERTICAL);
@@ -265,7 +265,7 @@ final class WeatherSheet extends FrameLayout {
         rise.setText(r > 0 ? "↑  " + tf.format(new Date(r)).toUpperCase(Locale.getDefault()) : "");
         set.setText(s > 0 ? tf.format(new Date(s)).toUpperCase(Locale.getDefault()) + "  ↓" : "");
         long len = s > r && r > 0 ? (s - r) / 60_000 : -1;
-        daylight.setText(len > 0 ? (len / 60) + " h " + (len % 60) + " min of daylight" : "");
+        daylight.setText(len > 0 ? act.getString(R.string.duration_of_daylight, Words.get(R.string.duration_h_min, len / 60, len % 60)) : "");
     }
 
     private String hour(long t) {
@@ -273,7 +273,7 @@ final class WeatherSheet extends FrameLayout {
         c.setTimeInMillis(t);
         if (DateFormat.is24HourFormat(act)) return String.format(Locale.getDefault(), "%02d", c.get(Calendar.HOUR_OF_DAY));
         int h = c.get(Calendar.HOUR);
-        return (h == 0 ? 12 : h) + (c.get(Calendar.AM_PM) == Calendar.AM ? " AM" : " PM");
+        return (h == 0 ? 12 : h) + " " + new java.text.DateFormatSymbols().getAmPmStrings()[c.get(Calendar.AM_PM)];
     }
 
     private static TextView heading(Context c, String s) {

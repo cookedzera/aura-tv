@@ -167,7 +167,7 @@ final class Switcher extends FrameLayout {
         closeDisc.addView(closeIcon, new FrameLayout.LayoutParams(Ui.dp(24), Ui.dp(24), Gravity.CENTER));
         closeAll.addView(closeDisc, new LinearLayout.LayoutParams(Ui.dp(64), Ui.dp(64)));
         closeLabel = Ui.text(a, 13, Ui.semibold, 0xE6FFFFFF);
-        closeLabel.setText("Close all");
+        closeLabel.setText(act.getString(R.string.close_all));
         LinearLayout.LayoutParams cll = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         cll.topMargin = Ui.dp(10);
         closeAll.addView(closeLabel, cll);
@@ -196,13 +196,13 @@ final class Switcher extends FrameLayout {
         addView(closeAll, cal);
 
         hint = Ui.text(a, 11.5f, Ui.regular, 0x73FFFFFF);
-        hint.setText("OK opens  ·  ▲ on an app closes it  ·  ► reaches Close all");
+        hint.setText(act.getString(R.string.ok_opens_on_an_app));
         LayoutParams hl = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         hl.bottomMargin = Ui.dp(10);
         addView(hint, hl);
 
         empty = Ui.text(a, 17, Ui.medium, 0xCCFFFFFF);
-        empty.setText("Apps you open will line up here");
+        empty.setText(act.getString(R.string.apps_you_open_will_line));
         addView(empty, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
 
         // the app between card and full screen: its colour, its icon and name in the middle
@@ -461,7 +461,7 @@ final class Switcher extends FrameLayout {
             if (a.pkg.equals(current)) start = cur = apps.size();
             apps.add(a);
             boolean live = a.pkg.equals(playing);
-            LinearLayout item = item(a, live ? "●  Playing now" : apps.size() == 1 && a.pkg.equals(current) ? "Just now" : Habits.ago(now - e.getValue()));
+            LinearLayout item = item(a, live ? "●  " + act.getString(R.string.playing_now) : apps.size() == 1 && a.pkg.equals(current) ? act.getString(R.string.just_now) : Habits.ago(now - e.getValue()));
             ((TextView) item.getTag()).setTextColor(live ? 0xFF7BE0A8 : 0x8CFFFFFF);
             if (item.getParent() != null) ((ViewGroup) item.getParent()).removeView(item);
             items.add(item);
@@ -555,7 +555,7 @@ final class Switcher extends FrameLayout {
         am.getMemoryInfo(mi);
         if (mi.totalMem <= 0) return;
         float gb = 1024f * 1024f * 1024f, used = (mi.totalMem - mi.availMem) / gb, total = mi.totalMem / gb;
-        memText.setText(String.format(Locale.getDefault(), "%.1f of %.1f GB", used, total));
+        memText.setText(act.getString(R.string.gb_of_gb, used, total));
         float f = Math.max(0.03f, Math.min(1f, used / total));
         if (animate) memFill.animate().scaleX(f).setStartDelay(0).setDuration(700).setInterpolator(Ui.EMPHASIZED).start();
         else memFill.setScaleX(f);

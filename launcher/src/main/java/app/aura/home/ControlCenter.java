@@ -105,7 +105,7 @@ final class ControlCenter {
                 app = "  ·  " + String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(p.pkg, 0))).toUpperCase(Locale.getDefault());
             } catch (Exception ignored) {
             }
-            nowState.setText((p.playing ? "NOW PLAYING" : "PAUSED") + app);
+            nowState.setText((p.playing ? act.getString(R.string.now_playing_caps) : act.getString(R.string.paused)) + app);
             nowBar.set(p.progress);
             nowBar.setVisibility(p.progress > 0f ? View.VISIBLE : View.INVISIBLE);
             if (p.art != null) {
@@ -186,7 +186,7 @@ final class ControlCenter {
         header.setOrientation(LinearLayout.VERTICAL);
         TextView title = Ui.caps(a, 8, 0x99FFFFFF, 0.3f);
         headTitle = title;
-        title.setText("CONTROL CENTER");
+        title.setText(act.getString(R.string.control_center));
         header.addView(title);
         time = Ui.text(a, 62, Ui.heavy, 0xFFFFFFFF);
         time.setIncludeFontPadding(true);
@@ -247,7 +247,7 @@ final class ControlCenter {
         pc.setOrientation(LinearLayout.VERTICAL);
         TextView pk = pick.tint(Ui.caps(a, 6.5f, 0xFFFFFFFF, 0.24f), 0.6f);
         pk.setShadowLayer(0, 0, 0, 0);
-        pk.setText("TONIGHT'S PICK  ·  TVMAZE");
+        pk.setText(a.getString(R.string.tonights_pick_caps) + "  ·  TVMAZE");
         pickKicker = pk;
         pc.addView(pk, lp(0, 0));
         pickName = pick.tint(Ui.text(a, 15, Ui.heavy, 0xFFFFFFFF), 1f);
@@ -325,7 +325,7 @@ final class ControlCenter {
         notesBox.setOrientation(LinearLayout.VERTICAL);
         notesBox.setClipChildren(false);
         TextView ncap = Ui.caps(a, 7, 0x8CFFFFFF, 0.24f);
-        ncap.setText("NOTIFICATIONS");
+        ncap.setText(act.getString(R.string.notifications));
         notesBox.addView(ncap);
         for (int k = 0; k < noteRows.length; k++) {
             Pad row = new Pad(a, null, 14, 0f);
@@ -433,6 +433,7 @@ final class ControlCenter {
             caps[k].setGravity(Gravity.CENTER);
             caps[k].setEllipsize(android.text.TextUtils.TruncateAt.END);
             caps[k].setPadding(Ui.dp(4), 0, Ui.dp(4), 0);
+            Ui.shrinkToWidth(caps[k], 8f);
             FrameLayout.LayoutParams cl = new FrameLayout.LayoutParams(Ui.dp(half), ViewGroup.LayoutParams.WRAP_CONTENT);
             cl.leftMargin = Ui.dp(x);
             cl.topMargin = Ui.dp(y + 75);
@@ -443,7 +444,7 @@ final class ControlCenter {
         btCap = caps[1];
         sleepCap = caps[2];
         photoCap = caps[3];
-        photoCap.setText("Photo mode");
+        photoCap.setText(act.getString(R.string.photo_mode));
 
         // 1x2: volume
         volume = place(new Slider(a), 2, 0, 1, 2);
@@ -471,7 +472,7 @@ final class ControlCenter {
         // 2x1: inputs
         FrameLayout inputs = place(module(a), 0, 2, 2, 1);
         TextView il = Ui.caps(a, 7, 0x8CFFFFFF, 0.24f);
-        il.setText("INPUTS");
+        il.setText(act.getString(R.string.inputs));
         FrameLayout.LayoutParams ill = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         ill.leftMargin = Ui.dp(14);
         ill.topMargin = Ui.dp(10);
@@ -484,8 +485,8 @@ final class ControlCenter {
         sl.topMargin = Ui.dp(25);
         inputs.addView(segments, sl);
 
-        picture = place(button(a, R.drawable.ic_picture, "Picture"), 2, 2, 1, 1);
-        sound = place(button(a, R.drawable.ic_volume, "Sound"), 3, 2, 1, 1);
+        picture = place(button(a, R.drawable.ic_picture, act.getString(R.string.picture)), 2, 2, 1, 1);
+        sound = place(button(a, R.drawable.ic_volume, act.getString(R.string.sound)), 3, 2, 1, 1);
 
         // 1x1: memory, with a ring; OK shows recent apps, where they're closed (a "boost" that kills
         // apps from a launcher is refused by Android 11 and later anyway)
@@ -498,7 +499,7 @@ final class ControlCenter {
         ring = boost.tint(new Ring(a, boost), 1f);
         bc.addView(ring, new LinearLayout.LayoutParams(Ui.dp(34), Ui.dp(34)));
         boostValue = boost.tint(Ui.text(a, 10, Ui.medium, 0xFFFFFFFF), 0.9f);
-        bc.addView(boostValue, lp(0, 6));
+        bc.addView(boostValue, fill(lp(0, 6), boostValue, 8f));
         boost.addView(bc, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         // 1x1: your day
@@ -510,12 +511,12 @@ final class ControlCenter {
         todayValue.setLetterSpacing(-0.03f);
         tc.addView(todayValue, lp(0, 0));
         TextView tcap = Ui.text(a, 9, Ui.medium, 0x99FFFFFF);
-        tcap.setText("in apps today");
-        tc.addView(tcap, lp(0, 4));
+        tcap.setText(act.getString(R.string.in_apps_today));
+        tc.addView(tcap, fill(lp(0, 4), tcap, 7f));
         today.addView(tc, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        settings = place(button(a, R.drawable.ic_settings, "Settings"), 2, 3, 1, 1);
-        standby = place(button(a, R.drawable.ic_power, "Standby"), 3, 3, 1, 1);
+        settings = place(button(a, R.drawable.ic_settings, act.getString(R.string.settings)), 2, 3, 1, 1);
+        standby = place(button(a, R.drawable.ic_power, act.getString(R.string.standby)), 3, 3, 1, 1);
         focusables.addAll(Arrays.asList(picture, sound, boost, settings, standby, pick, vpnPill, nowCard));
         focusables.addAll(Arrays.asList(noteRows));
 
@@ -542,6 +543,15 @@ final class ControlCenter {
 
     private static int span(int n) {
         return n * U + (n - 1) * G;
+    }
+
+    /** A label across its whole tile, centred, shrinking to fit there rather than running past the edge. */
+    private static LinearLayout.LayoutParams fill(LinearLayout.LayoutParams p, TextView t, float minSp) {
+        p.width = ViewGroup.LayoutParams.MATCH_PARENT;
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(Ui.dp(6), t.getPaddingTop(), Ui.dp(6), t.getPaddingBottom());
+        Ui.shrinkToWidth(t, minSp);
+        return p;
     }
 
     private static LinearLayout.LayoutParams lp(int left, int top) {
@@ -590,7 +600,7 @@ final class ControlCenter {
             t.setSingleLine(true);
             t.setEllipsize(android.text.TextUtils.TruncateAt.END);
             t.setGravity(Gravity.CENTER);
-            l.addView(t, lp(0, 2));
+            l.addView(t, fill(lp(0, 2), t, 6.5f));
         }
         if (!android.text.TextUtils.equals(t.getText(), line)) t.setText(line);
         t.setVisibility(line == null || line.isEmpty() ? View.GONE : View.VISIBLE);
@@ -658,10 +668,10 @@ final class ControlCenter {
             if (best == null) return null;
             int t = best.getType();
             String where = t == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ? "Bluetooth"
-                    : t == 29 ? "Soundbar · eARC" : t == android.media.AudioDeviceInfo.TYPE_HDMI_ARC ? "Soundbar · ARC"
-                    : t == android.media.AudioDeviceInfo.TYPE_LINE_DIGITAL ? "Optical"
+                    : t == 29 ? act.getString(R.string.soundbar_earc) : t == android.media.AudioDeviceInfo.TYPE_HDMI_ARC ? act.getString(R.string.soundbar_arc)
+                    : t == android.media.AudioDeviceInfo.TYPE_LINE_DIGITAL ? act.getString(R.string.optical)
                     : t == android.media.AudioDeviceInfo.TYPE_HDMI ? "HDMI"
-                    : t == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ? "TV speakers" : "USB audio";
+                    : t == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ? act.getString(R.string.tv_speakers) : act.getString(R.string.usb_audio);
             java.util.Set<Integer> enc = new java.util.HashSet<>();
             for (int e : best.getEncodings()) enc.add(e);
             String format = enc.contains(18 /* E-AC-3 JOC: Dolby Atmos */) ? "Atmos"
@@ -689,7 +699,7 @@ final class ControlCenter {
             vpnPill.setVisibility(View.GONE);
             return;
         }
-        vpnText.setText("VPN  ·  " + (on ? "Connected" : "Off") + (name != null ? "  ·  " + name : ""));
+        vpnText.setText("VPN  ·  " + (on ? act.getString(R.string.connected) : act.getString(R.string.off)) + (name != null ? "  ·  " + name : ""));
         vpnText.setAlpha(on ? 1f : 0.75f);
         vpnPill.setVisibility(View.VISIBLE);
     }
@@ -709,12 +719,12 @@ final class ControlCenter {
     private void nextVpn() {
         List<String> apps = Vpn.apps(act);
         if (apps.size() < 2) {
-            host.hud(R.drawable.ic_vpn, apps.isEmpty() ? "No VPN app on this TV" : "Your VPN app is " + Vpn.label(act, apps.get(0)));
+            host.hud(R.drawable.ic_vpn, apps.isEmpty() ? act.getString(R.string.no_vpn_app_on_this) : act.getString(R.string.your_vpn_app_is, Vpn.label(act, apps.get(0))));
             return;
         }
         String next = apps.get((apps.indexOf(Vpn.chosen(act, apps)) + 1) % apps.size());
         Vpn.choose(act, next);
-        host.hud(R.drawable.ic_vpn, "VPN app: " + Vpn.label(act, next));
+        host.hud(R.drawable.ic_vpn, act.getString(R.string.vpn_app_name, Vpn.label(act, next)));
         refreshVpn();
     }
 
@@ -807,11 +817,11 @@ final class ControlCenter {
         if (k >= notesShown.size()) return;
         MediaWatch.Note n = notesShown.get(k);
         if (!n.clearable) {
-            host.hud(R.drawable.ic_info, "This one stays until its app clears it");
+            host.hud(R.drawable.ic_info, act.getString(R.string.this_one_stays_until_its));
             return;
         }
         MediaWatch.dismiss(n.key);
-        host.hud(R.drawable.ic_check, "Dismissed");
+        host.hud(R.drawable.ic_check, act.getString(R.string.dismissed));
     }
 
     private static Pad button(Context c, int iconRes, String label) {
@@ -824,7 +834,7 @@ final class ControlCenter {
         l.addView(p.tint(icon(c, iconRes), 1f), new LinearLayout.LayoutParams(Ui.dp(23), Ui.dp(23)));
         TextView t = p.tint(Ui.text(c, 10, Ui.medium, 0xFFFFFFFF), 0.9f);
         t.setText(label);
-        l.addView(t, lp(0, 8));
+        l.addView(t, fill(lp(0, 8), t, 7.5f));
         p.addView(l, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         return p;
     }
@@ -1056,7 +1066,7 @@ final class ControlCenter {
             final boolean online = Compat.onWifi(Compat.svc(act, ConnectivityManager.class), true);
             BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
             final boolean btOn = ba != null && ba.isEnabled();
-            final String btName = btOn ? btSheet.connectedName() : "Bluetooth off";
+            final String btName = btOn ? btSheet.connectedName() : act.getString(R.string.bluetooth_off);
             final ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
             Compat.svc(act, ActivityManager.class).getMemoryInfo(mi);
             act.runOnUiThread(() -> {
@@ -1068,7 +1078,7 @@ final class ControlCenter {
                 for (java.util.Map.Entry<String, Object[]> e : faces.entrySet()) if (!appFaces.containsKey(e.getKey())) appFaces.put(e.getKey(), e.getValue());
                 showNotes(notes);
                 wifi.setOn(online);
-                wifiCap.setText(online ? "Wi-Fi" : "Offline");
+                wifiCap.setText(online ? act.getString(R.string.wi_fi) : act.getString(R.string.offline));
                 bt.setOn(btOn);
                 btCap.setText(btName);
                 showMemory(mi);
@@ -1080,15 +1090,15 @@ final class ControlCenter {
     void tick(Calendar now) {
         boolean h24 = DateFormat.is24HourFormat(act);
         String t = new SimpleDateFormat(h24 ? "H:mm" : "h:mm", Locale.getDefault()).format(now.getTime());
-        time.setText(h24 ? t : t + (now.get(Calendar.AM_PM) == Calendar.AM ? " AM" : " PM"));
-        date.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now.getTime()));
+        time.setText(h24 ? t : t + " " + new java.text.DateFormatSymbols().getAmPmStrings()[now.get(Calendar.AM_PM)]);
+        date.setText(Words.date("EEEE, d MMMM", now.getTimeInMillis()));
         refreshSleep();
     }
 
     private void refreshSleep() {
         long left = Power.sleepLeftMs(act);
         sleep.setOn(left > 0);
-        sleepCap.setText(left <= 0 ? "Sleep timer" : (Power.atEnd(act) ? "At the end · " : "Sleep in ") + duration((int) Math.ceil(left / 60_000.0)));
+        sleepCap.setText(left <= 0 ? act.getString(R.string.sleep_timer) : act.getString(Power.atEnd(act) ? R.string.at_the_end_value : R.string.sleep_in_value, duration((int) Math.ceil(left / 60_000.0))));
     }
 
     private void refreshMemory() {
@@ -1099,7 +1109,7 @@ final class ControlCenter {
 
     private void showMemory(ActivityManager.MemoryInfo mi) {
         ring.set(mi.totalMem > 0 ? mi.availMem / (float) mi.totalMem : 0f);
-        boostValue.setText(mi.availMem / (1024 * 1024) + " MB free");
+        boostValue.setText(act.getString(R.string.mb_free, mi.availMem / (1024 * 1024)));
     }
 
     /** Sky and day, read off-thread: sun times, the light outside, time spent in apps. */
@@ -1118,17 +1128,17 @@ final class ControlCenter {
             long today = Habits.todayMs(act);
             java.text.DateFormat tf = DateFormat.getTimeFormat(act);
             final String ph = Sun.label(Sun.phase(now));
-            final String evName = up ? "SUNSET" : "SUNRISE";
+            final String evName = up ? act.getString(R.string.sunset) : act.getString(R.string.sunrise);
             final String evTime = next > 0 ? tf.format(new Date(next)).toUpperCase(Locale.getDefault()) : "–";
             final String oth = after > 0 ? (up ? "↑ " : "↓ ") + tf.format(new Date(after)).toUpperCase(Locale.getDefault()) : "";
             final String day = today >= 0 ? compact(today) : "–";
             int fresh = Gallery.walls(act).size();
             Weather.Now wx = Weather.now(act);
-            String outside = wx == null ? "" : wx.temp + "° and " + wx.condition().toLowerCase(Locale.ROOT)
-                    + (wx.city.isEmpty() ? "" : " in " + wx.city) + ". ";
-            final String line = outside + "Photos follow the " + ph.toLowerCase(Locale.ROOT) + " outside."
-                    + (fresh > 0 ? "\n" + fresh + (fresh == 1 ? " fresh photo" : " fresh photos") + " on the wall, none shown twice." : "")
-                    + (today >= 0 ? "\n" + Habits.duration(today) + " in apps today." : "");
+            String outside = wx == null ? "" : (wx.city.isEmpty() ? act.getString(R.string.outside_weather, wx.temp, Words.inSentence(wx.condition()))
+                    : act.getString(R.string.outside_weather_in, wx.temp, Words.inSentence(wx.condition()), wx.city)) + " ";
+            final String line = outside + Sun.photosFollow(Sun.phase(now))
+                    + (fresh > 0 ? "\n" + act.getResources().getQuantityString(R.plurals.fresh_photos_on_the_wall, fresh, fresh) : "")
+                    + (today >= 0 ? "\n" + act.getString(R.string.duration_in_apps_today, Habits.duration(today)) : "");
             preparePick();
             act.runOnUiThread(() -> {
                 if (shownPick == null) showPick(); // first time: no need to wait for the next opening
@@ -1169,7 +1179,7 @@ final class ControlCenter {
         pickPoster.setImageBitmap(nextPoster);
         pickName.setText(p.name);
         pickLine.setText(p.line);
-        pickKicker.setText("TONIGHT'S PICK  ·  " + p.src.toUpperCase(Locale.ROOT));
+        pickKicker.setText(act.getString(R.string.tonights_pick_caps) + "  ·  " + p.src.toUpperCase(Locale.ROOT));
         pickAbout.setText(p.about);
         pickAbout.setVisibility(p.about.isEmpty() ? View.GONE : View.VISIBLE);
         // a song on takes its place, and the tvOS style has no room for it
@@ -1281,20 +1291,20 @@ final class ControlCenter {
 
     private void standby() {
         host.closeCc(false);
-        if (!Power.screenOff(act)) host.hud(R.drawable.ic_info, "Standby needs setup · Settings, Set up on this TV");
+        if (!Power.screenOff(act)) host.hud(R.drawable.ic_info, act.getString(R.string.standby_needs_setup_settings_set));
     }
 
     private void cycleSleep() {
         long left = Power.sleepLeftMs(act);
         // with no way to switch the TV off, a timer would only fade the sound out and leave it on
         if (left <= 0 && !Power.canSleep(act)) {
-            host.hud(R.drawable.ic_info, "The sleep timer needs setup · Settings, Set up on this TV");
+            host.hud(R.drawable.ic_info, act.getString(R.string.the_sleep_timer_needs_setup));
             return;
         }
         // first, when something with an end is playing: sleep when it ends
         if (left <= 0 && Power.setSleepAtEnd(act)) {
             refreshSleep();
-            host.hud(R.drawable.ic_moon, "TV sleeps when this ends · in " + duration((int) Math.ceil(Power.sleepLeftMs(act) / 60_000.0)));
+            host.hud(R.drawable.ic_moon, act.getString(R.string.tv_sleeps_when_this_ends, duration((int) Math.ceil(Power.sleepLeftMs(act) / 60_000.0))));
             return;
         }
         // from "when this ends", on to the usual steps
@@ -1309,12 +1319,11 @@ final class ControlCenter {
         if (cur >= SLEEP_STEPS[SLEEP_STEPS.length - 1]) next = 0;
         Power.setSleep(act, next);
         refreshSleep();
-        host.hud(R.drawable.ic_moon, next == 0 ? "Sleep timer off" : "TV will fade out and sleep in " + duration(next));
+        host.hud(R.drawable.ic_moon, next == 0 ? act.getString(R.string.sleep_timer_off) : act.getString(R.string.tv_will_fade_out_and_sleep, duration(next)));
     }
 
     private static String duration(int min) {
-        if (min < 60) return min + " min";
-        return min % 60 == 0 ? (min / 60) + " h" : (min / 60) + " h " + (min % 60) + " min";
+        return Words.minutes(min);
     }
 
     // ---- widgets -----------------------------------------------------------------------------

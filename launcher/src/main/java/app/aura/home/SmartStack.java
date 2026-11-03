@@ -263,10 +263,10 @@ final class SmartStack extends FrameLayout {
             head.addView(icon, il);
             kicker = Ui.caps(c, 7.5f, 0xD9FFFFFF, 0.22f);
             kicker.setShadowLayer(0, 0, 0, 0);
-            kicker.setEllipsize(TextUtils.TruncateAt.END);
+            Ui.shrinkToWidth(kicker, 6f);
             head.addView(kicker, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             badge = Ui.text(c, 7, Ui.heavy, 0xFF15171B);
-            badge.setText("NEW");
+            badge.setText(R.string.new_badge);
             badge.setLetterSpacing(0.14f);
             badge.setPadding(Ui.dp(6), Ui.dp(2), Ui.dp(6), Ui.dp(2));
             GradientDrawable pill = new GradientDrawable();

@@ -11,7 +11,11 @@ public class AuraApp extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        Words.init(this);
         Trouble.init(this);
         Safety.watch(this);
+        // phones and computers can play on the TV whenever Aura's process runs (the Home button
+        // service keeps it running), not only while home is on screen
+        Renderer.apply(this);
     }
 }

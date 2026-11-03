@@ -62,11 +62,13 @@ final class Picks {
 
     /** A genre as Settings offers it, with TVmaze's names for it (genres or show types) and TMDB's film and series ids (0: none). */
     static final class Genre {
-        final String id, name;
+        final String id;
+        /** Its name on screen, a string resource. */
+        final int name;
         final String[] maze;
         final int film, show;
 
-        Genre(String id, String name, int film, int show, String... maze) {
+        Genre(String id, int name, int film, int show, String... maze) {
             this.id = id;
             this.name = name;
             this.film = film;
@@ -76,36 +78,39 @@ final class Picks {
     }
 
     static final Genre[] GENRES = {
-            new Genre("action", "Action", 28, 10759, "Action"),
-            new Genre("adventure", "Adventure", 12, 10759, "Adventure"),
-            new Genre("animation", "Animation", 16, 16, "Anime", "Animation"),
-            new Genre("comedy", "Comedy", 35, 35, "Comedy"),
-            new Genre("crime", "Crime", 80, 80, "Crime", "Legal"),
-            new Genre("documentary", "Documentary", 99, 99, "Documentary"),
-            new Genre("drama", "Drama", 18, 18, "Drama", "Medical"),
-            new Genre("family", "Family and kids", 10751, 10762, "Family", "Children"),
-            new Genre("fantasy", "Fantasy", 14, 10765, "Fantasy", "Supernatural"),
-            new Genre("history", "History", 36, 10768, "History"),
-            new Genre("horror", "Horror", 27, 0, "Horror"),
-            new Genre("music", "Music", 10402, 0, "Music"),
-            new Genre("mystery", "Mystery", 9648, 9648, "Mystery"),
-            new Genre("reality", "Reality", 0, 10764, "Reality"),
-            new Genre("romance", "Romance", 10749, 0, "Romance"),
-            new Genre("scifi", "Sci-fi", 878, 10765, "Science-Fiction"),
-            new Genre("thriller", "Thriller", 53, 9648, "Thriller", "Espionage"),
-            new Genre("war", "War", 10752, 10768, "War"),
-            new Genre("western", "Western", 37, 37, "Western"),
+            new Genre("action", R.string.genre_action, 28, 10759, "Action"),
+            new Genre("adventure", R.string.genre_adventure, 12, 10759, "Adventure"),
+            new Genre("animation", R.string.genre_animation, 16, 16, "Anime", "Animation"),
+            new Genre("comedy", R.string.genre_comedy, 35, 35, "Comedy"),
+            new Genre("crime", R.string.genre_crime, 80, 80, "Crime", "Legal"),
+            new Genre("documentary", R.string.genre_documentary, 99, 99, "Documentary"),
+            new Genre("drama", R.string.genre_drama, 18, 18, "Drama", "Medical"),
+            new Genre("family", R.string.genre_family, 10751, 10762, "Family", "Children"),
+            new Genre("fantasy", R.string.genre_fantasy, 14, 10765, "Fantasy", "Supernatural"),
+            new Genre("history", R.string.genre_history, 36, 10768, "History"),
+            new Genre("horror", R.string.genre_horror, 27, 0, "Horror"),
+            new Genre("music", R.string.genre_music, 10402, 0, "Music"),
+            new Genre("mystery", R.string.genre_mystery, 9648, 9648, "Mystery"),
+            new Genre("reality", R.string.genre_reality, 0, 10764, "Reality"),
+            new Genre("romance", R.string.genre_romance, 10749, 0, "Romance"),
+            new Genre("scifi", R.string.genre_scifi, 878, 10765, "Science-Fiction"),
+            new Genre("thriller", R.string.genre_thriller, 53, 9648, "Thriller", "Espionage"),
+            new Genre("war", R.string.genre_war, 10752, 10768, "War"),
+            new Genre("western", R.string.genre_western, 37, 37, "Western"),
     };
 
     static final String KIND = "pick_kind", GENRE_LIST = "pick_genres", RATING = "pick_rating", ERA = "pick_era",
             SOURCE = "pick_source", MY_APPS = "pick_my_apps", KEY = "tmdb_key", SESSION = "tmdb_session",
             ACCOUNT = "tmdb_account", USER = "tmdb_user";
     private static final String MADE_FOR = "pick_made_for", COUNT = "pick_count";
-    static final String[] KINDS = {"shows", "films", "both"}, KIND_NAMES = {"Shows", "Films", "Films and shows"};
-    static final String[] SOURCES = {"top", "trending", "watchlist"}, SOURCE_NAMES = {"Top rated", "Trending this week", "Your TMDB watchlist"};
+    static final String[] KINDS = {"shows", "films", "both"};
+    static final int[] KIND_NAMES = {R.string.kind_shows, R.string.kind_films, R.string.kind_both},
+            KIND_WORDS = {R.string.kind_shows_word, R.string.kind_films_word, R.string.kind_both_word};
+    static final String[] SOURCES = {"top", "trending", "watchlist"};
+    static final int[] SOURCE_NAMES = {R.string.source_top, R.string.source_trending, R.string.your_tmdb_watchlist};
     static final float[] RATINGS = {6.5f, 7f, 7.5f, 8f, 8.5f};
-    static final String[] ERAS = {"any", "2020", "2010", "2000", "classic"},
-            ERA_NAMES = {"Any year", "From 2020", "From 2010", "From 2000", "Before 2000"};
+    static final String[] ERAS = {"any", "2020", "2010", "2000", "classic"};
+    static final int[] ERA_NAMES = {R.string.era_any, R.string.era_2020, R.string.era_2010, R.string.era_2000, R.string.era_classic};
 
     /** Streaming apps and their TMDB watch provider ids, for "only what's on my apps". */
     private static final String[][] PROVIDERS = {
@@ -190,13 +195,27 @@ final class Picks {
         prefs(c).edit().putString(GENRE_LIST, b.toString()).apply();
     }
 
+    /** Why a pick is on the card ("TOP RATED"), kept in English in the pool, in the TV's language. */
+    static String why(Context c, String why) {
+        switch (why) {
+            case "ON YOUR APPS":
+                return c.getString(R.string.why_on_your_apps);
+            case "TRENDING THIS WEEK":
+                return c.getString(R.string.why_trending);
+            case "ON YOUR WATCHLIST":
+                return c.getString(R.string.why_watchlist);
+            default:
+                return c.getString(R.string.why_top_rated);
+        }
+    }
+
     /** "Any", or the chosen genres by name: "Drama, Crime +2". */
     static String genreSummary(Context c) {
         List<String> names = new ArrayList<>();
         Set<String> g = genres(c);
-        for (Genre x : GENRES) if (g.contains(x.id)) names.add(x.name);
-        if (names.isEmpty()) return "Any";
-        return names.size() <= 2 ? android.text.TextUtils.join(", ", names) : names.get(0) + ", " + names.get(1) + " +" + (names.size() - 2);
+        for (Genre x : GENRES) if (g.contains(x.id)) names.add(c.getString(x.name));
+        if (names.isEmpty()) return c.getString(R.string.any_genre_short);
+        return names.size() <= 2 ? android.text.TextUtils.join(", ", names) : c.getString(R.string.genres_more, names.get(0), names.get(1), names.size() - 2);
     }
 
     /** Everything the pool depends on, in one line: a pool made for another taste is made again. */
@@ -204,7 +223,9 @@ final class Picks {
         List<String> g = new ArrayList<>(genres(c));
         Collections.sort(g);
         return kind(c) + "|" + source(c) + "|" + g + "|" + rating(c) + "|" + era(c) + "|" + myApps(c) + "|" + tmdb(c)
-                + "|" + prefs(c).getString(ACCOUNT, "");
+                + "|" + prefs(c).getString(ACCOUNT, "")
+                // the cards are written in the TV's language: another language makes them again
+                + "|" + Locale.getDefault().getLanguage();
     }
 
     /** How many picks the pool holds now (-1 before the first is made). */
@@ -484,13 +505,13 @@ final class Picks {
         String why = providers.isEmpty() ? "TOP RATED" : "ON YOUR APPS";
         List<JSONObject> out = new ArrayList<>();
         JSONObject first = json(get(q + "&page=1", c));
-        add(out, first, type, why, null, null);
+        add(c, out, first, type, why, null, null);
         // a few more pages, picked at random, so the pool isn't the same top thirty every week
         int pages = Math.min(first.optInt("total_pages", 1), 15);
         List<Integer> more = new ArrayList<>();
         for (int p = 2; p <= pages; p++) more.add(p);
         Collections.shuffle(more);
-        for (int i = 0; i < Math.min(2, more.size()); i++) add(out, json(get(q + "&page=" + more.get(i), c)), type, why, null, null);
+        for (int i = 0; i < Math.min(2, more.size()); i++) add(c, out, json(get(q + "&page=" + more.get(i), c)), type, why, null, null);
         return out;
     }
 
@@ -503,7 +524,7 @@ final class Picks {
         for (String s : ids.split("\\|")) if (!s.isEmpty()) want.add(Integer.parseInt(s));
         List<JSONObject> out = new ArrayList<>();
         for (int page = 1; page <= 3; page++) {
-            add(out, json(get(TMDB + "/trending/" + type + "/week?language=" + language() + "&page=" + page, c)), type,
+            add(c, out, json(get(TMDB + "/trending/" + type + "/week?language=" + language() + "&page=" + page, c)), type,
                     "TRENDING THIS WEEK", want, years(c));
         }
         return out;
@@ -517,14 +538,14 @@ final class Picks {
         for (int page = 1; page <= 3; page++) {
             JSONObject r = json(get(TMDB + "/account/" + account + "/watchlist/" + (type.equals("movie") ? "movies" : "tv")
                     + "?session_id=" + enc(session) + "&language=" + language() + "&sort_by=created_at.desc&page=" + page, c));
-            add(out, r, type, "ON YOUR WATCHLIST", null, null);
+            add(c, out, r, type, "ON YOUR WATCHLIST", null, null);
             if (page >= r.optInt("total_pages", 1)) break;
         }
         return out;
     }
 
     /** TMDB's results, each as a pick; with {@code want}/{@code yr}, only those in those genres and years. */
-    private static void add(List<JSONObject> out, JSONObject page, String type, String why, Set<Integer> want, int[] yr) throws JSONException {
+    private static void add(Context c, List<JSONObject> out, JSONObject page, String type, String why, Set<Integer> want, int[] yr) throws JSONException {
         JSONArray rs = page.optJSONArray("results");
         boolean film = type.equals("movie");
         for (int i = 0; rs != null && i < rs.length(); i++) {
@@ -541,12 +562,12 @@ final class Picks {
             }
             String name = r.optString(film ? "title" : "name");
             StringBuilder line = new StringBuilder();
-            line.append(film ? "Film" : "Series");
+            line.append(c.getString(film ? R.string.pick_film : R.string.pick_series));
             double vote = r.optDouble("vote_average", 0);
             if (vote > 0) line.append(String.format(Locale.ROOT, "  ·  ★ %.1f", vote));
             int shown = 0;
             for (int k = 0; g != null && k < g.length() && shown < 2; k++) {
-                String gn = genreName(g.optInt(k), film);
+                String gn = genreName(c, g.optInt(k), film);
                 if (gn != null) {
                     line.append("  ·  ").append(gn);
                     shown++;
@@ -601,8 +622,8 @@ final class Picks {
         return ids.isEmpty() ? null : android.text.TextUtils.join("|", ids);
     }
 
-    private static String genreName(int id, boolean film) {
-        for (Genre x : GENRES) if ((film ? x.film : x.show) == id) return x.name;
+    private static String genreName(Context c, int id, boolean film) {
+        for (Genre x : GENRES) if ((film ? x.film : x.show) == id) return c.getString(x.name);
         return null;
     }
 

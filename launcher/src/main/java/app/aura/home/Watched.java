@@ -182,7 +182,7 @@ final class Watched {
             long left = Math.max(1, (length - position) / 60_000);
             String by = o.optString("by", "");
             it.sub = (by.isEmpty() || by.equalsIgnoreCase(title) ? "" : by + "  ·  ")
-                    + (left < 60 ? left + " min left" : String.format(Locale.ROOT, "%d h %d min left", left / 60, left % 60));
+                    + (left < 60 ? Words.get(R.string.min_left, left) : Words.get(R.string.h_min_left, left / 60, left % 60));
             String pic = o.optString("art", "");
             if (!pic.isEmpty()) {
                 BitmapFactory.Options opt = new BitmapFactory.Options();

@@ -402,32 +402,32 @@ final class Adb {
     static String[][] setup(Context c) {
         String p = c.getPackageName();
         List<String[]> s = new ArrayList<>();
-        if (Build.VERSION.SDK_INT >= 24) s.add(new String[]{"Home", "cmd package set-home-activity " + p + "/" + HomeActivity.class.getName()});
+        if (Build.VERSION.SDK_INT >= 24) s.add(new String[]{c.getString(R.string.home), "cmd package set-home-activity " + p + "/" + HomeActivity.class.getName()});
         // Google TV and Fire TV keep Home for their own launcher regardless: the Home button service takes it
-        if (HomeRole.stubborn(c) && !HomeKeys.on(c)) s.add(new String[]{"Home button", HomeKeys.enableCommand(c)});
+        if (HomeRole.stubborn(c) && !HomeKeys.on(c)) s.add(new String[]{c.getString(R.string.home_button), HomeKeys.enableCommand(c)});
         // Android 13+ greys out the Accessibility switch of an app installed from a file ("restricted
         // setting"); this lifts it, so the Home button can be switched by hand later too
-        if (Build.VERSION.SDK_INT >= 33) s.add(new String[]{"Accessibility", "appops set " + p + " ACCESS_RESTRICTED_SETTINGS allow"});
-        s.add(new String[]{"Block ads, animations", "pm grant " + p + " android.permission.WRITE_SECURE_SETTINGS"});
-        s.add(new String[]{"Wi-Fi name", "pm grant " + p + " android.permission.DUMP"});
+        if (Build.VERSION.SDK_INT >= 33) s.add(new String[]{c.getString(R.string.accessibility), "appops set " + p + " ACCESS_RESTRICTED_SETTINGS allow"});
+        s.add(new String[]{c.getString(R.string.block_ads_animations), "pm grant " + p + " android.permission.WRITE_SECURE_SETTINGS"});
+        s.add(new String[]{c.getString(R.string.wi_fi_name), "pm grant " + p + " android.permission.DUMP"});
         // the firmware takes the remote's profile button for Google TV's picker: the log is how Aura knows
-        if (Safety.hasGoogleTvHome(c)) s.add(new String[]{"Profile button", "pm grant " + p + " android.permission.READ_LOGS"});
-        s.add(new String[]{"Memory", "pm grant " + p + " android.permission.PACKAGE_USAGE_STATS"});
-        s.add(new String[]{"Smart Stack, Today", "appops set " + p + " GET_USAGE_STATS allow"});
-        if (Build.VERSION.SDK_INT >= 23) s.add(new String[]{"Wi-Fi sheet", "pm grant " + p + " android.permission.ACCESS_FINE_LOCATION"});
-        if (Build.VERSION.SDK_INT >= 23) s.add(new String[]{"Continue watching", "pm grant " + p + " android.permission.READ_TV_LISTINGS"});
+        if (Safety.hasGoogleTvHome(c)) s.add(new String[]{c.getString(R.string.profile_button), "pm grant " + p + " android.permission.READ_LOGS"});
+        s.add(new String[]{c.getString(R.string.memory), "pm grant " + p + " android.permission.PACKAGE_USAGE_STATS"});
+        s.add(new String[]{c.getString(R.string.smart_stack_today), "appops set " + p + " GET_USAGE_STATS allow"});
+        if (Build.VERSION.SDK_INT >= 23) s.add(new String[]{c.getString(R.string.wi_fi_sheet), "pm grant " + p + " android.permission.ACCESS_FINE_LOCATION"});
+        if (Build.VERSION.SDK_INT >= 23) s.add(new String[]{c.getString(R.string.continue_watching), "pm grant " + p + " android.permission.READ_TV_LISTINGS"});
         // "cmd notification allow_listener" arrived in Android 8.1: before it (Fire OS 6 is 7.1) this
         // step always failed and Now playing never came on. There, Aura joins the list itself
-        if (Build.VERSION.SDK_INT >= 27) s.add(new String[]{"Now playing", "cmd notification allow_listener " + p + "/" + MediaWatch.class.getName()});
-        else s.add(new String[]{"Now playing", MediaWatch.enableCommand(c)});
-        s.add(new String[]{"Standby", "dpm set-active-admin --user 0 " + p + "/" + SleepAdmin.class.getName()});
-        s.add(new String[]{"Screensaver", "settings put secure screensaver_components " + p + "/" + Ambient.class.getName()});
+        if (Build.VERSION.SDK_INT >= 27) s.add(new String[]{c.getString(R.string.now_playing), "cmd notification allow_listener " + p + "/" + MediaWatch.class.getName()});
+        else s.add(new String[]{c.getString(R.string.now_playing), MediaWatch.enableCommand(c)});
+        s.add(new String[]{c.getString(R.string.standby), "dpm set-active-admin --user 0 " + p + "/" + SleepAdmin.class.getName()});
+        s.add(new String[]{c.getString(R.string.screensaver), "settings put secure screensaver_components " + p + "/" + Ambient.class.getName()});
         // the slowest: Aura compiled ahead of time opens and scrolls quicker
-        if (Build.VERSION.SDK_INT >= 31) s.add(new String[]{"Bluetooth", "pm grant " + p + " android.permission.BLUETOOTH_CONNECT"});
-        if (Build.VERSION.SDK_INT >= 24) s.add(new String[]{"Speed", "cmd package compile -m speed -f " + p});
+        if (Build.VERSION.SDK_INT >= 31) s.add(new String[]{c.getString(R.string.bluetooth), "pm grant " + p + " android.permission.BLUETOOTH_CONNECT"});
+        if (Build.VERSION.SDK_INT >= 24) s.add(new String[]{c.getString(R.string.adb_speed), "cmd package compile -m speed -f " + p});
         // very last, and only when needed: Android restarts an app whose permission to install changes
         if (Build.VERSION.SDK_INT >= 26 && !c.getPackageManager().canRequestPackageInstalls()) {
-            s.add(new String[]{"Updates", "appops set " + p + " REQUEST_INSTALL_PACKAGES allow"});
+            s.add(new String[]{c.getString(R.string.updates), "appops set " + p + " REQUEST_INSTALL_PACKAGES allow"});
         }
         return s.toArray(new String[0][]);
     }
@@ -454,7 +454,7 @@ final class Adb {
             List<String> failed = new ArrayList<>();
             for (int i = 0; i < steps.length; i++) {
                 p.step(i, steps.length, steps[i][0]);
-                if (i == steps.length - 1 && steps[i][0].equals("Updates")) p.restarting(ok + 1, steps.length, failed);
+                if (i == steps.length - 1 && steps[i][1].contains("REQUEST_INSTALL_PACKAGES")) p.restarting(ok + 1, steps.length, failed);
                 List<String> out = run(app, steps[i][1]);
                 String o = out == null ? null : out.get(0);
                 // pm and settings say nothing when it works; the rest print Success; "already" is fine too

@@ -46,16 +46,24 @@ final class Welcome extends FrameLayout {
         void homeHint(String text);
     }
 
-    /** Pref key, label, what it does, preview, what to refresh. */
+    /** Pref key, preview, what to refresh; with its label and what it does from FEATURE_WORDS. */
     private static final String[][] FEATURES = {
-            {Prefs.TOP_SHELF, "App cards", "Rest on an app and its shows line up above it, ready to play. Off for only apps.", "shelf", "shelf"},
-            {Prefs.PARALLAX, "Parallax icons", "Tiles tilt toward you and catch the light as you move between them.", "parallax", "parallax"},
-            {Prefs.STACK_AUTO, "Smart Stack", "Continue watching, new episodes and tonight's pick, turning on their own.", "stack", "stack"},
-            {Prefs.WEATHER, "Weather", "The temperature and the sky in the corner; open the Sky widget for the hours and the week ahead.", "weather", "weather"},
-            {Prefs.DAILY, "Fresh HD photographs", "New 4K photographs on your wall every day, never the same one twice.", "daily", "daily"},
-            {Prefs.PICKS, "Tonight's pick", "A film or show worth your evening, chosen fresh each day.", "picks", "picks"},
+            {Prefs.TOP_SHELF, "shelf", "shelf"},
+            {Prefs.PARALLAX, "parallax", "parallax"},
+            {Prefs.STACK_AUTO, "stack", "stack"},
+            {Prefs.WEATHER, "weather", "weather"},
+            {Prefs.DAILY, "daily", "daily"},
+            {Prefs.PICKS, "picks", "picks"},
     };
-    private static final String[] LOOK_LINES = {"Apple TV's icons", "Frosted, over your photo", "Bold colour", "Dark and quiet", "Each app's own banner"};
+    private static final int[][] FEATURE_WORDS = {
+            {R.string.app_cards, R.string.welcome_shelf},
+            {R.string.parallax_icons, R.string.welcome_parallax},
+            {R.string.smart_stack, R.string.welcome_stack},
+            {R.string.weather, R.string.welcome_weather},
+            {R.string.fresh_hd_photographs, R.string.welcome_daily},
+            {R.string.tonights_pick, R.string.welcome_picks},
+    };
+    private static final int[] LOOK_LINES = {R.string.look_tvos, R.string.look_glass, R.string.look_vivid, R.string.look_midnight, R.string.look_original};
 
     private final Activity act;
     private final Backdrop backdrop;
@@ -79,7 +87,11 @@ final class Welcome extends FrameLayout {
         act = a;
         backdrop = b;
         host = h;
-        java.util.Collections.addAll(features, FEATURES);
+        // pref key, label, what it does, preview, what to refresh
+        for (int i = 0; i < FEATURES.length; i++) {
+            String[] f = FEATURES[i];
+            features.add(new String[]{f[0], a.getString(FEATURE_WORDS[i][0]), a.getString(FEATURE_WORDS[i][1]), f[1], f[2]});
+        }
         GlassFrame veil = new GlassFrame(a, b, 0, 0.62f);
         veil.edgeLight = false;
         addView(veil, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -233,21 +245,21 @@ final class Welcome extends FrameLayout {
         col.addView(kicker, wrap(0));
         TextView title = Ui.text(act, 64, Ui.heavy, 0xFFFFFFFF);
         title.setLetterSpacing(-0.045f);
-        title.setText("Welcome home");
+        title.setText(act.getString(R.string.welcome_home));
         col.addView(title, wrap(6));
         TextView body = Ui.text(act, 16, Ui.regular, 0xCCFFFFFF);
         body.setSingleLine(false);
         body.setGravity(Gravity.CENTER_HORIZONTAL);
         body.setMaxWidth(Ui.dp(520));
         body.setLineSpacing(Ui.dpf(4), 1f);
-        body.setText("A calm, quick home for your TV. Three choices and you're in, and everything can be changed later in Settings.");
+        body.setText(act.getString(R.string.a_calm_quick_home_for));
         col.addView(body, wrap(14));
         LinearLayout buttons = new LinearLayout(act);
-        buttons.addView(button("Get started", true, () -> show(8, 1)), wrap(0));
+        buttons.addView(button(act.getString(R.string.get_started), true, () -> show(8, 1)), wrap(0));
         LinearLayout.LayoutParams sl = wrap(0);
         sl.leftMargin = Ui.dp(14);
         // keeping the defaults still passes by the Home button, where Android won't hand Home over itself
-        buttons.addView(button("Keep the defaults", false, () -> {
+        buttons.addView(button(act.getString(R.string.keep_the_defaults), false, () -> {
             if (HomeRole.needsSetup(act)) show(3, 1);
             else finish();
         }), sl);
@@ -259,15 +271,15 @@ final class Welcome extends FrameLayout {
     /** Aura's own home screen, or Apple TV's: each drawn small, with what it's like. */
     private View style() {
         LinearLayout col = column(Gravity.CENTER_HORIZONTAL);
-        col.addView(kicker("STEP 1 OF 3"), wrap(0));
-        col.addView(title("Choose a style"), wrap(6));
-        col.addView(line("Two ways to lay out your home screen. Settings switches between them any time."), wrap(8));
+        col.addView(kicker(act.getString(R.string.step_1_of_3)), wrap(0));
+        col.addView(title(act.getString(R.string.choose_a_style)), wrap(6));
+        col.addView(line(act.getString(R.string.two_ways_to_lay_out)), wrap(8));
         LinearLayout row = new LinearLayout(act);
         row.setClipChildren(false);
         row.setClipToPadding(false);
         String[][] styles = {
-                {"aura", "Aura", "The sky outside, what to watch next and today at a glance, a glass sidebar, then your apps."},
-                {"tvos", "tvOS", "Just your apps on a frosted dock under the photograph, their shows rising above."},
+                {"aura", "Aura", act.getString(R.string.style_aura_about)},
+                {"tvos", "tvOS", act.getString(R.string.style_tvos_about)},
         };
         boolean tvos = Prefs.tvos(act);
         for (String[] st : styles) {
@@ -277,7 +289,7 @@ final class Welcome extends FrameLayout {
             StyleCard card = new StyleCard(act, st[0].equals("tvos"));
             item.addView(card, new LinearLayout.LayoutParams(Ui.dp(304), Ui.dp(171)));
             TextView name = Ui.text(act, 17, Ui.semibold, 0xFFFFFFFF);
-            name.setText((mine ? "✓  " : "") + st[1] + " style");
+            name.setText((mine ? "✓  " : "") + act.getString(R.string.name_style, st[1]));
             item.addView(name, wrap(20));
             TextView sub = Ui.text(act, 12, Ui.regular, 0x99FFFFFF);
             sub.setSingleLine(false);
@@ -305,9 +317,9 @@ final class Welcome extends FrameLayout {
 
     private View look() {
         LinearLayout col = column(Gravity.CENTER_HORIZONTAL);
-        col.addView(kicker("STEP 2 OF 3"), wrap(0));
-        col.addView(title("Choose a look"), wrap(6));
-        col.addView(line("How your apps sit on the glass. OK picks one."), wrap(8));
+        col.addView(kicker(act.getString(R.string.step_2_of_3)), wrap(0));
+        col.addView(title(act.getString(R.string.choose_a_look)), wrap(6));
+        col.addView(line(act.getString(R.string.how_your_apps_sit_on)), wrap(8));
         LinearLayout row = new LinearLayout(act);
         row.setClipChildren(false);
         row.setClipToPadding(false);
@@ -332,7 +344,7 @@ final class Welcome extends FrameLayout {
             }
             item.addView(tile, new LinearLayout.LayoutParams(Ui.dp(152), Ui.dp(86)));
             TextView name = Ui.text(act, 15, Ui.semibold, 0xFFFFFFFF);
-            name.setText((style.equals(current) ? "✓  " : "") + Prefs.TILE_NAMES[i].replace(" banners", ""));
+            name.setText((style.equals(current) ? "✓  " : "") + act.getString(Prefs.TILE_SHORT_NAMES[i]));
             item.addView(name, wrap(20));
             TextView sub = Ui.text(act, 11.5f, Ui.regular, 0x99FFFFFF);
             sub.setText(LOOK_LINES[i]);
@@ -355,8 +367,8 @@ final class Welcome extends FrameLayout {
     private View choices() {
         FrameLayout f = new FrameLayout(act);
         LinearLayout left = column(Gravity.START);
-        left.addView(kicker("STEP 3 OF 3"), wrap(0));
-        left.addView(title("Make it yours"), wrap(6));
+        left.addView(kicker(act.getString(R.string.step_3_of_3)), wrap(0));
+        left.addView(title(act.getString(R.string.make_it_yours)), wrap(6));
         FrameLayout box = new FrameLayout(act);
         box.setBackground(pill(0x26000000, 18));
         box.setClipToOutline(true);
@@ -390,7 +402,7 @@ final class Welcome extends FrameLayout {
                 preview.show(feature[3]);
             });
         }
-        Row next = new Row(act, "Continue");
+        Row next = new Row(act, act.getString(R.string.continue_word));
         next.arrow();
         LinearLayout.LayoutParams nl = rowLp();
         nl.topMargin = Ui.dp(14);
@@ -406,20 +418,20 @@ final class Welcome extends FrameLayout {
 
     private View ready() {
         LinearLayout col = column(Gravity.CENTER_HORIZONTAL);
-        col.addView(title("You're all set"), wrap(0));
-        col.addView(line("Three things worth knowing."), wrap(8));
+        col.addView(title(act.getString(R.string.youre_all_set)), wrap(0));
+        col.addView(line(act.getString(R.string.three_things_worth_knowing)), wrap(8));
         LinearLayout tips = column(Gravity.START);
-        tips.addView(tip("HOME  ×2", "Your recent apps, side by side"), wrap(0));
-        tips.addView(tip("HOLD  OK", "Move an app, hide it, or make a folder"), wrap(14));
-        tips.addView(tip("MENU", "Control Center: Wi-Fi, sound, sleep and more"), wrap(14));
+        tips.addView(tip(act.getString(R.string.home_2), act.getString(R.string.your_recent_apps_side_by)), wrap(0));
+        tips.addView(tip(act.getString(R.string.hold_ok), act.getString(R.string.move_an_app_hide_it)), wrap(14));
+        tips.addView(tip(act.getString(R.string.menu), act.getString(R.string.control_center_wi_fi_sound)), wrap(14));
         col.addView(tips, wrap(34));
         if (HomeRole.held(act)) {
-            col.addView(button("Start watching", true, this::finish), wrap(40));
+            col.addView(button(act.getString(R.string.start_watching), true, this::finish), wrap(40));
         } else {
             // the Home button still opens the old home screen: Android asks once, on the screen. Where
             // it keeps Home for its own launcher (Google TV), the next page sets Aura's Home button up
             LinearLayout buttons = new LinearLayout(act);
-            buttons.addView(button("Make Aura your home", true, () -> {
+            buttons.addView(button(act.getString(R.string.make_aura_your_home), true, () -> {
                 if (HomeRole.needsSetup(act)) {
                     HomeKeys.setTakeover(act, true);
                     if (!HomeKeys.set(act, true)) {
@@ -427,7 +439,7 @@ final class Welcome extends FrameLayout {
                         return;
                     }
                     finish();
-                    host.homeHint("Home now opens Aura");
+                    host.homeHint(act.getString(R.string.home_now_opens_aura));
                     return;
                 }
                 finish();
@@ -436,7 +448,7 @@ final class Welcome extends FrameLayout {
             }), wrap(0));
             LinearLayout.LayoutParams sl = wrap(0);
             sl.leftMargin = Ui.dp(14);
-            buttons.addView(button("Not now", false, this::finish), sl);
+            buttons.addView(button(act.getString(R.string.not_now), false, this::finish), sl);
             col.addView(buttons, wrap(40));
         }
         horizontal = true;
@@ -471,27 +483,27 @@ final class Welcome extends FrameLayout {
     /** Google TV keeps Home whatever is chosen: the ways Aura can take it over, once. */
     private View homeWays() {
         LinearLayout col = column(Gravity.CENTER_HORIZONTAL);
-        col.addView(kicker("ONE MORE STEP"), wrap(0));
-        col.addView(title("Make Aura your home"), wrap(6));
-        TextView body = line(HomeRole.other(act) + " keeps the Home button for itself, whatever you choose. Aura can take it over, once, in one of these ways.");
+        col.addView(kicker(act.getString(R.string.one_more_step)), wrap(0));
+        col.addView(title(act.getString(R.string.make_aura_your_home)), wrap(6));
+        TextView body = line(act.getString(R.string.keeps_the_home_button_whatever, HomeRole.other(act)));
         body.setSingleLine(false);
         body.setGravity(Gravity.CENTER_HORIZONTAL);
         body.setMaxWidth(Ui.dp(560));
         body.setLineSpacing(Ui.dpf(3), 1f);
         col.addView(body, wrap(10));
         LinearLayout list = column(Gravity.START);
-        way(list, "On this TV  ·  recommended", () -> show(5, 1));
-        way(list, "From a computer", () -> show(6, 1));
+        way(list, act.getString(R.string.on_this_tv_recommended), () -> show(5, 1));
+        way(list, act.getString(R.string.from_a_computer), () -> show(6, 1));
         if (HomeRole.byHand(act)) {
-            way(list, "By hand, in Accessibility", () -> {
+            way(list, act.getString(R.string.by_hand_in_accessibility), () -> {
                 finish();
                 String m = HomeRole.make(act);
                 if (m != null) host.homeHint(m);
             });
         }
-        way(list, "Later", () -> {
+        way(list, act.getString(R.string.later), () -> {
             finish();
-            host.homeHint("Whenever you like: Settings, Home button");
+            host.homeHint(act.getString(R.string.whenever_you_like_settings_home));
         });
         col.addView(list, wrap(30));
         horizontal = false;
@@ -511,24 +523,24 @@ final class Welcome extends FrameLayout {
     /** The TV setting itself up, through USB debugging, the way a computer would: three steps that tick themselves off. */
     private View onTv() {
         LinearLayout col = column(Gravity.START);
-        col.addView(kicker("ON THIS TV"), wrap(0));
-        col.addView(title("Three steps, once"), wrap(6));
-        col.addView(line("Each one ticks itself off as you go. Back to Aura with the Back button."), wrap(6));
-        col.addView(stepRow(0, "Turn on Developer options",
-                "Settings, System, About: press OK on Android TV OS build seven times, until it says you're a developer.",
-                button("Open About", false, () -> openSettings(android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS))), wrap(24));
-        col.addView(stepRow(1, "Turn on USB debugging",
-                "In Developer options, switch on USB debugging. Some TVs call it Network debugging.",
-                button("Developer options", false, () -> openSettings(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))), wrap(14));
-        setupButton = button(setupDone ? "Start watching" : "Connect", true, this::connect);
-        col.addView(stepRow(2, "Let Aura in",
-                "Android asks \"Allow USB debugging?\": tick Always allow from this computer, then Allow. Aura does the rest.", setupButton), wrap(14));
+        col.addView(kicker(act.getString(R.string.on_this_tv)), wrap(0));
+        col.addView(title(act.getString(R.string.three_steps_once)), wrap(6));
+        col.addView(line(act.getString(R.string.each_one_ticks_itself_off)), wrap(6));
+        col.addView(stepRow(0, act.getString(R.string.turn_on_developer_options),
+                act.getString(R.string.settings_system_about_press_ok),
+                button(act.getString(R.string.open_about), false, () -> openSettings(android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS))), wrap(24));
+        col.addView(stepRow(1, act.getString(R.string.turn_on_usb_debugging),
+                act.getString(R.string.in_developer_options_switch_on_2),
+                button(act.getString(R.string.developer_options), false, () -> openSettings(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))), wrap(14));
+        setupButton = button(setupDone ? act.getString(R.string.start_watching) : act.getString(R.string.connect), true, this::connect);
+        col.addView(stepRow(2, act.getString(R.string.let_aura_in),
+                act.getString(R.string.android_asks_allow_usb_debugging), setupButton), wrap(14));
         setupStatus = Ui.text(act, 14, Ui.medium, 0xE6FFFFFF);
         setupStatus.setSingleLine(false);
         setupStatus.setMaxWidth(Ui.dp(760));
         col.addView(setupStatus, wrap(20));
         // some newer Google TVs have no plain USB debugging to connect through: wireless debugging, paired by code
-        if (Adb.wireless()) col.addView(button("No USB debugging? Use wireless debugging", false, () -> show(7, 1)), wrap(12));
+        if (Adb.wireless()) col.addView(button(act.getString(R.string.no_usb_debugging_use_wireless), false, () -> show(7, 1)), wrap(12));
         lastDev = devOn();
         lastUsb = usbOn();
         refreshSetup();
@@ -585,7 +597,7 @@ final class Welcome extends FrameLayout {
             mark(1, dev && usb || setupDone);
             mark(2, setupDone);
             if (!setupBusy && !setupDone) {
-                setupStatus.setText(!dev ? "Start with step 1." : !usb ? "Developer options are on. Now step 2." : "Ready. Press Connect.");
+                setupStatus.setText(!dev ? act.getString(R.string.start_with_step_1) : !usb ? act.getString(R.string.developer_options_are_on_now) : act.getString(R.string.ready_press_connect));
             }
             // a step just done here: on to the next one's button
             if (dev && !lastDev && at == 0) focus(usb ? 2 : 1);
@@ -595,8 +607,8 @@ final class Welcome extends FrameLayout {
             HomeKeys.setTakeover(act, true);
             if (HomeKeys.set(act, true)) {
                 setupDone = true;
-                setupStatus.setText("Done. Home now opens Aura.");
-                setupButton.setText("Start watching");
+                setupStatus.setText(act.getString(R.string.done_home_now_opens_aura));
+                setupButton.setText(act.getString(R.string.start_watching));
                 focus(targets.indexOf(setupButton));
             }
         }
@@ -625,11 +637,11 @@ final class Welcome extends FrameLayout {
         }
         if (setupBusy) return;
         if (!usbOn()) {
-            setupStatus.setText(!devOn() ? "Developer options first: step 1." : "Switch on USB debugging first: step 2.");
+            setupStatus.setText(!devOn() ? act.getString(R.string.developer_options_first_step_1) : act.getString(R.string.switch_on_usb_debugging_first));
             return;
         }
         setupBusy = true;
-        setupStatus.setText("Android is asking on the screen: tick Always allow, then Allow.");
+        setupStatus.setText(act.getString(R.string.android_is_asking_on_the));
         new SafeThread(() -> {
             String r = Adb.connect(act);
             act.runOnUiThread(() -> {
@@ -642,9 +654,9 @@ final class Welcome extends FrameLayout {
                     return;
                 }
                 setupBusy = false;
-                setupStatus.setText(r.equals(Adb.DENIED) ? "Android didn't let Aura in. Press Connect again, tick Always allow, then Allow."
-                        : r.equals(Adb.OFF) ? "Aura can't reach debugging yet. Check USB debugging is on (or Network debugging), then Connect."
-                        : "Couldn't connect. Try again in a moment.");
+                setupStatus.setText(r.equals(Adb.DENIED) ? act.getString(R.string.android_didnt_let_aura_in_2)
+                        : r.equals(Adb.OFF) ? act.getString(R.string.aura_cant_reach_debugging_yet)
+                        : act.getString(R.string.couldnt_connect_try_again_in));
             });
         }, "welcome-connect").start();
     }
@@ -654,7 +666,8 @@ final class Welcome extends FrameLayout {
         Adb.runSetup(act, new Adb.Progress() {
             @Override
             public void step(int i, int n, String name) {
-                String now = "Switching everything on  ·  " + (i + 1) + " of " + n + (name.equals("Speed") ? "  ·  about a minute" : "");
+                String now = act.getString(R.string.switching_everything_on) + "  ·  " + act.getString(R.string.n_of_m, i + 1, n)
+                        + (name.equals(act.getString(R.string.adb_speed)) ? "  ·  " + act.getString(R.string.about_a_minute) : "");
                 if (setupStatus == null) return;
                 act.runOnUiThread(() -> setupStatus.setText(now));
             }
@@ -689,10 +702,10 @@ final class Welcome extends FrameLayout {
             return;
         }
         if (page != 5) return;
-        setupStatus.setText(!setupDone ? "Home couldn't be handed over. Settings, Set up on this TV can try again."
-                : failed == null || failed.isEmpty() ? "Done. Home now opens Aura, and every extra is on."
-                : "Done. Home now opens Aura. Not switched on: " + android.text.TextUtils.join(", ", failed) + ".");
-        setupButton.setText(setupDone ? "Start watching" : "Try again");
+        setupStatus.setText(!setupDone ? act.getString(R.string.home_couldnt_be_handed_over)
+                : failed == null || failed.isEmpty() ? act.getString(R.string.done_home_now_opens_aura_2)
+                : act.getString(R.string.done_not_switched_on, android.text.TextUtils.join(", ", failed)));
+        setupButton.setText(setupDone ? act.getString(R.string.start_watching) : act.getString(R.string.try_again));
         refreshSetup();
         focus(targets.indexOf(setupButton));
         // Google TV's own home screen is still there, behind Aura: asked once whether to switch it off
@@ -714,24 +727,22 @@ final class Welcome extends FrameLayout {
      */
     private View retireAsk() {
         LinearLayout col = column(Gravity.CENTER_HORIZONTAL);
-        col.addView(kicker("GOOGLE TV HOME"), wrap(0));
-        col.addView(title("Switch off Google TV's home?"), wrap(6));
-        TextView body = line("Aura is your home now, but Google TV's still runs behind it: the remote's profile and notification "
-                + "buttons open its screens, and it keeps about 150 MB of memory busy. Switched off, those buttons open Aura's instead. "
-                + "Google Assistant voice search, Google's side panel and Google profiles stop with it.");
+        col.addView(kicker(act.getString(R.string.google_tv_home)), wrap(0));
+        col.addView(title(act.getString(R.string.switch_off_google_tvs_home)), wrap(6));
+        TextView body = line(act.getString(R.string.retire_body));
         body.setSingleLine(false);
         body.setGravity(Gravity.CENTER_HORIZONTAL);
         body.setMaxWidth(Ui.dp(620));
         body.setLineSpacing(Ui.dpf(3), 1f);
         col.addView(body, wrap(10));
-        TextView undo = line("Nothing is deleted. Settings, Set up on this TV brings it back any time.");
+        TextView undo = line(act.getString(R.string.nothing_is_deleted_settings_set));
         undo.setTextColor(0x80FFFFFF);
         col.addView(undo, wrap(12));
         LinearLayout buttons = new LinearLayout(act);
-        buttons.addView(button("Yes, switch it off", true, this::retire), wrap(0));
+        buttons.addView(button(act.getString(R.string.yes_switch_it_off), true, this::retire), wrap(0));
         LinearLayout.LayoutParams nl = wrap(0);
         nl.leftMargin = Ui.dp(14);
-        buttons.addView(button("No, keep it", false, () -> {
+        buttons.addView(button(act.getString(R.string.no_keep_it), false, () -> {
             if (!retireBusy) finish();
         }), nl);
         col.addView(buttons, wrap(34));
@@ -747,7 +758,7 @@ final class Welcome extends FrameLayout {
     private void retire() {
         if (retireBusy) return;
         retireBusy = true;
-        retireStatus.setText("Switching it off…");
+        retireStatus.setText(act.getString(R.string.switching_it_off));
         final Context app = act.getApplicationContext();
         new SafeThread(() -> {
             Boolean took = Safety.retireGoogleHome(app, true);
@@ -756,11 +767,11 @@ final class Welcome extends FrameLayout {
                 if (page != 9) return;
                 if (took != null && took) {
                     finish();
-                    host.homeHint("Google TV's home is off · Settings, Set up on this TV brings it back");
+                    host.homeHint(act.getString(R.string.google_tvs_home_is_off));
                     return;
                 }
-                retireStatus.setText(took == null ? "Aura lost the connection to debugging. Settings, Set up on this TV can do this later."
-                        : "Android didn't allow it on this TV. Aura still opens on Home.");
+                retireStatus.setText(took == null ? act.getString(R.string.aura_lost_the_connection_to)
+                        : act.getString(R.string.android_didnt_allow_it_on));
             });
         }, "welcome-retire").start();
     }
@@ -788,12 +799,12 @@ final class Welcome extends FrameLayout {
         View code = qr != null ? new SettingsPanel.Code(act, qr) : new View(act);
         row.addView(code, new LinearLayout.LayoutParams(Ui.dp(200), Ui.dp(200)));
         LinearLayout col = column(Gravity.START);
-        col.addView(kicker("WIRELESS DEBUGGING"), wrap(0));
-        col.addView(title("Pair with a code"), wrap(6));
+        col.addView(kicker(act.getString(R.string.wireless_debugging_2)), wrap(0));
+        col.addView(title(act.getString(R.string.pair_with_a_code)), wrap(6));
         String[] steps = {
-                "Developer options: switch on Wireless debugging.",
-                "Choose Pair device with pairing code. Leave it open.",
-                url != null ? "Scan this with your phone and type the six digits it shows." : "Connect the TV to Wi-Fi first: the code is typed on your phone."};
+                act.getString(R.string.developer_options_switch_on_wireless),
+                act.getString(R.string.choose_pair_device_with_pairing),
+                url != null ? act.getString(R.string.scan_this_with_your_phone) : act.getString(R.string.connect_the_tv_to_wi_2)};
         for (int i = 0; i < steps.length; i++) {
             TextView t = Ui.text(act, 15, Ui.medium, 0xE6FFFFFF);
             t.setSingleLine(false);
@@ -804,10 +815,10 @@ final class Welcome extends FrameLayout {
         setupStatus = Ui.text(act, 14, Ui.medium, 0xB3FFFFFF);
         setupStatus.setSingleLine(false);
         setupStatus.setMaxWidth(Ui.dp(470));
-        setupStatus.setText("Waiting for the code…");
+        setupStatus.setText(act.getString(R.string.waiting_for_the_code));
         col.addView(setupStatus, wrap(18));
         LinearLayout buttons = new LinearLayout(act);
-        buttons.addView(button("Developer options", true, () -> openSettings(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)), wrap(0));
+        buttons.addView(button(act.getString(R.string.developer_options), true, () -> openSettings(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)), wrap(0));
         col.addView(buttons, wrap(18));
         LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         cl.leftMargin = Ui.dp(40);
@@ -821,21 +832,21 @@ final class Welcome extends FrameLayout {
     private void pairWith(String code) {
         if (pairing || page != 7) return;
         pairing = true;
-        setupStatus.setText("Pairing with the TV…");
+        setupStatus.setText(act.getString(R.string.pairing_with_the_tv));
         new SafeThread(() -> {
             String r = Adb.pair(act, code);
             act.runOnUiThread(() -> {
                 pairing = false;
                 if (page != 7) return;
                 if (r.equals(Adb.OK) || r.equals(Adb.OPEN_DOOR)) {
-                    setupStatus.setText("Paired. Switching everything on…");
+                    setupStatus.setText(act.getString(R.string.paired_switching_everything_on));
                     setupBusy = true;
                     switchOn();
                     return;
                 }
-                setupStatus.setText(r.equals(Adb.DENIED) ? "That code didn't match. Open Pair device with pairing code again and send the new one."
-                        : r.equals(Adb.OFF) ? "No pairing dialog found. Open Pair device with pairing code, and keep it open while you send the code."
-                        : "Pairing didn't finish. Try again with a fresh code.");
+                setupStatus.setText(r.equals(Adb.DENIED) ? act.getString(R.string.that_code_didnt_match_open)
+                        : r.equals(Adb.OFF) ? act.getString(R.string.no_pairing_dialog_found_open_2)
+                        : act.getString(R.string.pairing_didnt_finish_try_again));
             });
         }, "welcome-pair").start();
     }
@@ -843,9 +854,9 @@ final class Welcome extends FrameLayout {
     /** The same from a computer: the TV's address and two adb lines, and Aura finishes once the computer has run them. */
     private View fromPc() {
         LinearLayout col = column(Gravity.START);
-        col.addView(kicker("FROM A COMPUTER"), wrap(0));
-        col.addView(title("Two lines on a computer"), wrap(6));
-        TextView first = line("On the TV, switch on Developer options and USB debugging (steps 1 and 2 of On this TV). Then, on a computer on the same Wi-Fi with Android's adb:");
+        col.addView(kicker(act.getString(R.string.from_a_computer_2)), wrap(0));
+        col.addView(title(act.getString(R.string.two_lines_on_a_computer)), wrap(6));
+        TextView first = line(act.getString(R.string.on_the_tv_switch_on));
         first.setSingleLine(false);
         first.setMaxWidth(Ui.dp(760));
         col.addView(first, wrap(10));
@@ -858,19 +869,19 @@ final class Welcome extends FrameLayout {
         code.setBackground(pill(0x33000000, 14));
         code.setPadding(Ui.dp(18), Ui.dp(14), Ui.dp(18), Ui.dp(14));
         col.addView(code, wrap(14));
-        TextView then = line("Allow the question the TV asks. Aura notices and finishes by itself. For every extra at once, run setup-aura.ps1 from Aura's GitHub page instead.");
+        TextView then = line(act.getString(R.string.allow_the_question_the_tv));
         then.setSingleLine(false);
         then.setMaxWidth(Ui.dp(760));
         col.addView(then, wrap(14));
         setupStatus = Ui.text(act, 14, Ui.medium, 0xE6FFFFFF);
-        setupStatus.setText(setupDone ? "Done. Home now opens Aura." : "Waiting for the computer…");
+        setupStatus.setText(setupDone ? act.getString(R.string.done_home_now_opens_aura) : act.getString(R.string.waiting_for_the_computer));
         col.addView(setupStatus, wrap(18));
         LinearLayout buttons = new LinearLayout(act);
-        buttons.addView(button(devOn() ? "Developer options" : "Open About", false, () -> openSettings(devOn()
+        buttons.addView(button(devOn() ? act.getString(R.string.developer_options) : act.getString(R.string.open_about), false, () -> openSettings(devOn()
                 ? android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS : android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS)), wrap(0));
-        setupButton = button(setupDone ? "Start watching" : "Later", true, () -> {
+        setupButton = button(setupDone ? act.getString(R.string.start_watching) : act.getString(R.string.later), true, () -> {
             finish();
-            if (!setupDone) host.homeHint("Whenever you like: Settings, Home button");
+            if (!setupDone) host.homeHint(act.getString(R.string.whenever_you_like_settings_home));
         });
         LinearLayout.LayoutParams sl = wrap(0);
         sl.leftMargin = Ui.dp(14);
@@ -1137,6 +1148,9 @@ final class Welcome extends FrameLayout {
             setBackground(idle);
             label = Ui.text(c, 15, Ui.semibold, 0xFFFFFFFF);
             label.setText(text);
+            // the row's width less the switch beside it
+            label.setMaxWidth(Ui.dp(258));
+            Ui.shrinkToWidth(label, 12f);
             LayoutParams ll = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START | Gravity.CENTER_VERTICAL);
             ll.leftMargin = Ui.dp(18);
             addView(label, ll);

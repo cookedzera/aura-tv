@@ -69,7 +69,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     /** Each widget's natural width; the ones you keep share the row in these proportions. */
     private static final int[] WIDGET_W = {260, 320, 200};
     private static final int WIDGET_ROW = 816, WIDGET_GAP = 18;
-    static final String[] WIDGET_IDS = {"sky", "stack", "today"}, WIDGET_NAMES = {"Sky", "Smart Stack", "Today"};
+    static final String[] WIDGET_IDS = {"sky", "stack", "today"};
+    static final int[] WIDGET_NAMES = {R.string.widget_sky, R.string.smart_stack, R.string.today};
     /** Browsing, the photograph sits half-soft behind the glass; resting, it comes back sharp. */
     private static final float HOME_DEFOCUS = 0.38f;
     private static final int SIDE = 0, WIDGETS = 1, GRID = 2, SHELF = 3, TOP = 4;
@@ -236,9 +237,24 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     // ---- lifecycle ---------------------------------------------------------------------------
 
+    /** The TV's language when home was built: Aura keeps itself through most changes, but not this one. */
+    private Locale builtIn;
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration c) {
+        super.onConfigurationChanged(c);
+        // the TV's language changed: home is built again, every word in the new one
+        @SuppressWarnings("deprecation")
+        Locale now = c.locale;
+        if (builtIn != null && now != null && !builtIn.equals(now)) recreate();
+    }
+
     @Override
     protected void onCreate(Bundle state) {
         createdAt = SystemClock.uptimeMillis();
+        @SuppressWarnings("deprecation")
+        Locale lang = getResources().getConfiguration().locale;
+        builtIn = lang;
         super.onCreate(state);
         // crashing again and again: back quieter, or Home handed back to the TV's own home screen
         Safety.watch(this);
@@ -255,7 +271,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         applyLight();
         if (safe != null) {
             handler.postDelayed(() -> hud(R.drawable.ic_info, safe.equals("safe")
-                    ? "Aura kept stopping, so some extras are off for now" : "Aura kept stopping: Home opens the TV's own home screen again"), 6000);
+                    ? getString(R.string.aura_kept_stopping_so_some) : getString(R.string.aura_kept_stopping_home_opens)), 6000);
         }
         getWindow().setBackgroundDrawable(null);
         occlude();
@@ -379,13 +395,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         super.onActivityResult(request, result, data);
         if (request != HomeRole.REQUEST) return;
         if (HomeRole.held(this)) {
-            hud(R.drawable.ic_check, "Home now opens Aura");
+            hud(R.drawable.ic_check, getString(R.string.home_now_opens_aura));
         } else if (result == RESULT_OK) {
             // Android said yes, yet Home still opens another launcher: the Home button service takes it from here
             String m = HomeRole.make(this);
             if (m != null) hud(R.drawable.ic_info, m);
         } else {
-            homeHint("Press Home on the remote and choose Aura, then Always");
+            homeHint(getString(R.string.press_home_on_the_remote));
         }
         if (settings.isOpen()) settings.refresh();
     }
@@ -400,8 +416,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void checkHome() {
         if (!HomeRole.waiting || !resumed) return;
         HomeRole.waiting = false;
-        if (HomeKeys.live) hud(R.drawable.ic_check, "Home now opens Aura");
-        else hud(R.drawable.ic_info, "Aura's Home button is still off · Settings, Home button");
+        if (HomeKeys.live) hud(R.drawable.ic_check, getString(R.string.home_now_opens_aura));
+        else hud(R.drawable.ic_info, getString(R.string.auras_home_button_is_still));
         if (settings.isOpen()) settings.refresh();
     }
 
@@ -847,7 +863,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             public void hold(AppRepo.App a, Card from) {
                 swallow(heldConfirm);
                 List<AppMenu.Item> items = new ArrayList<>();
-                items.add(new AppMenu.Item(R.drawable.ic_apps, "Take out of folder", () -> {
+                items.add(new AppMenu.Item(R.drawable.ic_apps, getString(R.string.take_out_of_folder), () -> {
                     menu.hide();
                     Folders.remove(HomeActivity.this, a.pkg);
                     String id = folderPanel.openId;
@@ -855,15 +871,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     populate();
                     Folders.Folder left = id == null ? null : Folders.all(HomeActivity.this).get(id);
                     if (left != null) openFolder(id);
-                    hud(R.drawable.ic_check, a.label + " is back on the grid");
+                    hud(R.drawable.ic_check, getString(R.string.name_is_back_on_the_grid, a.label));
                 }));
                 // a kids' profile can move apps and make folders, nothing more (as on the grid)
-                if (!Profiles.kids(HomeActivity.this)) items.add(new AppMenu.Item(R.drawable.ic_info, "App info", () -> {
+                if (!Profiles.kids(HomeActivity.this)) items.add(new AppMenu.Item(R.drawable.ic_info, getString(R.string.app_info), () -> {
                     menu.hide();
                     closeFolder();
                     open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + a.pkg)), from);
                 }));
-                items.add(new AppMenu.Item(R.drawable.ic_settings, "Rename folder", () -> {
+                items.add(new AppMenu.Item(R.drawable.ic_settings, getString(R.string.rename_folder), () -> {
                     menu.hide();
                     String id = folderPanel.openId;
                     closeFolder();
@@ -946,7 +962,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             @Override
             public void cleared(int count) {
                 closeSwitcher();
-                hud(R.drawable.ic_check, count == 1 ? "Closed" : "Closed " + count + " apps · memory freed");
+                hud(R.drawable.ic_check, count == 1 ? getString(R.string.closed) : getString(R.string.closed_n_apps, count));
             }
         });
         root.addView(switcher, match());
@@ -968,7 +984,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 closeWho(false);
                 Profiles.use(HomeActivity.this, p.id);
                 applySetting("profile");
-                hud(R.drawable.ic_check, "Hello, " + p.name);
+                hud(R.drawable.ic_check, getString(R.string.hello_name, p.name));
             }
 
             @Override
@@ -1133,7 +1149,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tdW = new Widget(this, backdrop);
         LinearLayout d = column(18, 18, 18, 16);
         tdKicker = Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.24f);
-        tdKicker.setText("TODAY");
+        tdKicker.setText(getString(R.string.today_2));
         tdKicker.setEllipsize(android.text.TextUtils.TruncateAt.END);
         d.addView(tdKicker, lp(MATCH, WRAP, 0, 0));
         tdValue = Ui.text(this, 30, Ui.semibold, 0xFFF7F4EE);
@@ -1148,7 +1164,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tdDataRow = new LinearLayout(this);
         tdDataRow.setGravity(Gravity.CENTER_VERTICAL);
         TextView dl = Ui.caps(this, 6.5f, 0x8CFFFFFF, 0.24f);
-        dl.setText("DATA");
+        dl.setText(getString(R.string.data));
         tdDataRow.addView(dl, new LinearLayout.LayoutParams(0, WRAP, 1f));
         tdData = Ui.text(this, 9.5f, Ui.medium, 0xCCFFFFFF);
         tdDataRow.addView(tdData);
@@ -1157,7 +1173,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         LinearLayout m = new LinearLayout(this);
         m.setGravity(Gravity.CENTER_VERTICAL);
         TextView ml = Ui.caps(this, 6.5f, 0x8CFFFFFF, 0.24f);
-        ml.setText("MEMORY");
+        ml.setText(getString(R.string.memory_2));
         m.addView(ml, new LinearLayout.LayoutParams(0, WRAP, 1f));
         tdMem = Ui.text(this, 9.5f, Ui.medium, 0xCCFFFFFF);
         m.addView(tdMem);
@@ -1189,7 +1205,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 // paused: the button says Resume, and OK does just that
                 try {
                     playing.controller.getTransportControls().play();
-                    hud(R.drawable.ic_play, "Playing  ·  " + playing.title);
+                    hud(R.drawable.ic_play, getString(R.string.playing_value, playing.title));
                     handler.postDelayed(() -> refreshWidgets(false), 250);
                     return;
                 } catch (RuntimeException e) {
@@ -1291,7 +1307,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tdMusic.setVisibility(View.VISIBLE);
         boolean live = p.controller != null;
         String app = owner != null ? owner.label : null;
-        tdmKicker.setText(live ? (p.playing ? "NOW PLAYING" : "PAUSED") : "LAST PLAYED");
+        tdmKicker.setText(live ? (p.playing ? getString(R.string.now_playing_caps) : getString(R.string.paused)) : getString(R.string.last_played));
         // the text column beside the cover: two lines, the type a little smaller before anything is cut
         int col = (tdW.getWidth() > 0 ? tdW.getWidth() : Ui.dp(WIDGET_W[2])) - Ui.dp(18 + 18 + 50 + 12);
         Ui.fitLines(tdmTitle, Ui.songTitle(p.title), col, 2, 13.5f, 11.5f);
@@ -1314,7 +1330,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tdProgress.set(Math.max(0f, Math.min(1f, p.progress)));
         boolean pausable = live && p.playing, small = minimised(p);
         tdChipIcon.setImageResource(small ? R.drawable.ic_expand : pausable ? R.drawable.ic_pause : R.drawable.ic_play);
-        tdChipText.setText(small ? "Expand" : pausable ? "Playing" : live ? "Resume" : "Continue");
+        tdChipText.setText(small ? getString(R.string.expand) : pausable ? getString(R.string.playing) : live ? getString(R.string.resume) : getString(R.string.continue_word));
     }
 
     // ---- listening -----------------------------------------------------------------------------
@@ -1380,7 +1396,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         lTime = Ui.text(this, 9.5f, Ui.medium, 0x8CFFFFFF);
         foot.addView(lTime, new LinearLayout.LayoutParams(0, WRAP, 1f));
         TextView hint = Ui.caps(this, 6.5f, 0x66FFFFFF, 0.24f);
-        hint.setText("HOLD OK TO MINIMISE");
+        hint.setText(getString(R.string.hold_ok_to_minimise));
         foot.addView(hint);
         col.addView(foot, lp(MATCH, WRAP, 0, 7));
         LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(0, MATCH, 1f);
@@ -1391,7 +1407,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         listenW.onLongClick = () -> {
             if (listening == null) return;
             minimisedPkg = listening.pkg;
-            hud(R.drawable.ic_check, "Minimised \u00b7 OK on the small card brings it back");
+            hud(R.drawable.ic_check, getString(R.string.minimised_ok_on_the_small));
             updateListening();
             refreshWidgets(false);
         };
@@ -1502,7 +1518,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             } catch (Exception ignored) {
             }
         }
-        lKick.setText(("NOW PLAYING" + (label.isEmpty() ? "" : "  \u00b7  " + label)).toUpperCase(Locale.getDefault()));
+        lKick.setText((getString(R.string.now_playing_caps) + (label.isEmpty() ? "" : "  \u00b7  " + label)).toUpperCase(Locale.getDefault()));
         lTitle.setText(p.title);
         lBy.setText(p.by != null ? p.by : "");
         lBy.setVisibility(p.by == null || p.by.isEmpty() ? View.GONE : View.VISIBLE);
@@ -1553,7 +1569,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         boolean on = st != null && st.getState() == android.media.session.PlaybackState.STATE_PLAYING;
         if (st == null || dur <= 0) {
             lBar.setVisibility(View.INVISIBLE);
-            lTime.setText(st != null && !on ? "Paused" : "");
+            lTime.setText(st != null && !on ? getString(R.string.paused_2) : "");
             return;
         }
         long pos = st.getPosition();
@@ -1561,7 +1577,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         pos = Math.max(0, Math.min(dur, pos));
         lBar.setVisibility(View.VISIBLE);
         lBar.set(pos / (float) dur);
-        lTime.setText((on ? "" : "Paused  \u00b7  ") + NowPlaying.clock(pos) + "  /  " + NowPlaying.clock(dur));
+        String clock = NowPlaying.clock(pos) + "  /  " + NowPlaying.clock(dur);
+        lTime.setText(on ? clock : getString(R.string.paused_value, clock));
     }
 
     private void placeWidget(Widget w, int i) {
@@ -1752,7 +1769,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 p.setTypeface(Ui.medium);
                 p.setTextSize(Ui.dpf(11f));
                 p.setTextAlign(Paint.Align.CENTER);
-                c.drawText("Swipe up for fullscreen", cx, Ui.dpf(23f), p);
+                c.drawText(getString(R.string.swipe_up_for_fullscreen), cx, Ui.dpf(23f), p);
             }
         };
         tvosHint.setVisibility(View.GONE);
@@ -1868,15 +1885,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         col.setPadding(0, Ui.dp(8), 0, Ui.dp(8));
         col.setClipChildren(false);
         col.setClipToPadding(false);
-        addSide(col, R.drawable.ic_apps, "Apps", () -> focusGrid(0), true);
-        addSide(col, R.drawable.ic_search, "Find an app", () -> openFind(""), false);
-        addSide(col, R.drawable.ic_hdmi, "Inputs", () -> openCc(true), false);
-        addSide(col, R.drawable.ic_photo, "Photo mode", () -> setPhoto(true), false);
+        addSide(col, R.drawable.ic_apps, getString(R.string.apps), () -> focusGrid(0), true);
+        addSide(col, R.drawable.ic_search, getString(R.string.find_an_app), () -> openFind(""), false);
+        addSide(col, R.drawable.ic_hdmi, getString(R.string.inputs_2), () -> openCc(true), false);
+        addSide(col, R.drawable.ic_photo, getString(R.string.photo_mode), () -> setPhoto(true), false);
         LinearLayout.LayoutParams rl = lp(Ui.dp(22), Ui.hair(), 0, 10);
         rl.bottomMargin = Ui.dp(4);
         col.addView(Ui.rule(this, 0x33FFFFFF), rl);
-        addSide(col, R.drawable.ic_tune, "Control Center", () -> openCc(false), false);
-        addSide(col, R.drawable.ic_settings, "Settings", this::openSettings, false);
+        addSide(col, R.drawable.ic_tune, getString(R.string.control_center_2), () -> openCc(false), false);
+        addSide(col, R.drawable.ic_settings, getString(R.string.settings), this::openSettings, false);
         // a small red dot on Settings while a new version of Aura waits, as on iOS
         updateDot = redDot(this);
         ((FrameLayout) side.get(side.size() - 1)).addView(updateDot, frame(Ui.dp(8), Ui.dp(8), Gravity.TOP | Gravity.END, 0, Ui.dp(6), Ui.dp(6), 0));
@@ -1927,7 +1944,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
             String v = Updater.pending(HomeActivity.this);
             if (v != null && Updater.tellOnce(HomeActivity.this)) {
-                showHud(R.drawable.ic_bolt, "Aura " + v + " is out  ·  Settings → Updates", 5000);
+                showHud(R.drawable.ic_bolt, getString(R.string.aura_version_is_out_settings, v), 5000);
             }
         }
     };
@@ -2053,16 +2070,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         String setAt = set > 0 ? tf.format(new Date(set)).toUpperCase(Locale.getDefault()) : "";
         switch (m) {
             case FIRST_LIGHT:
-                show(m, "FIRST LIGHT", "Dawn is breaking", "Sunrise at " + riseAt);
+                show(m, getString(R.string.sky_dawn), getString(R.string.dawn_is_breaking), getString(R.string.sunrise_at, riseAt));
                 break;
             case SUNRISE:
-                show(m, "SUNRISE", "The sun is up", "Sunset at " + setAt + " · the photographs turn to day");
+                show(m, getString(R.string.sunrise), getString(R.string.the_sun_is_up), getString(R.string.sunset_at_day, setAt));
                 break;
             case GOLDEN:
-                show(m, "GOLDEN HOUR", "The light turns gold", "Sunset at " + setAt + " · the photographs follow it");
+                show(m, getString(R.string.sky_golden), getString(R.string.the_light_turns_gold), getString(R.string.sunset_at_golden, setAt));
                 break;
             default:
-                show(m, "SUNSET", "The sun has set", "Sunrise at " + riseAt + " · night skies from here");
+                show(m, getString(R.string.sunset), getString(R.string.the_sun_has_set), getString(R.string.sunrise_at_night, riseAt));
         }
         momentArc.set(rise, set, now);
         // and the photograph moves on to one that matches the new light
@@ -2343,7 +2360,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (c.getParent() == null) page.addView(c, new FrameLayout.LayoutParams(Ui.dp(TILE_W), WRAP));
             if (c.tag.equals(keep)) at = i;
         }
-        gridLabel.setText("YOUR APPS  ·  " + (sorted.size() + foldered.size()));
+        gridLabel.setText(getString(R.string.your_apps_n, sorted.size() + foldered.size()));
         int rows = (cells.size() + COLS - 1) / COLS;
         page.getLayoutParams().height = Ui.dp(gridY() + (paged ? Math.min(2, rows) : rows) * ROW_H + 40);
         placeDock();
@@ -2520,7 +2537,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         } catch (RuntimeException e) {
             // not on this TV (a settings page Fire OS doesn't have), not allowed, or refused
             if (!(e instanceof ActivityNotFoundException)) Trouble.caught("opening " + label, e);
-            hud(R.drawable.ic_info, "Couldn't open " + label);
+            hud(R.drawable.ic_info, getString(R.string.couldnt_open, label));
             endLaunch();
         }
     }
@@ -2565,7 +2582,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         } catch (RuntimeException e) {
             // not on this TV (a settings page Fire OS doesn't have), not allowed, or refused
             if (!(e instanceof ActivityNotFoundException)) Trouble.caught("opening " + label, e);
-            hud(R.drawable.ic_info, "Couldn't open " + label);
+            hud(R.drawable.ic_info, getString(R.string.couldnt_open, label));
         }
     }
 
@@ -2675,7 +2692,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tdDataRow.setVisibility(bytes >= 0 ? View.VISIBLE : View.GONE);
         if (bytes < 0) return;
         double mb = bytes / 1048576.0;
-        tdData.setText((mb < 1000 ? Math.round(mb) + " MB" : String.format(Locale.getDefault(), "%.2f GB", mb / 1024)) + " today");
+        tdData.setText(getString(R.string.data_today, mb < 1000 ? Math.round(mb) + " MB" : String.format(Locale.getDefault(), "%.2f GB", mb / 1024)));
     }
 
     private void applySky(long now, long rise, long set, boolean up, long next, Sun.Phase phase) {
@@ -2697,7 +2714,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         skyKicker.setTextColor(color);
         skyKicker.setText("●  " + Sun.label(phase));
         java.text.DateFormat tf = DateFormat.getTimeFormat(this);
-        String event = up ? "Sunset" : "Sunrise", title = "";
+        String event = up ? getString(R.string.sunset_2) : getString(R.string.sunrise_2), title = "";
         if (next > 0) {
             long min = (next - now) / 60_000;
             title = min < 180 ? event + " in " + (min < 60 ? min + " min" : (min / 60) + " h " + (min % 60) + " min")
@@ -2719,17 +2736,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             // memory still shows below
         } else if (today < 0) {
             tdValue.setText("–");
-            tdSub.setText("Usage access is off");
+            tdSub.setText(getString(R.string.usage_access_is_off));
         } else {
             long min = today / 60_000;
             tdValue.setText(min < 60 ? min + "m" : (min / 60) + "h " + (min % 60) + "m");
             AppRepo.App a = top == null ? null : find(top);
-            tdSub.setText(a != null ? "in apps · mostly " + a.label : "in apps so far");
+            tdSub.setText(a != null ? getString(R.string.in_apps_mostly, a.label) : getString(R.string.in_apps_so_far));
         }
         ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
         Compat.svc(this, ActivityManager.class).getMemoryInfo(mi);
         memory.set(mi.totalMem > 0 ? mi.availMem / (float) mi.totalMem : 0f);
-        tdMem.setText(mi.availMem / (1024 * 1024) + " MB free");
+        tdMem.setText(getString(R.string.mb_free, mi.availMem / (1024 * 1024)));
     }
 
     /** What the stack shows beyond your own history: new releases on your apps and tonight's pick, art decoded. */
@@ -2857,7 +2874,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             AppRepo.App owner = it.pkg == null ? null : find(it.pkg);
             String app = owner != null ? "  ·  " + owner.label.toUpperCase(Locale.getDefault()) : "";
             Fresh.Show fresh = x == null ? null : sameShow(it.title, x.shows);
-            s.kicker = (fresh != null ? "NEW EPISODE OUT" : watching ? "CONTINUE WATCHING" : it.kicker != null ? it.kicker : "FOR YOU") + app;
+            s.kicker = (fresh != null ? getString(R.string.new_episode_out) : watching ? getString(R.string.continue_watching_caps) : it.kicker != null ? it.kicker : getString(R.string.for_you)) + app;
             s.title = it.title;
             s.sub = fresh != null && !fresh.episode.isEmpty() ? fresh.episode : it.sub;
             s.art = it.art;
@@ -2866,7 +2883,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.label = it.title;
             s.fresh = fresh != null;
             s.key = key;
-            s.decline = watching ? "Hide from the stack" : "Not interested";
+            s.decline = watching ? getString(R.string.hide_from_the_stack) : getString(R.string.not_interested);
             // what you're watching stays a little longer than a suggestion
             s.dwellMs = watching ? 9_000 : 7_000;
             if (owner != null) {
@@ -2895,8 +2912,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (usual != null && suggest) {
             Calendar c = Calendar.getInstance();
             String hour = DateFormat.is24HourFormat(this) ? c.get(Calendar.HOUR_OF_DAY) + ":00"
-                    : (c.get(Calendar.HOUR) == 0 ? 12 : c.get(Calendar.HOUR)) + (c.get(Calendar.AM_PM) == Calendar.AM ? " AM" : " PM");
-            out.add(appSlide(usual, "YOUR " + hour + " USUAL", "You tend to open it around this time"));
+                    : (c.get(Calendar.HOUR) == 0 ? 12 : c.get(Calendar.HOUR)) + " " + new java.text.DateFormatSymbols().getAmPmStrings()[c.get(Calendar.AM_PM)];
+            out.add(appSlide(usual, getString(R.string.your_hour_usual, hour.toUpperCase(Locale.getDefault())), getString(R.string.you_tend_to_open_it)));
             suggested.add(usual.pkg);
         }
         // new today on your streaming apps, with the show's own artwork. A show you've opened from the
@@ -2913,9 +2930,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (!known && (others >= 1 || !used.isEmpty() && !used.contains(f.pkg))) continue;
             SmartStack.Slide s = new SmartStack.Slide();
             String label = owner.label.toUpperCase(Locale.getDefault());
-            s.kicker = known ? "NEW EPISODE OUT  ·  " + label : "NEW TODAY ON " + label;
+            s.kicker = known ? getString(R.string.new_episode_out_on, label) : getString(R.string.new_today_on, label);
             s.title = f.name;
-            s.sub = f.episode.isEmpty() ? "Out now on " + owner.label : f.episode;
+            s.sub = f.episode.isEmpty() ? getString(R.string.out_now_on, owner.label) : f.episode;
             s.art = x.art.get(i);
             s.color = owner.color;
             s.icon = owner.icon;
@@ -2923,7 +2940,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.intent = owner.launch;
             s.label = owner.label;
             s.key = key;
-            s.decline = "Not interested";
+            s.decline = getString(R.string.not_interested);
             if (known) {
                 out.add(0, s);
             } else {
@@ -2933,15 +2950,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         AppRepo.App last = suggest && recent != null && HomeKeys.allowed(this, (String) recent[0])
                 && !taste.declined(Taste.app((String) recent[0])) ? find((String) recent[0]) : null;
-        if (last != null && suggested.add(last.pkg)) out.add(appSlide(last, "JUMP BACK IN", "Opened " + Habits.ago(now - (Long) recent[1])));
+        if (last != null && suggested.add(last.pkg)) out.add(appSlide(last, getString(R.string.jump_back_in), getString(R.string.opened_ago, Habits.ago(now - (Long) recent[1]))));
         AppRepo.App most = suggest && top != null && watchable(top) && HomeKeys.allowed(this, top)
                 && !taste.declined(Taste.app(top)) ? find(top) : null;
-        if (most != null && suggested.add(most.pkg)) out.add(appSlide(most, "MOST WATCHED TODAY", "Where most of today's screen time went"));
+        if (most != null && suggested.add(most.pkg)) out.add(appSlide(most, getString(R.string.most_watched_today), getString(R.string.where_most_of_todays_screen)));
         List<SmartStack.Slide> picks = new ArrayList<>();
         for (int i = 0; x != null && i < x.picks.size(); i++) {
             Picks.Pick p = x.picks.get(i);
             SmartStack.Slide s = new SmartStack.Slide();
-            s.kicker = (i == 0 ? "TONIGHT'S PICK" : "ALSO TONIGHT") + "  ·  " + p.why;
+            s.kicker = (i == 0 ? getString(R.string.tonights_pick_caps) : getString(R.string.also_tonight)) + "  ·  " + Picks.why(this, p.why);
             s.title = p.name;
             s.sub = p.line;
             s.art = x.pickArt.get(i);
@@ -2950,7 +2967,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.label = p.name + " trailer";
             s.dwellMs = 6_000;
             s.key = Continue.key(p.name);
-            s.decline = "Not interested";
+            s.decline = getString(R.string.not_interested);
             picks.add(s);
         }
         // the TV itself, before anything to watch: a remote about to go flat, and storage running out
@@ -2958,13 +2975,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         for (int i = 0; remotes != null && i < remotes.size(); i++) {
             String[] d = remotes.get(i);
             SmartStack.Slide s = new SmartStack.Slide();
-            s.kicker = "BATTERY LOW";
+            s.kicker = getString(R.string.battery_low);
             s.title = d[0];
-            s.sub = d[1] + "% left  ·  time for new batteries";
+            s.sub = getString(R.string.battery_left, d[1]);
             s.color = 0xFFE8A33A;
             s.icon = getDrawable(R.drawable.ic_bluetooth);
             s.key = "battery:" + d[2] + ":" + Integer.parseInt(d[1]) / 5;
-            s.decline = "Not now";
+            s.decline = getString(R.string.not_now);
             s.action = this::openBluetooth;
             s.label = d[0];
             s.dwellMs = 8_000;
@@ -2972,13 +2989,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         if (freeBytes >= 0 && freeBytes < 600L * 1024 * 1024) {
             SmartStack.Slide s = new SmartStack.Slide();
-            s.kicker = "STORAGE ALMOST FULL";
-            s.title = (freeBytes >> 20) + " MB free";
-            s.sub = "A full TV slows down  ·  OK to make room";
+            s.kicker = getString(R.string.storage_almost_full);
+            s.title = getString(R.string.mb_free, freeBytes >> 20);
+            s.sub = getString(R.string.a_full_tv_slows_down);
             s.color = 0xFFE06A4A;
             s.icon = getDrawable(R.drawable.ic_info);
             s.key = "storage:" + (freeBytes >> 20) / 100;
-            s.decline = "Not now";
+            s.decline = getString(R.string.not_now);
             s.intent = new Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             // Android's storage page uninstalls and clears apps: a kids' profile asks for the PIN first
             final Intent room = s.intent;
@@ -2986,7 +3003,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.label = "storage";
             out.add(Math.min(out.size(), remotes != null ? remotes.size() : 0), s);
         }
-        for (int i = out.size() - 1; i >= 0; i--) if (out.get(i).decline != null && "Not now".equals(out.get(i).decline) && taste.declined(out.get(i).key)) out.remove(i);
+        for (int i = out.size() - 1; i >= 0; i--) if (out.get(i).decline != null && getString(R.string.not_now).equals(out.get(i).decline) && taste.declined(out.get(i).key)) out.remove(i);
         // nine cards at most, so the dots stay a glance: the last suggestions go first, and
         // tonight's picks (dealt last) always keep their places
         while (out.size() + picks.size() > 9 && !out.isEmpty()) out.remove(out.size() - 1);
@@ -2995,7 +3012,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             for (Cell cell : cells) {
                 AppRepo.App a = watchable(cell.tag) ? find(cell.tag) : null;
                 if (a != null) {
-                    out.add(appSlide(a, "START WITH", "First in your apps"));
+                    out.add(appSlide(a, getString(R.string.start_with), getString(R.string.first_in_your_apps)));
                     break;
                 }
             }
@@ -3048,7 +3065,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private SmartStack.Slide appSlide(AppRepo.App a, String kicker, String sub) {
         SmartStack.Slide s = new SmartStack.Slide();
         s.key = Taste.app(a.pkg);
-        s.decline = "Don't suggest " + a.label;
+        s.decline = getString(R.string.dont_suggest, a.label);
         s.kicker = kicker;
         s.title = a.label;
         s.sub = sub;
@@ -3623,7 +3640,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (p != null && p.controller != null) {
                 if (p.playing) p.controller.getTransportControls().pause();
                 else p.controller.getTransportControls().play();
-                hud(R.drawable.ic_check, (p.playing ? "Paused  ·  " : "Playing  ·  ") + p.title);
+                hud(R.drawable.ic_check, getString(p.playing ? R.string.paused_value : R.string.playing_value, p.title));
                 handler.postDelayed(() -> {
                     refreshWidgets(false);
                     if (zone == GRID && rowOf(gridAt) == 0 && !cells.isEmpty()) {
@@ -3642,7 +3659,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 boolean next = code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || code == KeyEvent.KEYCODE_MEDIA_NEXT;
                 if (next) p.controller.getTransportControls().skipToNext();
                 else p.controller.getTransportControls().skipToPrevious();
-                hud(R.drawable.ic_check, next ? "Next song" : "Previous song");
+                hud(R.drawable.ic_check, next ? getString(R.string.next_song) : getString(R.string.previous_song));
                 handler.postDelayed(() -> refreshWidgets(false), 600);
                 return swallow(code);
             }
@@ -4184,14 +4201,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             stopPreview();
             swallow(heldConfirm);
             List<AppMenu.Item> items = new ArrayList<>();
-            items.add(new AppMenu.Item(R.drawable.ic_hide, "Hide from home", () -> {
+            items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.hide_from_home), () -> {
                 closeMenu(card);
                 Prefs.hide(this, tag, true);
                 live.clear();
                 live.addAll(liveInputs());
                 populate();
                 focusGrid(0);
-                hud(R.drawable.ic_hide, name + " is hidden  ·  Settings, Hidden apps brings it back");
+                hud(R.drawable.ic_hide, getString(R.string.name_is_hidden_hidden_apps, name));
             }));
             home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
             menu.show(card, name, items);
@@ -4205,17 +4222,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // the OK that opened the menu is still held: its release mustn't press the first row
         swallow(heldConfirm);
         List<AppMenu.Item> items = new ArrayList<>();
-        items.add(new AppMenu.Item(R.drawable.ic_move, "Move", () -> {
+        items.add(new AppMenu.Item(R.drawable.ic_move, getString(R.string.move), () -> {
             closeMenu(card);
             startEdit();
         }));
         if (pkg.startsWith("folder:")) {
             final String id = pkg.substring(7);
-            items.add(new AppMenu.Item(R.drawable.ic_settings, "Rename", () -> {
+            items.add(new AppMenu.Item(R.drawable.ic_settings, getString(R.string.rename), () -> {
                 closeMenu(card);
                 nameFolder(id, false);
             }));
-            items.add(new AppMenu.Item(R.drawable.ic_apps, "Remove folder", () -> {
+            items.add(new AppMenu.Item(R.drawable.ic_apps, getString(R.string.remove_folder), () -> {
                 closeMenu(card);
                 // its apps return to where the folder stood, in the folder's order
                 Folders.Folder gone = Folders.all(this).get(id);
@@ -4229,34 +4246,34 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 }
                 Folders.dissolve(this, id);
                 populate();
-                hud(R.drawable.ic_apps, label + " removed  ·  its apps are back on the grid");
+                hud(R.drawable.ic_apps, getString(R.string.folder_removed, label));
             }));
             home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
             menu.show(card, label, items);
             return;
         }
-        items.add(new AppMenu.Item(R.drawable.ic_apps, "Add to folder", () -> {
+        items.add(new AppMenu.Item(R.drawable.ic_apps, getString(R.string.add_to_folder), () -> {
             closeMenu(card);
             chooseFolder(pkg, label, card);
         }));
         // a kids' profile can move apps and make folders, nothing more
         if (!Profiles.kids(this)) {
-            items.add(new AppMenu.Item(R.drawable.ic_picture, "Change its picture", () -> {
+            items.add(new AppMenu.Item(R.drawable.ic_picture, getString(R.string.change_its_picture), () -> {
                 closeMenu(card);
                 openSettings();
                 if (settings.isOpen()) settings.art(pkg, label);
             }));
-            items.add(new AppMenu.Item(R.drawable.ic_hide, "Hide from home", () -> {
+            items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.hide_from_home), () -> {
                 closeMenu(card);
                 Prefs.hide(this, pkg, true);
                 populate();
-                hud(R.drawable.ic_hide, label + " is hidden  ·  Settings brings it back");
+                hud(R.drawable.ic_hide, getString(R.string.name_is_hidden_settings, label));
             }));
-            items.add(new AppMenu.Item(R.drawable.ic_info, "App info", () -> {
+            items.add(new AppMenu.Item(R.drawable.ic_info, getString(R.string.app_info), () -> {
                 closeMenu(card);
                 open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + pkg)), card);
             }));
-            if (removable(pkg)) items.add(new AppMenu.Item(R.drawable.ic_trash, "Uninstall", () -> {
+            if (removable(pkg)) items.add(new AppMenu.Item(R.drawable.ic_trash, getString(R.string.uninstall), () -> {
                 closeMenu(card);
                 // Android asks to confirm; the grid updates itself once the app is gone
                 open(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + pkg)), card);
@@ -4271,7 +4288,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         int n = widgets.indexOf(w), id = -1;
         for (int i = 0; i < 3; i++) if (allWidgets[i] == w) id = i;
         if (editing || ccOpen || menu.isOpen() || n < 0 || id < 0) return;
-        final String name = WIDGET_NAMES[id], key = WIDGET_IDS[id];
+        final String name = getString(WIDGET_NAMES[id]), key = WIDGET_IDS[id];
         swallow(heldConfirm);
         List<AppMenu.Item> items = new ArrayList<>();
         // the card on show first: leave it out of the stack from now on
@@ -4280,29 +4297,29 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             items.add(new AppMenu.Item(R.drawable.ic_hide, card.decline, () -> {
                 closeMenu(w);
                 Taste.decline(getApplicationContext(), card.key);
-                hud(R.drawable.ic_hide, "It won't come back  ·  Settings → Widgets brings it back");
+                hud(R.drawable.ic_hide, getString(R.string.it_wont_come_back_settings));
                 refreshWidgets(true);
             }));
         }
-        if (n > 0) items.add(new AppMenu.Item(R.drawable.ic_move, "Move left", () -> moveWidget(w, -1)));
-        if (n < widgets.size() - 1) items.add(new AppMenu.Item(R.drawable.ic_move, "Move right", () -> moveWidget(w, 1)));
+        if (n > 0) items.add(new AppMenu.Item(R.drawable.ic_move, getString(R.string.move_left), () -> moveWidget(w, -1)));
+        if (n < widgets.size() - 1) items.add(new AppMenu.Item(R.drawable.ic_move, getString(R.string.move_right), () -> moveWidget(w, 1)));
         // what the stack deals: its cards are chosen on the Widgets page
-        if (w == fyW) items.add(new AppMenu.Item(R.drawable.ic_tune, "Choose cards", () -> {
+        if (w == fyW) items.add(new AppMenu.Item(R.drawable.ic_tune, getString(R.string.choose_cards), () -> {
             closeMenu(w);
             openSettings("widgets");
         }));
-        if (widgets.size() > 1) items.add(new AppMenu.Item(R.drawable.ic_hide, "Hide", () -> {
+        if (widgets.size() > 1) items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.hide), () -> {
             closeMenu(w);
             Prefs.hideWidget(this, key, true);
             layoutWidgets(true);
             focusWidget(Math.min(n, widgets.size() - 1));
-            hud(R.drawable.ic_hide, name + " is hidden  ·  Settings brings it back");
+            hud(R.drawable.ic_hide, getString(R.string.name_is_hidden_settings, name));
         }));
-        else items.add(new AppMenu.Item(R.drawable.ic_hide, "Only apps · tvOS style", () -> {
+        else items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.only_apps_tvos_style), () -> {
             closeMenu(w);
             Prefs.of(this).edit().putString(Prefs.LAYOUT, "tvos").apply();
             applySetting("layout");
-            hud(R.drawable.ic_check, "tvOS style  ·  Settings → Home screen brings widgets back");
+            hud(R.drawable.ic_check, getString(R.string.tvos_style_settings_home_screen));
         }));
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         menu.show(w, name, items);
@@ -4358,10 +4375,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 Folders.add(this, f.id, pkg);
                 populate();
                 focusTag(f.tag());
-                hud(R.drawable.ic_check, label + " is in " + f.name);
+                hud(R.drawable.ic_check, getString(R.string.name_is_in_folder, label, f.name));
             }));
         }
-        items.add(new AppMenu.Item(R.drawable.ic_add, "New folder", () -> {
+        items.add(new AppMenu.Item(R.drawable.ic_add, getString(R.string.new_folder), () -> {
             closeMenu(card);
             Folders.Folder f = Folders.create(this, pkg);
             // the new folder takes the app's place in the grid
@@ -4376,7 +4393,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             nameFolder(f.id, true);
         }));
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        menu.show(card, "ADD " + label + " TO", items);
+        menu.show(card, getString(R.string.add_name_to, label), items);
     }
 
     private void openFolder(String id) {
@@ -4447,11 +4464,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         List<String> names = Folders.suggestions(this);
         names.remove(f.name);
-        ask.show(fresh ? "NAME YOUR NEW FOLDER" : "RENAME " + f.name.toUpperCase(Locale.getDefault()), f.name,
-                "Type a name, then OK", names, name -> {
+        ask.show(fresh ? getString(R.string.name_your_new_folder) : getString(R.string.rename_name, f.name.toUpperCase(Locale.getDefault())), f.name,
+                getString(R.string.type_a_name_then_ok), names, name -> {
                     Folders.rename(this, id, name);
                     afterAsk();
-                    hud(R.drawable.ic_check, fresh ? "New folder: " + name : "Renamed to " + name);
+                    hud(R.drawable.ic_check, fresh ? getString(R.string.new_folder_name, name) : getString(R.string.renamed_to, name));
                 });
     }
 
@@ -4538,7 +4555,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         wiggle.setRepeatMode(ValueAnimator.REVERSE);
         wiggle.addUpdateListener(a -> card.setRotation(1.4f * (float) a.getAnimatedValue()));
         wiggle.start();
-        showHud(R.drawable.ic_move, "Move " + c.label.getText() + " with the arrows  ·  OK when done", 0);
+        showHud(R.drawable.ic_move, getString(R.string.move_with_the_arrows, c.label.getText()), 0);
     }
 
     private void stopEdit() {
@@ -4549,7 +4566,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         List<String> order = new ArrayList<>();
         for (Cell c : cells) if (!c.tag.startsWith("input:")) order.add(c.tag);
         AppRepo.saveDock(prefs, order);
-        hud(R.drawable.ic_check, "Your apps are arranged");
+        hud(R.drawable.ic_check, getString(R.string.your_apps_are_arranged));
         wake();
     }
 
@@ -4619,7 +4636,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (apps.isEmpty() || editing) return;
         populate();
         if (announce && fresh != null) {
-            hud(R.drawable.ic_hdmi, fresh + " is on  ·  it's your first tile");
+            hud(R.drawable.ic_hdmi, getString(R.string.input_is_on, fresh));
             if (!ccOpen && zone == GRID) focusGrid(0);
         }
     }
@@ -4741,10 +4758,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         Calendar now = Calendar.getInstance();
         boolean h24 = DateFormat.is24HourFormat(this);
         String t = new SimpleDateFormat(h24 ? "H:mm" : "h:mm", Locale.getDefault()).format(now.getTime());
-        stTime.setText(h24 ? t : t + (now.get(Calendar.AM_PM) == Calendar.AM ? " AM" : " PM"));
+        stTime.setText(h24 ? t : t + " " + new java.text.DateFormatSymbols().getAmPmStrings()[now.get(Calendar.AM_PM)]);
         int hour = now.get(Calendar.HOUR_OF_DAY);
-        hello.setText(hour >= 5 && hour < 12 ? "Good morning" : hour >= 12 && hour < 17 ? "Good afternoon" : "Good evening");
-        dateLine.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now.getTime()));
+        hello.setText(hour >= 5 && hour < 12 ? getString(R.string.good_morning) : hour >= 12 && hour < 17 ? getString(R.string.good_afternoon) : getString(R.string.good_evening));
+        dateLine.setText(Words.date("EEEE, d MMMM", now.getTimeInMillis()));
         cc.tick(now);
         story.tick(now);
         refreshStatus();
@@ -4779,12 +4796,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         askTag = null;
         pinFrom = getCurrentFocus();
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        ask.showPin("FOR GROWN-UPS", pin -> {
+        ask.showPin(getString(R.string.for_grown_ups), pin -> {
             View before = pinFrom;
             pinFrom = null;
             unblockHome();
             if (!Profiles.pinOk(this, pin)) {
-                hud(R.drawable.ic_info, "That's not the PIN");
+                hud(R.drawable.ic_info, getString(R.string.thats_not_the_pin));
                 if (before != null && before.isShown()) before.requestFocus();
                 return;
             }
@@ -4878,6 +4895,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             case "sources":
                 // photographs from the sources now on, and those switched off leave, on a run in a moment
                 Daily.soon(this);
+                break;
+            case "dlna":
+                Renderer.apply(this);
                 break;
             case "cards":
                 // the Smart Stack's choice of cards changed: deal them again
@@ -5106,13 +5126,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void progressSplash() {
         if (splash == null) return;
         if (!wallReady && !appsReady) {
-            splash.setProgress(0.2f, "WAKING UP");
+            splash.setProgress(0.2f, getString(R.string.waking_up));
         } else if (!appsReady) {
-            splash.setProgress(0.48f, "ARRANGING YOUR APPS");
+            splash.setProgress(0.48f, getString(R.string.arranging_your_apps));
         } else if (!wallReady) {
-            splash.setProgress(0.52f, "DEVELOPING THE PHOTOGRAPHS");
+            splash.setProgress(0.52f, getString(R.string.developing_the_photographs));
         } else {
-            splash.setProgress(0.8f, "POLISHING THE GLASS");
+            splash.setProgress(0.8f, getString(R.string.polishing_the_glass));
             // after the next layout every tile has its artwork; only then reveal
             page.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
                 @Override
@@ -5132,7 +5152,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (splash == null || splashFinishing) return;
         splashFinishing = true;
         final Splash s = splash;
-        s.finish("WELCOME HOME", this::startIntro, () -> splashGone(s));
+        s.finish(getString(R.string.welcome_home_2), this::startIntro, () -> splashGone(s));
         // its landing animation needs frames; should none come (Aura started under an app, a busy
         // TV), the loading screen still goes, so it can never hold the remote
         handler.postDelayed(dropSplash, 4000);
@@ -5337,7 +5357,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             } catch (RuntimeException ignored) {
             }
         }
-        hud(R.drawable.ic_info, "Voice search isn't available");
+        hud(R.drawable.ic_info, getString(R.string.voice_search_isnt_available));
     }
 
     private LinearLayout column(int l, int t, int r, int b) {

@@ -33,7 +33,15 @@ final class Folders {
     }
 
     /** Names offered for a folder, so naming one needs no keyboard; any other can be typed. */
-    static final String[] NAMES = {"Movies & Shows", "Music", "Kids", "Sports", "News", "Games", "Tools", "Favourites"};
+    private static final int[] NAMES = {R.string.folder_movies, R.string.genre_music, R.string.folder_kids, R.string.folder_sports,
+            R.string.folder_news, R.string.folder_games, R.string.folder_tools, R.string.folder_favourites};
+
+    /** {@link #NAMES} in the TV's language. */
+    private static String[] names(Context c) {
+        String[] out = new String[NAMES.length];
+        for (int i = 0; i < NAMES.length; i++) out[i] = c.getString(NAMES[i]);
+        return out;
+    }
     private static final String KEY = "folders";
 
     private Folders() { }
@@ -76,8 +84,9 @@ final class Folders {
     /** A new folder with the first unused name, holding {@code pkg}; returns it. */
     static Folder create(Context c, String pkg) {
         Map<String, Folder> all = all(c);
-        String name = NAMES[0];
-        for (String n : NAMES) {
+        String[] names = names(c);
+        String name = names[0];
+        for (String n : names) {
             boolean used = false;
             for (Folder f : all.values()) if (f.name.equals(n)) used = true;
             if (!used) {
@@ -121,7 +130,7 @@ final class Folders {
     static List<String> suggestions(Context c) {
         List<String> out = new ArrayList<>();
         Map<String, Folder> all = all(c);
-        for (String n : NAMES) {
+        for (String n : names(c)) {
             boolean used = false;
             for (Folder f : all.values()) if (f.name.equalsIgnoreCase(n)) used = true;
             if (!used) out.add(n);
