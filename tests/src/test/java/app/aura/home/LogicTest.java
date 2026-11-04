@@ -92,4 +92,29 @@ public class LogicTest {
         Profiles.remove(c, added.id);
         assertEquals(before, Profiles.all(c).size());
     }
+
+    @Test
+    public void systemNoiseFilteredAndSleepCancelledOnManualScreenOff() throws Exception {
+        Context c = RuntimeEnvironment.getApplication();
+        assertTrue(Habits.isSystemNoise("com.amazon.venezia"));
+        assertTrue(Habits.isSystemNoise("com.amazon.vizzini"));
+        assertTrue(Habits.isSystemNoise("com.google.android.apps.tv.launcherx"));
+        assertTrue(Habits.isSystemNoise("com.realtek.keyintercept"));
+        assertFalse(Habits.isSystemNoise("com.netflix.ninja"));
+
+        Habits.opened(c, "com.amazon.venezia");
+        assertFalse("Fire OS background noise is excluded from recent apps",
+                Habits.recentList(c, Collections.singleton("com.amazon.venezia"), 10).containsKey("com.amazon.venezia"));
+
+        Power.setSleep(c, 30);
+        assertTrue(Power.sleepLeftMs(c) >= 29 * 60_000L);
+        Power.onScreenOff(c);
+        assertEquals("manual screen-off cancels pending sleep timer", 0L, Power.sleepLeftMs(c));
+
+        try (java.net.ServerSocket ss = new java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
+            int openPort = ss.getLocalPort();
+            assertEquals(openPort, Adb.probeLocalPort(200, 1, openPort));
+        }
+        assertEquals(-1, Adb.probeLocalPort(80, 1));
+    }
 }

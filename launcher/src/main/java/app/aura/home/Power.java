@@ -16,10 +16,12 @@ import android.media.AudioManager;
  * service (Android 9+) or the TV's own debugging link, if Aura has either.
  */
 final class Power {
-    static final String FADE = "app.aura.home.action.FADE", SLEEP = "app.aura.home.action.SLEEP",
-            RESTORE = "app.aura.home.action.RESTORE";
-    static final long FADE_MS = 60_000;
+    static final String WARN_5M = "app.aura.home.action.WARN_5M", FADE = "app.aura.home.action.FADE",
+            SLEEP = "app.aura.home.action.SLEEP", RESTORE = "app.aura.home.action.RESTORE";
+    static final long FADE_MS = 60_000, WARN_5M_MS = 5 * 60_000L;
     static final int FADE_STEPS = 12;
+    private static final int NOTE_ID = 77;
+    private static final String CHANNEL_ID = "aura_sleep";
 
     private static volatile long cachedSleepAt = -1;
     private static volatile long lastPendingCheckAt;
@@ -84,11 +86,12 @@ final class Power {
         long left = MediaWatch.remainingMs(c);
         if (left < 2 * 60_000L || left > 6 * 3_600_000L) return false;
         setSleep(c, 0);
-        long at = System.currentTimeMillis() + left + 20_000;
-        schedule(c, FADE, 0, Math.max(System.currentTimeMillis() + 1_000, at - FADE_MS));
+        long now = System.currentTimeMillis(), at = now + left + 20_000;
+        if (at - now > WARN_5M_MS + 60_000L) schedule(c, WARN_5M, 0, at - WARN_5M_MS);
+        schedule(c, FADE, 0, Math.max(now + 1_000, at - FADE_MS));
         prefs(c).edit().putLong("sleepAt", at).putBoolean("sleepEnd", true).apply();
         cachedSleepAt = at;
-        lastPendingCheckAt = System.currentTimeMillis();
+        lastPendingCheckAt = now;
         return true;
     }
 
@@ -100,12 +103,13 @@ final class Power {
         prefs(c).edit().remove("sleepEnd").apply();
         AlarmManager am = Compat.svc(c, AlarmManager.class);
         if (am != null) {
-            for (String a : new String[]{FADE, SLEEP, RESTORE}) {
+            for (String a : new String[]{WARN_5M, FADE, SLEEP, RESTORE}) {
                 PendingIntent pi = intent(c, a, 0);
                 am.cancel(pi);
                 pi.cancel();
             }
         }
+        cancelSleepNotification(c);
         restoreVolume(c);
         if (minutes <= 0) {
             prefs(c).edit().remove("sleepAt").apply();
@@ -113,10 +117,79 @@ final class Power {
             return;
         }
         long now = System.currentTimeMillis(), at = now + minutes * 60_000L;
+        if (minutes >= 10) schedule(c, WARN_5M, 0, at - WARN_5M_MS);
         schedule(c, FADE, 0, Math.max(now + 1_000, at - FADE_MS));
         prefs(c).edit().putLong("sleepAt", at).apply();
         cachedSleepAt = at;
         lastPendingCheckAt = now;
+    }
+
+    /** Five minutes left on the sleep timer: a quiet heads-up notification over whatever app is open. */
+    static void warnFiveMinutes(Context c) {
+        long left = sleepLeftMs(c);
+        if (left < 60_000L) return;
+        postSleepNotification(c, c.getString(R.string.sleep_timer),
+                c.getString(R.string.tv_will_fade_out_and_sleep, Words.minutes(5)), false, 0);
+    }
+
+    /** Posts a TV-extended notification (with optional 60-second system countdown during the final fade). */
+    private static void postSleepNotification(Context c, String title, String text, boolean countdown, long durationMs) {
+        try {
+            android.app.NotificationManager nm = Compat.svc(c, android.app.NotificationManager.class);
+            if (nm == null) return;
+            android.app.Notification.Builder b;
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                android.app.NotificationChannel ch = new android.app.NotificationChannel(
+                        CHANNEL_ID, c.getString(R.string.sleep_timer), android.app.NotificationManager.IMPORTANCE_HIGH);
+                ch.enableVibration(false);
+                ch.setSound(null, null);
+                nm.createNotificationChannel(ch);
+                b = new android.app.Notification.Builder(c, CHANNEL_ID);
+            } else {
+                b = new android.app.Notification.Builder(c);
+            }
+            PendingIntent openPi = PendingIntent.getActivity(c, 78,
+                    new Intent(c, HomeActivity.class).putExtra("aura_cc", "").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    (android.os.Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0) | PendingIntent.FLAG_UPDATE_CURRENT);
+            b.setSmallIcon(R.drawable.ic_moon)
+                    .setContentTitle(title)
+                    .setContentText(text)
+                    .setContentIntent(openPi)
+                    .setAutoCancel(true)
+                    .setOnlyAlertOnce(true);
+            if (countdown) {
+                android.os.Bundle extras = new android.os.Bundle();
+                extras.putBoolean("timer_notification", true);
+                extras.putLong("timer_duration", durationMs);
+                b.addExtras(extras);
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                b.extend(new android.app.Notification.TvExtender());
+            }
+            nm.notify(NOTE_ID, b.build());
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    static void cancelSleepNotification(Context c) {
+        try {
+            android.app.NotificationManager nm = Compat.svc(c, android.app.NotificationManager.class);
+            if (nm != null) nm.cancel(NOTE_ID);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    /**
+     * The TV's screen went off while a sleep timer still had time left (someone switched the TV off
+     * by hand before the timer ended): cancel the timer and put the volume back so it doesn't fire
+     * later or leave the sound faded on next wake.
+     */
+    static void onScreenOff(Context c) {
+        SharedPreferences p = prefs(c);
+        long at = p.getLong("sleepAt", 0);
+        if (at > 0 && at - System.currentTimeMillis() > 15_000L) {
+            setSleep(c, 0);
+        }
     }
 
     /** One step of the fade; the first step remembers the volume to come back to. */
@@ -132,6 +205,10 @@ final class Power {
                 schedule(c, FADE, 0, at - FADE_MS);
                 return;
             }
+        }
+        if (step == 0) {
+            postSleepNotification(c, c.getString(R.string.sleep_timer),
+                    c.getString(R.string.tv_will_fade_out_and_sleep, Words.minutes(1)), true, FADE_MS);
         }
         if (am.isVolumeFixed()) {
             long at = p.getLong("sleepAt", 0);
@@ -162,6 +239,7 @@ final class Power {
     }
 
     static void sleepNow(Context c) {
+        cancelSleepNotification(c);
         prefs(c).edit().remove("sleepAt").remove("sleepEnd").apply();
         cachedSleepAt = 0;
         // put the volume back once the panel is off, so it's normal the next time the TV wakes. Had

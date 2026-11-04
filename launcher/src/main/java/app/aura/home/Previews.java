@@ -199,6 +199,7 @@ final class Previews {
         try {
             Bitmap b = BitmapFactory.decodeFile(f.getPath(), o);
             if (b == null) return null;
+            if (w <= 0 || h <= 0 || (b.getWidth() <= w && b.getHeight() <= h)) return b;
             Bitmap s = Bitmap.createScaledBitmap(b, w, h, true);
             if (s != b) b.recycle();
             return s;

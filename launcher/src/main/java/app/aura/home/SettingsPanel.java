@@ -244,6 +244,12 @@ final class SettingsPanel {
         go(p);
     }
 
+    /** Opens straight to the app picker for a held remote button. */
+    void openKeyPicker(int code, int scan) {
+        newKey = new int[]{code, scan};
+        open("keys");
+    }
+
     /** Redraws the page on show, after something outside changed what it says. */
     void refresh() {
         if (isOpen()) build();
@@ -1552,6 +1558,11 @@ final class SettingsPanel {
                 host.open(new Intent(Settings.ACTION_SETTINGS), panel);
             }
         });
+        Intent xray = new Intent().setClassName("com.amazon.ssm", "com.amazon.ssm.ControlPanel");
+        if (xray.resolveActivity(act.getPackageManager()) != null) {
+            add(act.getString(R.string.system_xray), act.getString(R.string.cpu_memory_and_network_overlay), "adb:xray",
+                    () -> host.open(xray.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), panel));
+        }
     }
 
     private void toggle(String label, String key, String onText, String offText, String what) {

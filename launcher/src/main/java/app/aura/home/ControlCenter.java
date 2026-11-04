@@ -1304,7 +1304,7 @@ final class ControlCenter {
         if (!Power.screenOff(act)) host.hud(R.drawable.ic_info, act.getString(R.string.standby_needs_setup_settings_set));
     }
 
-    private void cycleSleep() {
+    void cycleSleep() {
         long left = Power.sleepLeftMs(act);
         // with no way to switch the TV off, a timer would only fade the sound out and leave it on
         if (left <= 0 && !Power.canSleep(act)) {

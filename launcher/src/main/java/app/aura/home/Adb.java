@@ -297,12 +297,79 @@ final class Adb {
     }
 
     /**
-     * Network debugging on port 5555 where the TV offers it; else wireless debugging (Android 11+),
-     * once paired, at whatever port it has now: the last one tried first, then found over mDNS.
+     * Probes candidate loopback ADB ports in parallel with a non-blocking NIO {@link java.nio.channels.Selector}.
+     * Returns the first open port, or -1 as soon as all candidates refuse or {@code timeoutMs} elapses.
+     */
+    static int probeLocalPort(int timeoutMs, int... ports) {
+        if (ports == null || ports.length == 0) return -1;
+        java.nio.channels.Selector sel = null;
+        List<java.nio.channels.SocketChannel> chans = new ArrayList<>(ports.length);
+        try {
+            sel = java.nio.channels.Selector.open();
+            for (int port : ports) {
+                if (port <= 0) continue;
+                try {
+                    java.nio.channels.SocketChannel ch = java.nio.channels.SocketChannel.open();
+                    ch.configureBlocking(false);
+                    if (ch.connect(new InetSocketAddress("127.0.0.1", port))) {
+                        ch.close();
+                        return port;
+                    }
+                    ch.register(sel, java.nio.channels.SelectionKey.OP_CONNECT, port);
+                    chans.add(ch);
+                } catch (IOException ignored) {
+                }
+            }
+            long deadline = android.os.SystemClock.uptimeMillis() + Math.max(20, timeoutMs);
+            while (!sel.keys().isEmpty()) {
+                long wait = deadline - android.os.SystemClock.uptimeMillis();
+                if (wait <= 0 || sel.select(wait) == 0) break;
+                java.util.Iterator<java.nio.channels.SelectionKey> it = sel.selectedKeys().iterator();
+                while (it.hasNext()) {
+                    java.nio.channels.SelectionKey k = it.next();
+                    it.remove();
+                    if (!k.isValid() || !k.isConnectable()) continue;
+                    java.nio.channels.SocketChannel ch = (java.nio.channels.SocketChannel) k.channel();
+                    int p = (Integer) k.attachment();
+                    try {
+                        if (ch.finishConnect()) return p;
+                    } catch (IOException refused) {
+                        k.cancel();
+                        try {
+                            ch.close();
+                        } catch (IOException ignored) {
+                        }
+                    }
+                }
+            }
+        } catch (IOException ignored) {
+        } finally {
+            for (java.nio.channels.SocketChannel ch : chans) {
+                try {
+                    ch.close();
+                } catch (IOException ignored) {
+                }
+            }
+            if (sel != null) {
+                try {
+                    sel.close();
+                } catch (IOException ignored) {
+                }
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Network debugging on port 5555 (or OEM ADB ports) where the TV offers it; else wireless
+     * debugging (Android 11+), once paired, at whatever port it has now: the last one tried first,
+     * then found over mDNS.
      */
     private static Link link(Context c, boolean mayAsk) throws IOException {
+        int localPort = probeLocalPort(250, PORT, 1127, 5114, 7896, 30105, 31015);
         try {
-            return Link.open("127.0.0.1", PORT, key(dir(c)), name(), mayAsk);
+            if (localPort < 0) throw new ConnectException("local adb off");
+            return Link.open("127.0.0.1", localPort, key(dir(c)), name(), mayAsk);
         } catch (IOException e) {
             if (Build.VERSION.SDK_INT < 30 || !Prefs.device(c).getBoolean("adb_paired", false)) throw e;
         }

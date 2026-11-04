@@ -75,8 +75,11 @@ public class HomeKeys extends AccessibilityService {
     /** A volume button held down (its key code), and since when; 0 when none. */
     private int volumeHeld;
     private long volumeSince;
-    /** As Android's own repeat: a pause after the press, then a step every 100 ms, never past 6 s (a lost release). */
-    private static final long VOLUME_WAIT_MS = 500, VOLUME_STEP_MS = 100, VOLUME_MAX_MS = 6000;
+    /**
+     * As Android's own repeat: a short pause after the press (< 400 ms InputDispatcher repeat
+     * timeout on Realtek/Amlogic TVs), then a smooth step every 95 ms, never past 8 s (a lost release).
+     */
+    private static final long VOLUME_WAIT_MS = 320, VOLUME_STEP_MS = 95, VOLUME_MAX_MS = 8000;
     private final Runnable volumeRepeat = new Runnable() {
         @Override
         public void run() {
@@ -86,16 +89,30 @@ public class HomeKeys extends AccessibilityService {
             }
             android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
             if (am == null) return;
+            int dir = volumeHeld == KeyEvent.KEYCODE_VOLUME_UP
+                    ? android.media.AudioManager.ADJUST_RAISE : android.media.AudioManager.ADJUST_LOWER;
             try {
-                am.adjustSuggestedStreamVolume(volumeHeld == KeyEvent.KEYCODE_VOLUME_UP ? android.media.AudioManager.ADJUST_RAISE
-                        : android.media.AudioManager.ADJUST_LOWER, android.media.AudioManager.USE_DEFAULT_STREAM_TYPE,
+                int before = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+                am.adjustSuggestedStreamVolume(dir, android.media.AudioManager.STREAM_MUSIC,
                         android.media.AudioManager.FLAG_SHOW_UI);
+                if (!am.isVolumeFixed() && am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) == before) {
+                    am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, dir,
+                            android.media.AudioManager.FLAG_SHOW_UI);
+                }
             } catch (RuntimeException ex) {
                 volumeHeld = 0;
                 return;
             }
             handler.postDelayed(this, VOLUME_STEP_MS);
         }
+    };
+    /** A mapped remote button held down: short press opens its app, holding reassigns it. */
+    private int mappedKeyDown = -1, mappedScanDown = -1;
+    private boolean mappedHoldFired;
+    private final Runnable mappedHold = () -> {
+        if (mappedKeyDown < 0 || mappedHoldFired) return;
+        mappedHoldFired = true;
+        if (!Profiles.kids(this)) openKeyPicker(mappedKeyDown, mappedScanDown);
     };
     /** How late D-pad releases arrive, smoothed: the firmware's own delay, for Settings to show. */
     private long lag, lagN;
@@ -150,6 +167,17 @@ public class HomeKeys extends AccessibilityService {
             return true;
         } catch (RuntimeException ex) {
             return false;
+        }
+    }
+
+    /** Opens Aura straight to the app picker for a held remote button. */
+    private void openKeyPicker(int code, int scan) {
+        try {
+            startActivity(new Intent(this, HomeActivity.class)
+                    .putExtra("aura_key_code", code)
+                    .putExtra("aura_key_scan", scan)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION));
+        } catch (RuntimeException ignored) {
         }
     }
 
@@ -289,10 +317,11 @@ public class HomeKeys extends AccessibilityService {
     /**
      * Just after a restart: the launcher Android opened is the TV's own, and Aura takes its place.
      * Only when that's certain (the usage history says so), or on a box with no inputs of its own
-     * (a TV may have started on its tuner or an HDMI input, and stays there).
+     * (a TV may have started on its tuner or an HDMI input, and stays there), and never when an
+     * external HDMI-CEC device woke the TV via One Touch Play.
      */
     private void afterBoot() {
-        if (front != null || !takeover()) return;
+        if (front != null || !takeover() || Cec.externalActiveSource(this)) return;
         String last = lastForeground();
         if (last != null ? isOther(last) : !hasInputs()) openHome();
     }
@@ -378,7 +407,7 @@ public class HomeKeys extends AccessibilityService {
         // nor do an app's own pop-ups: another app's dialog over the one you're in doesn't make it the app in front
         if (ok && cls != null && !pkg.equals(getPackageName()) && !activity(pkg, cls)) ok = false;
         if (ok) {
-            if (!pkg.equals(front) && !pkg.equals(getPackageName())) {
+            if (!pkg.equals(front) && !pkg.equals(getPackageName()) && !Habits.isSystemNoise(pkg)) {
                 // recent apps learn it here, however it was opened (a remote's own button, another app)
                 lastApp = pkg;
                 lastAppAt = System.currentTimeMillis();
@@ -493,33 +522,59 @@ public class HomeKeys extends AccessibilityService {
                 return true;
             }
         }
-        // the switcher's picture of the app: taken as you leave it by Back as well as by Home, and
-        // kept fresh while you browse it, so the card shows the screen you last saw, not its icon
-        if (!up && e.getRepeatCount() == 0 && key != KeyEvent.KEYCODE_HOME && front != null
-                && !front.equals(getPackageName()) && Previews.on(this)) {
-            Long last = shotOf.get(front);
-            if (key == KeyEvent.KEYCODE_BACK || last == null || SystemClock.uptimeMillis() - last > REFRESH_MS) shoot(front);
-        }
         // held volume: Android re-sends every key that passes through here, and a re-sent key gets no
-        // repeats of its own, so holding Volume moved it one step (GitHub issue #1). The press goes
-        // on as before; while it stays held, the volume keeps stepping from here, as the repeats would
+        // repeats of its own (or sends a single repeatCount=1 before stopping), so holding Volume moved
+        // it one step. Handled before screenshots so Volume never triggers takeScreenshot().
         if (key == KeyEvent.KEYCODE_VOLUME_UP || key == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            handler.removeCallbacks(volumeRepeat);
-            if (!up && e.getRepeatCount() == 0) {
+            if (up || e.isCanceled()) {
+                volumeHeld = 0;
+                handler.removeCallbacks(volumeRepeat);
+                return false;
+            }
+            if (e.getRepeatCount() == 0) {
+                handler.removeCallbacks(volumeRepeat);
                 volumeHeld = key;
                 volumeSince = SystemClock.uptimeMillis();
                 handler.postDelayed(volumeRepeat, VOLUME_WAIT_MS);
-            } else {
-                // let go, or this TV passes Android's own repeats through: they carry on by themselves
-                volumeHeld = 0;
+                return false;
             }
-            return false;
+            // held repeat: keep volumeRepeat running and swallow the hardware repeat so re-injection
+            // never resets the hold or causes double-steps while volumeRepeat steps smoothly
+            if (volumeHeld != key) {
+                volumeHeld = key;
+                volumeSince = SystemClock.uptimeMillis();
+                handler.removeCallbacks(volumeRepeat);
+                handler.post(volumeRepeat);
+            }
+            return true;
         }
-        // a button given an app
+        // the switcher's picture of the app: taken as you leave it by Back as well as by Home, and
+        // kept fresh while you browse it, so the card shows the screen you last saw, not its icon
+        if (!up && e.getRepeatCount() == 0 && key != KeyEvent.KEYCODE_HOME && key != KeyEvent.KEYCODE_VOLUME_MUTE
+                && front != null && !front.equals(getPackageName()) && Previews.on(this)) {
+            Long last = shotOf.get(front);
+            if (key == KeyEvent.KEYCODE_BACK || last == null || SystemClock.uptimeMillis() - last > REFRESH_MS) shoot(front);
+        }
+        // a button given an app: short press opens it, holding reassigns it
         String app = mapped(this, key, e.getScanCode());
         if (app != null) {
-            if (up && !e.isCanceled()) {
-                launch(this, app);
+            if (!up) {
+                if (e.getRepeatCount() == 0) {
+                    mappedKeyDown = key;
+                    mappedScanDown = e.getScanCode();
+                    mappedHoldFired = false;
+                    handler.removeCallbacks(mappedHold);
+                    handler.postDelayed(mappedHold, HOLD_MS);
+                }
+            } else {
+                handler.removeCallbacks(mappedHold);
+                boolean wasHeld = mappedHoldFired;
+                mappedKeyDown = -1;
+                mappedScanDown = -1;
+                mappedHoldFired = false;
+                if (!wasHeld && !e.isCanceled()) {
+                    launch(this, app);
+                }
             }
             return true;
         }
@@ -646,7 +701,9 @@ public class HomeKeys extends AccessibilityService {
     @Override
     public void onInterrupt() {
         volumeHeld = 0;
+        mappedKeyDown = -1;
         handler.removeCallbacks(volumeRepeat);
+        handler.removeCallbacks(mappedHold);
         handler.removeCallbacks(settleShot);
         handler.removeCallbacks(settleShotLate);
         handler.removeCallbacks(refilter);
@@ -660,7 +717,9 @@ public class HomeKeys extends AccessibilityService {
     public boolean onUnbind(Intent intent) {
         HomeCover.hide(false);
         volumeHeld = 0;
+        mappedKeyDown = -1;
         handler.removeCallbacks(volumeRepeat);
+        handler.removeCallbacks(mappedHold);
         handler.removeCallbacks(settleShot);
         handler.removeCallbacks(settleShotLate);
         handler.removeCallbacks(refilter);
@@ -829,8 +888,19 @@ public class HomeKeys extends AccessibilityService {
     static String mapped(Context c, int code, int scan) {
         Map<String, String> k = keys(c);
         String pkg = k.isEmpty() ? null : k.get(id(code, scan));
-        // in a kids' profile, a button given an app that profile hides does nothing (and isn't passed on)
-        return pkg != null && !allowed(c, pkg) ? "" : pkg;
+        if (pkg == null) return null;
+        // in a kids' profile, a button given YouTube opens YouTube Kids when installed and allowed;
+        // any other hidden app does nothing (and isn't passed on)
+        if (!allowed(c, pkg)) {
+            if (("com.google.android.youtube.tv".equals(pkg) || "com.amazon.firetv.youtube".equals(pkg))
+                    && allowed(c, "com.google.android.youtube.tvkids")
+                    && (c.getPackageManager().getLeanbackLaunchIntentForPackage("com.google.android.youtube.tvkids") != null
+                    || c.getPackageManager().getLaunchIntentForPackage("com.google.android.youtube.tvkids") != null)) {
+                return "com.google.android.youtube.tvkids";
+            }
+            return "";
+        }
+        return pkg;
     }
 
     /** Whether the profile in use may open {@code pkg}: a kids' profile can't open what it hides. */

@@ -220,6 +220,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             tick();
         }
     };
+    private final BroadcastReceiver screenOffReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            Power.onScreenOff(HomeActivity.this);
+            closeOverlays();
+            if (ccOpen) closeCc(false);
+            if (settings != null && settings.isOpen()) closeSettings();
+            if (switcher != null && switcher.isOpen()) closeSwitcher();
+        }
+    };
     private final BroadcastReceiver packageReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent i) {
@@ -313,6 +323,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         pf.addAction(Intent.ACTION_PACKAGE_REPLACED);
         pf.addDataScheme("package");
         registerReceiver(packageReceiver, pf);
+        registerReceiver(screenOffReceiver, new IntentFilter(Intent.ACTION_SCREEN_OFF));
         Previews.listener = shotTaken;
         Ambient.makeRoom = makeRoom;
         Ambient.homeComing = homeComing;
@@ -564,6 +575,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         handler.removeCallbacksAndMessages(null);
         settings.shutDrop();
         unregisterReceiver(packageReceiver);
+        unregisterReceiver(screenOffReceiver);
         if (Previews.listener == shotTaken) Previews.listener = null;
         if (Ambient.makeRoom == makeRoom) Ambient.makeRoom = null;
         if (Ambient.homeComing == homeComing) Ambient.homeComing = null;
@@ -650,6 +662,29 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         // Home held inside an app (HomeKeys): Control Center over it, Back returns to the app
         String ccFor = intent.getStringExtra("aura_cc");
+        String act = intent.getAction();
+        if ("android.app.action.TOGGLE_NOTIFICATION_HANDLER_PANEL".equals(act)
+                || "android.app.action.OPEN_NOTIFICATION_HANDLER_PANEL".equals(act)
+                || "com.amazon.tv.action.NAVIGATE_TO_INPUTS".equals(act)) {
+            lastHomeAt = 0;
+            if (welcome != null || switcher.isOpen()) return;
+            boolean inputs = "com.amazon.tv.action.NAVIGATE_TO_INPUTS".equals(act);
+            if (ccOpen && "android.app.action.TOGGLE_NOTIFICATION_HANDLER_PANEL".equals(act)) closeCc(true);
+            else if (!ccOpen) openCc(inputs);
+            return;
+        }
+        if (intent.hasExtra("aura_key_code")) {
+            lastHomeAt = 0;
+            if (welcome != null || Profiles.kids(this)) return;
+            int kCode = intent.getIntExtra("aura_key_code", KeyEvent.KEYCODE_UNKNOWN);
+            int kScan = intent.getIntExtra("aura_key_scan", 0);
+            if (switcher.isOpen()) closeSwitcher();
+            if (ccOpen) closeCc(false);
+            closeOverlays();
+            if (!settings.isOpen()) openSettingsNow("keys");
+            settings.openKeyPicker(kCode, kScan);
+            return;
+        }
         if (ccFor != null) {
             lastHomeAt = 0;
             if (welcome != null || switcher.isOpen()) return;
@@ -4423,6 +4458,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 closeMenu(card);
                 quietScreen();
             }));
+            if (Power.canSleep(this)) {
+                items.add(new AppMenu.Item(R.drawable.ic_moon, sleepMenuLabel(), () -> {
+                    closeMenu(card);
+                    cc.cycleSleep();
+                }));
+            }
         } else if (it.title != null && !it.title.isEmpty()) {
             final String key = Continue.key(it.title);
             boolean watching = it.progress > 0f;
@@ -4533,10 +4574,23 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 // Android asks to confirm; the grid updates itself once the app is gone
                 open(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + pkg)), card);
             }));
+            if (Power.canSleep(this)) {
+                items.add(new AppMenu.Item(R.drawable.ic_moon, sleepMenuLabel(), () -> {
+                    closeMenu(card);
+                    cc.cycleSleep();
+                }));
+            }
         }
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         menuBack = card;
         menu.show(card, label, items);
+    }
+
+    private String sleepMenuLabel() {
+        long left = Power.sleepLeftMs(this);
+        if (left <= 0) return getString(R.string.sleep_timer);
+        int min = (int) Math.ceil(left / 60_000.0);
+        return getString(R.string.sleep_in_value, Words.minutes(min));
     }
 
     /** Hold OK on a widget: move it along the row, or hide it (the others widen to fill its place). */

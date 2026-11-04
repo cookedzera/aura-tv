@@ -19,8 +19,25 @@ final class Habits {
     private static final long DAY = 86_400_000L;
     /** UsageEvents.Event.SCREEN_NON_INTERACTIVE, which Android names from 9 on; older TVs simply never send it. */
     private static final int SCREEN_OFF = 16;
+    private static final java.util.Set<String> SYSTEM_NOISE = new java.util.HashSet<>(java.util.Arrays.asList(
+            "com.amazon.venezia", "com.amazon.vizzini", "com.amazon.tv.launcher", "com.amazon.firehomestarter",
+            "com.amazon.tv.leanbacklauncher", "com.amazon.tv.settings", "com.amazon.tv.settings.v2",
+            "com.amazon.tv.quicksettings.ui", "com.amazon.ssm", "com.amazon.device.settings",
+            "com.amazon.ags.app", "com.amazon.avls.experience", "com.google.android.apps.tv.launcherx",
+            "com.google.android.tvlauncher", "com.google.android.tungsten.setupwraith",
+            "com.google.android.katniss", "com.android.tv.settings", "com.android.settings",
+            "com.android.systemui", "com.android.vending", "com.realtek.keyintercept"
+    ));
 
     private Habits() { }
+
+    /**
+     * System launchers, voice overlays, app stores and settings pages that aren't viewing apps:
+     * excluded from recent apps, For You habits, and daily screen time.
+     */
+    static boolean isSystemNoise(String pkg) {
+        return pkg == null || SYSTEM_NOISE.contains(pkg);
+    }
 
     static boolean granted(Context c) {
         AppOpsManager ops = Compat.svc(c, AppOpsManager.class);
@@ -89,7 +106,7 @@ final class Habits {
             events.getNextEvent(e);
             if (e.getEventType() != UsageEvents.Event.MOVE_TO_FOREGROUND) continue;
             String p = e.getPackageName();
-            if (p == null || p.equals(self)) continue;
+            if (p == null || p.equals(self) || isSystemNoise(p)) continue;
             long t = e.getTimeStamp();
             // one visit, not every screen inside the app
             boolean sameVisit = p.equals(lastPkg) && t - lastT < 10 * 60_000L;
@@ -154,7 +171,7 @@ final class Habits {
             }
             seenTo = now;
             for (Map.Entry<String, Long> s : seen.entrySet()) {
-                if (allowed.contains(s.getKey()) && s.getValue() >= now - 7 * DAY) last.put(s.getKey(), s.getValue());
+                if (allowed.contains(s.getKey()) && !isSystemNoise(s.getKey()) && s.getValue() >= now - 7 * DAY) last.put(s.getKey(), s.getValue());
             }
         }
         // Android's history on some TVs only reaches back to the last power-on: Aura's own list
@@ -162,7 +179,7 @@ final class Habits {
         android.content.SharedPreferences p = c.getSharedPreferences("aura_usage", Context.MODE_PRIVATE);
         Map<String, Long> kept = read(p.getString("recent", "{}"));
         for (Map.Entry<String, Long> k : kept.entrySet()) {
-            if (allowed.contains(k.getKey()) && (!last.containsKey(k.getKey()) || last.get(k.getKey()) < k.getValue())) last.put(k.getKey(), k.getValue());
+            if (allowed.contains(k.getKey()) && !isSystemNoise(k.getKey()) && (!last.containsKey(k.getKey()) || last.get(k.getKey()) < k.getValue())) last.put(k.getKey(), k.getValue());
         }
         p.edit().putString("recent", write(last)).apply();
         // closed in the switcher: gone until it's used again
@@ -182,7 +199,7 @@ final class Habits {
 
     /** An app was just opened from Aura: remembered for the switcher even across restarts. */
     static synchronized void opened(Context c, String pkg) {
-        if (pkg == null) return;
+        if (pkg == null || isSystemNoise(pkg)) return;
         android.content.SharedPreferences p = c.getSharedPreferences("aura_usage", Context.MODE_PRIVATE);
         Map<String, Long> kept = read(p.getString("recent", "{}"));
         kept.put(pkg, System.currentTimeMillis());
@@ -214,11 +231,13 @@ final class Habits {
         return d == 1 ? Words.get(R.string.yesterday) : Words.count(R.plurals.days_ago, (int) d);
     }
 
-    /** Foreground time in apps since midnight (Aura itself excluded), or -1 without access. */
+    /** Foreground time in apps since midnight (Aura itself and system noise excluded), or -1 without access. */
     static long todayMs(Context c) {
         if (!granted(c)) return -1;
         long total = 0;
-        for (Map.Entry<String, Long> e : today(c).entrySet()) if (!e.getKey().equals(c.getPackageName())) total += e.getValue();
+        for (Map.Entry<String, Long> e : today(c).entrySet()) {
+            if (!e.getKey().equals(c.getPackageName()) && !isSystemNoise(e.getKey())) total += e.getValue();
+        }
         return total;
     }
 
@@ -228,7 +247,7 @@ final class Habits {
         String best = null;
         long most = 5 * 60_000L;
         for (Map.Entry<String, Long> e : today(c).entrySet()) {
-            if (e.getKey().equals(c.getPackageName()) || e.getValue() <= most) continue;
+            if (e.getKey().equals(c.getPackageName()) || isSystemNoise(e.getKey()) || e.getValue() <= most) continue;
             most = e.getValue();
             best = e.getKey();
         }

@@ -32,8 +32,59 @@ final class Cec {
         return n != null ? n : label;
     }
 
+    /**
+     * True when the TV's HDMI-CEC service reports an external HDMI device (physical address > 0) as
+     * the active source right now (e.g. a console woke the TV via One Touch Play).
+     */
+    static boolean externalActiveSource(Context c) {
+        try {
+            Object mgr = c.getSystemService("hdmi_control");
+            if (mgr == null) return false;
+            Object tv = mgr.getClass().getMethod("getTvClient").invoke(mgr);
+            if (tv == null) return false;
+            Object src = tv.getClass().getMethod("getActiveSource").invoke(tv);
+            if (src == null) return false;
+            int phys = (Integer) src.getClass().getMethod("getPhysicalAddress").invoke(src);
+            return phys > 0 && phys != 0xFFFF;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static Map<Integer, String> tryHdmiManager(Context c) {
+        try {
+            Object mgr = c.getSystemService("hdmi_control");
+            if (mgr == null) return null;
+            Object tv = mgr.getClass().getMethod("getTvClient").invoke(mgr);
+            if (tv == null) return null;
+            Object list = tv.getClass().getMethod("getDeviceList").invoke(tv);
+            if (!(list instanceof java.util.List<?>)) return null;
+            Map<Integer, String> found = new HashMap<>();
+            for (Object d : (java.util.List<?>) list) {
+                if (d == null) continue;
+                int logical = (Integer) d.getClass().getMethod("getLogicalAddress").invoke(d);
+                if (logical == 0) continue;
+                int phys = (Integer) d.getClass().getMethod("getPhysicalAddress").invoke(d);
+                int port = (phys >> 12) & 0xF;
+                Object disp = d.getClass().getMethod("getDisplayName").invoke(d);
+                String name = disp != null ? disp.toString().trim() : "";
+                if (port > 0 && !name.isEmpty()) found.put(port, name);
+            }
+            return found;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     private static void refresh(Context c) {
-        if (reading || SystemClock.elapsedRealtime() - readAt < 30_000 || !Reports.allowed(c)) return;
+        if (reading || SystemClock.elapsedRealtime() - readAt < 30_000) return;
+        Map<Integer, String> direct = tryHdmiManager(c);
+        if (direct != null && !direct.isEmpty()) {
+            names = direct;
+            readAt = SystemClock.elapsedRealtime();
+            return;
+        }
+        if (!Reports.allowed(c)) return;
         reading = true;
         new SafeThread(() -> {
             Map<Integer, String> found = new HashMap<>();

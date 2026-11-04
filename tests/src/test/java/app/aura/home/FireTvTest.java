@@ -105,4 +105,57 @@ public class FireTvTest {
         assertFalse(np.key(android.view.KeyEvent.KEYCODE_DPAD_UP));
         b.release();
     }
+
+    @Test
+    public void volumeLongPressStepsSmoothlyAndKidsYoutubeFallsBack() throws Exception {
+        Context c = RuntimeEnvironment.getApplication();
+        android.media.AudioManager am = (android.media.AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+        am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 2, 0);
+        int startVol = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+
+        HomeKeys hk = Robolectric.setupService(HomeKeys.class);
+        // Initial ACTION_DOWN (repeatCount=0) passes through (false) so system OSD handles step 1, and arms volumeRepeat
+        android.view.KeyEvent down0 = new android.view.KeyEvent(0, 0, android.view.KeyEvent.ACTION_DOWN,
+                android.view.KeyEvent.KEYCODE_VOLUME_UP, 0);
+        assertFalse(hk.onKeyEvent(down0));
+
+        // Hardware repeat at 400ms (repeatCount=1) is consumed (true) without cancelling volumeRepeat
+        ShadowLooper.idleMainLooper(350, TimeUnit.MILLISECONDS);
+        android.view.KeyEvent down1 = new android.view.KeyEvent(0, 350, android.view.KeyEvent.ACTION_DOWN,
+                android.view.KeyEvent.KEYCODE_VOLUME_UP, 1);
+        assertTrue("hardware key repeat is consumed while volumeRepeat steps smoothly", hk.onKeyEvent(down1));
+
+        // Hold for another 400ms -> multiple volumeRepeat steps fire
+        ShadowLooper.idleMainLooper(400, TimeUnit.MILLISECONDS);
+        int heldVol = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+        assertTrue("holding volume up steps volume multiple times (was " + startVol + ", now " + heldVol + ")",
+                heldVol > startVol + 1);
+
+        // ACTION_UP stops volumeRepeat
+        android.view.KeyEvent up = new android.view.KeyEvent(0, 750, android.view.KeyEvent.ACTION_UP,
+                android.view.KeyEvent.KEYCODE_VOLUME_UP, 0);
+        assertFalse(hk.onKeyEvent(up));
+        int afterUpVol = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+        ShadowLooper.idleMainLooper(400, TimeUnit.MILLISECONDS);
+        assertEquals("volume stops stepping once released", afterUpVol,
+                am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC));
+
+        // Kids profile maps blocked YouTube button to YouTube Kids when installed
+        ShadowPackageManager pm = shadowOf(c.getPackageManager());
+        ComponentName ytk = new ComponentName("com.google.android.youtube.tvkids", "com.google.android.youtube.tvkids.MainActivity");
+        pm.addActivityIfNotPresent(ytk);
+        IntentFilter lf = new IntentFilter(Intent.ACTION_MAIN);
+        lf.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        pm.addIntentFilterForActivity(ytk, lf);
+
+        Profiles.Profile kids = Profiles.add(c, "Kids");
+        Profiles.setKids(c, kids.id, true);
+        Profiles.use(c, kids.id);
+        Prefs.hide(c, "com.google.android.youtube.tv", true);
+        HomeKeys.give(c, android.view.KeyEvent.KEYCODE_BUTTON_1, 0, "com.google.android.youtube.tv");
+        assertEquals("com.google.android.youtube.tvkids",
+                HomeKeys.mapped(c, android.view.KeyEvent.KEYCODE_BUTTON_1, 0));
+        HomeKeys.forget(c, HomeKeys.id(android.view.KeyEvent.KEYCODE_BUTTON_1, 0));
+        Profiles.remove(c, kids.id);
+    }
 }

@@ -9,7 +9,8 @@ public class SleepReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context c, Intent i) {
         String a = i.getAction();
-        if (Power.FADE.equals(a)) Power.fadeStep(c, i.getIntExtra("step", 0));
+        if (Power.WARN_5M.equals(a)) Power.warnFiveMinutes(c);
+        else if (Power.FADE.equals(a)) Power.fadeStep(c, i.getIntExtra("step", 0));
         else if (Power.RESTORE.equals(a)) Power.restoreVolume(c);
         else if (Power.SLEEP.equals(a)) Power.sleepNow(c);
     }

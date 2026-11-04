@@ -984,4 +984,6 @@
     <string name="screen_off_press_any_button">Screen off · press any button to wake</string>
     <string name="hold_ok_for_screen_off">Hold OK for screen off</string>
     <string name="time_left">%1$s left</string>
+    <string name="system_xray">System X-Ray</string>
+    <string name="cpu_memory_and_network_overlay">CPU, memory &amp; network overlay</string>
 </resources>
