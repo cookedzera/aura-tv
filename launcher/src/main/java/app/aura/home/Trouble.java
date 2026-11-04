@@ -44,13 +44,14 @@ final class Trouble {
     private static final Map<String, Long> lastNoted = new HashMap<>();
     private static volatile Context app;
     /** How many entries the file holds, once read: Settings asks on every redraw. */
-    private static volatile int known = -1;
+    private static volatile int known = -1, pendingCount;
 
     private Trouble() { }
 
     /** First thing as the process starts (Aura's Application). */
     static void init(Context c) {
         app = c.getApplicationContext();
+        if (known < 0) new SafeThread(() -> count(app), "trouble-init").start();
     }
 
     // ---- noting ------------------------------------------------------------------------------
@@ -110,6 +111,7 @@ final class Trouble {
             java.util.concurrent.ExecutorService s;
             synchronized (Trouble.class) {
                 pending.add(entry);
+                pendingCount = pending.size();
                 if (saver == null) saver = Compat.background("trouble", android.os.Process.THREAD_PRIORITY_BACKGROUND);
                 s = saver;
             }
@@ -122,6 +124,7 @@ final class Trouble {
     private static synchronized void save(Context c, String entry, boolean queued) {
         // cleared (Settings → Problem reports) while it waited: it goes with the rest
         if (queued && !pending.remove(entry)) return;
+        pendingCount = pending.size();
         try {
             List<String> entries = saved(c);
             // written at once (a crash, or off the main thread): any still waiting go first, in order,
@@ -129,6 +132,7 @@ final class Trouble {
             if (!queued) {
                 entries.addAll(pending);
                 pending.clear();
+                pendingCount = 0;
             }
             entries.add(entry);
             while (entries.size() > MAX_ENTRIES) entries.remove(0);
@@ -201,15 +205,20 @@ final class Trouble {
     }
 
     /** How many entries are kept: Settings shows it. */
-    static synchronized int count(Context c) {
-        if (known < 0) known = saved(c).size();
-        return Math.min(MAX_ENTRIES, known + pending.size());
+    static int count(Context c) {
+        int k = known;
+        if (k >= 0) return Math.min(MAX_ENTRIES, k + pendingCount);
+        synchronized (Trouble.class) {
+            if (known < 0) known = saved(c).size();
+            return Math.min(MAX_ENTRIES, known + pending.size());
+        }
     }
 
     static synchronized void clear(Context c) {
         //noinspection ResultOfMethodCallIgnored
         file(c).delete();
         pending.clear();
+        pendingCount = 0;
         known = 0;
         Prefs.device(c).edit().putInt("trouble_bg_kills", 0).apply();
     }

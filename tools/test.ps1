@@ -8,7 +8,7 @@ $root = Split-Path -Parent $PSScriptRoot
 if (-not $NoBuild) { & (Join-Path $PSScriptRoot "build.ps1") }
 # the same SDK and JDK build.ps1 uses
 $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } elseif ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { "$env:LOCALAPPDATA\Android\Sdk" }
-$jar = Get-ChildItem "$sdk\platforms" -Directory | Sort-Object Name | Select-Object -Last 1 | ForEach-Object { Join-Path $_.FullName "android.jar" }
+$jar = Get-ChildItem "$sdk\platforms" -Directory | Sort-Object { [int]($_.Name -replace '[^0-9]', '') } | Select-Object -Last 1 | ForEach-Object { Join-Path $_.FullName "android.jar" }
 if (-not $env:JAVA_HOME) { $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr" }
 $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 $ErrorActionPreference = "Continue"

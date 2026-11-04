@@ -163,7 +163,8 @@ final class Drop {
             while (server == s) {
                 try {
                     Socket c = s.accept();
-                    pool.execute(() -> serve(c));
+                    if (pool.isShutdown()) close(c);
+                    else pool.execute(() -> serve(c));
                 } catch (IOException e) {
                     break;
                 }
@@ -190,7 +191,9 @@ final class Drop {
             InputStream in = new BufferedInputStream(s.getInputStream());
             String[] req = line(in).split(" ");
             Map<String, String> head = new HashMap<>();
+            int headers = 0;
             for (String h; !(h = line(in)).isEmpty(); ) {
+                if (++headers > 64) throw new IOException("too many headers");
                 int colon = h.indexOf(':');
                 if (colon > 0) head.put(h.substring(0, colon).trim().toLowerCase(Locale.ROOT), h.substring(colon + 1).trim());
             }
@@ -470,6 +473,10 @@ final class Drop {
                     .put("title", e.optString("place")).toString().getBytes(StandardCharsets.UTF_8));
         } catch (Mine.Unsupported e) {
             fail(s, name, 415, e.getMessage());
+        } catch (OutOfMemoryError e) {
+            //noinspection ResultOfMethodCallIgnored
+            part.delete();
+            fail(s, name, 413, app.getString(R.string.too_big_for_the_tv));
         }
     }
 
@@ -586,9 +593,12 @@ final class Drop {
 
     private static String line(InputStream in) throws IOException {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
-        for (int c; (c = in.read()) != -1 && c != '\n'; ) {
+        int c = in.read();
+        if (c == -1) throw new java.io.EOFException();
+        while (c != -1 && c != '\n') {
             if (c != '\r') b.write(c);
             if (b.size() > 8192) throw new IOException("header too long");
+            c = in.read();
         }
         return b.toString("ISO-8859-1");
     }
@@ -641,7 +651,7 @@ final class Drop {
         String reason = code == 200 ? "OK" : code == 302 ? "Found" : code == 404 ? "Not Found"
                 : code == 403 ? "Forbidden" : code == 413 ? "Payload Too Large" : code == 415 ? "Unsupported Media Type" : "Error";
         String h = "HTTP/1.1 " + code + " " + reason + "\r\nContent-Type: " + type + "\r\nContent-Length: " + body.length
-                + "\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n" + extra + "\r\n";
+                + "\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n" + extra + "\r\n";
         OutputStream o = s.getOutputStream();
         o.write(h.getBytes(StandardCharsets.ISO_8859_1));
         o.write(body);

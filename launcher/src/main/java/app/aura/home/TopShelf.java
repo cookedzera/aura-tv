@@ -101,8 +101,10 @@ final class TopShelf extends FrameLayout {
                 || "com.liskovsoft.smarttubetv.beta".equals(pkg);
         if (base == null) {
             base = new ArrayList<>();
+            Taste.View taste = Taste.view(c);
             // what you're partway through in this app comes first, then what the app itself features
             for (Continue.Item it : Continue.all(c, 8)) {
+                if (taste.declined(Continue.key(it.title))) continue;
                 boolean match = pkg.equals(it.pkg) || (ytClient && "com.google.android.youtube.tv".equals(it.pkg));
                 if (match && it.art != null && base.size() < MAX) {
                     if (ytClient && !pkg.equals(it.pkg) && it.intent != null) {
@@ -116,6 +118,7 @@ final class TopShelf extends FrameLayout {
                 }
             }
             for (Continue.Item it : Continue.previews(c, pkg, MAX * 2)) {
+                if (taste.declined(Continue.key(it.title))) continue;
                 if (base.size() < MAX && !containsTitle(base, it.title)) {
                     if (it.progress > 0f) it.kicker = "▶  " + Words.get(R.string.continue_watching_caps);
                     else if ("com.google.android.youtube.tvmusic".equals(pkg)) it.kicker = "♪  YOUTUBE MUSIC";
@@ -128,14 +131,14 @@ final class TopShelf extends FrameLayout {
                 java.util.Set<String> have = new java.util.HashSet<>();
                 for (Continue.Item it : base) have.add(Continue.key(it.title));
                 for (Continue.Item it : Watched.recent(c, have, MAX - base.size(), pkg)) {
-                    if (it.art == null) continue;
+                    if (it.art == null || taste.declined(Continue.key(it.title))) continue;
                     it.kicker = "▶  " + Words.get(R.string.continue_watching_caps);
                     base.add(it);
                 }
             }
             if (base.size() < MAX) {
                 for (Fresh.Show s : Fresh.load(c)) {
-                    if (!pkg.equals(s.pkg) || base.size() >= MAX) continue;
+                    if (!pkg.equals(s.pkg) || base.size() >= MAX || taste.declined(Continue.key(s.name))) continue;
                     Continue.Item it = new Continue.Item();
                     it.title = s.name;
                     it.sub = s.episode.isEmpty() ? Words.get(R.string.new_today) : Words.get(R.string.new_today_value, s.episode);
@@ -221,10 +224,11 @@ final class TopShelf extends FrameLayout {
 
     /** In tvOS mode, dock apps without their own TV channel still show Up Next (Continue Watching) and Tonight's Pick. */
     private static void fillTvosUpNext(Context c, List<Continue.Item> out) {
+        Taste.View taste = Taste.view(c);
         for (Continue.Item it : Continue.all(c, MAX)) {
             if (out.size() >= MAX) return;
             // a kids' profile isn't offered what it hides, as the Smart Stack already does
-            if (it.pkg != null && !HomeKeys.allowed(c, it.pkg)) continue;
+            if (it.pkg != null && !HomeKeys.allowed(c, it.pkg) || taste.declined(Continue.key(it.title))) continue;
             if (it.art != null && !containsTitle(out, it.title)) {
                 it.kicker = "▶  " + Words.get(R.string.continue_watching_caps);
                 out.add(it);
@@ -236,11 +240,13 @@ final class TopShelf extends FrameLayout {
                 int day = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR);
                 for (int i = 0; i < picks.size() && out.size() < MAX; i++) {
                     Picks.Pick p = picks.get((day + i) % picks.size());
+                    if (taste.skip(Continue.key(p.name))) continue;
                     Bitmap b = Picks.poster(p);
                     if (b == null) continue;
                     Continue.Item it = new Continue.Item();
                     it.title = p.name;
                     it.sub = p.line;
+                    it.desc = p.about;
                     it.kicker = "★  " + Words.get(R.string.tonights_pick_caps);
                     it.art = b;
                     it.intent = Picks.watch(c, p);
@@ -329,6 +335,11 @@ final class TopShelf extends FrameLayout {
 
     /** Lays out up to three cards across the row; {@code open} runs when one is chosen. */
     void show(String pkg, Ready r, Opener open) {
+        show(pkg, r, open, null);
+    }
+
+    /** Lays out up to three cards across the row; {@code open} runs on OK and {@code hold} on hold-OK. */
+    void show(String pkg, Ready r, Opener open, Hold hold) {
         boolean same = up() && r.sig.equals(sig) && cards.size() == r.items.size();
         shown = pkg;
         if (same) {
@@ -336,7 +347,9 @@ final class TopShelf extends FrameLayout {
             // kept, only told where they now lead
             for (int i = 0; i < cards.size(); i++) {
                 final Continue.Item it = r.items.get(i);
-                cards.get(i).onClick = () -> open.open(it);
+                final Card card = cards.get(i);
+                card.onClick = () -> open.open(it);
+                card.onLongClick = hold != null ? () -> hold.hold(it, card) : null;
             }
             if (getAlpha() == 1f && getTranslationY() == 0f) return;
         } else {
@@ -347,10 +360,11 @@ final class TopShelf extends FrameLayout {
             boolean tvos = Prefs.tvos(getContext());
             for (int i = 0; i < n; i++) {
                 final Continue.Item it = r.items.get(i);
-                Card card = new Card(getContext(), paint(it, r.color), r.color, 22);
+                final Card card = new Card(getContext(), paint(it, r.color), r.color, 22);
                 card.ready = r.art[i];
                 card.tvos = tvos;
                 card.onClick = () -> open.open(it);
+                card.onLongClick = hold != null ? () -> hold.hold(it, card) : null;
                 LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(r.widths[i], ViewGroup.LayoutParams.MATCH_PARENT);
                 if (i > 0) l.leftMargin = Ui.dp(18);
                 row.addView(card, l);
@@ -380,6 +394,10 @@ final class TopShelf extends FrameLayout {
 
     interface Opener {
         void open(Continue.Item it);
+    }
+
+    interface Hold {
+        void hold(Continue.Item it, Card card);
     }
 
     /** A card's picture: wide show/film art or a tvOS Music/Play Now card with album cover and progress. */

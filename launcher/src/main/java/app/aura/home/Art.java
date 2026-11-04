@@ -22,8 +22,6 @@ final class Art {
 
     private static File file(Context c, String pkg) {
         File d = new File(c.getFilesDir(), "art");
-        if (!d.isDirectory()) //noinspection ResultOfMethodCallIgnored
-            d.mkdirs();
         return new File(d, pkg.replaceAll("[^A-Za-z0-9_.]", "_") + ".jpg");
     }
 
@@ -54,6 +52,8 @@ final class Art {
         new Canvas(out).drawBitmap(src, new Rect(x, y, x + cw, y + ch), new Rect(0, 0, W, H), new Paint(Paint.FILTER_BITMAP_FLAG));
         src.recycle();
         File f = file(c, pkg), part = new File(f.getPath() + ".part");
+        //noinspection ResultOfMethodCallIgnored
+        f.getParentFile().mkdirs();
         try (FileOutputStream fo = new FileOutputStream(part)) {
             out.compress(Bitmap.CompressFormat.JPEG, 88, fo);
         } catch (IOException e) {
@@ -69,7 +69,12 @@ final class Art {
     /** Off the main thread: the app's own picture, or null. */
     static Bitmap load(Context c, String pkg) {
         File f = file(c, pkg);
-        return f.isFile() ? BitmapFactory.decodeFile(f.getPath()) : null;
+        if (!f.isFile()) return null;
+        try {
+            return BitmapFactory.decodeFile(f.getPath());
+        } catch (OutOfMemoryError e) {
+            return null;
+        }
     }
 
     static boolean has(Context c, String pkg) {

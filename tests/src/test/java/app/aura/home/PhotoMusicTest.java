@@ -128,6 +128,42 @@ public class PhotoMusicTest {
         ac.pause();
         run(1500);
         Assert.assertNull(field(a, "photoMusic"));
+
+        // screen off (keep sound): dims the screen to black while volume/media keys work in the dark,
+        // and any other press wakes it back up
+        ac.resume();
+        run(300);
+        a.quietScreen();
+        run(500);
+        Assert.assertTrue("screen is off", (Boolean) field(a, "quietScreen"));
+        View veil = field(a, "quietVeil");
+        Assert.assertEquals(View.VISIBLE, veil.getVisibility());
+        Assert.assertEquals(0.01f, a.getWindow().getAttributes().screenBrightness, 0.001f);
+        a.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_VOLUME_UP));
+        a.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_VOLUME_UP));
+        Assert.assertTrue("volume keys keep the screen off", (Boolean) field(a, "quietScreen"));
+        a.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE));
+        a.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE));
+        Assert.assertTrue("media keys keep the screen off", (Boolean) field(a, "quietScreen"));
+        a.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_DPAD_CENTER));
+        a.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_DPAD_CENTER));
+        run(400);
+        Assert.assertFalse("another button wakes the screen", (Boolean) field(a, "quietScreen"));
+        Assert.assertEquals(android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE, a.getWindow().getAttributes().screenBrightness, 0.001f);
+
+        // episode synopsis and time left in the hold-OK note
+        Continue.Item ep = new Continue.Item();
+        ep.title = "Severance";
+        ep.sub = "S2 · E4";
+        ep.leftMin = 28;
+        ep.desc = "The team ventures out into the snow.";
+        Method itemNote = HomeActivity.class.getDeclaredMethod("itemNote", Continue.Item.class);
+        itemNote.setAccessible(true);
+        String note = (String) itemNote.invoke(a, ep);
+        Assert.assertTrue(note, note.contains("28 min left"));
+        Assert.assertTrue(note, note.contains("S2 · E4"));
+        Assert.assertTrue(note, note.contains("The team ventures out into the snow."));
+
         ac.stop().destroy();
         session.release();
     }

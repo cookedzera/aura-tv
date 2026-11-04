@@ -100,7 +100,7 @@ final class Fresh {
     }
 
     /** Today's and yesterday's releases (a midnight release can carry either date), newest first. */
-    static void refresh(Context c) throws IOException, InterruptedException {
+    static synchronized void refresh(Context c) throws IOException, InterruptedException {
         if (!stale(c)) return;
         File dir = dir(c);
         if (!dir.isDirectory() && !dir.mkdirs()) return;

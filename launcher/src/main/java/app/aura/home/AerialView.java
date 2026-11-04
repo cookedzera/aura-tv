@@ -63,18 +63,29 @@ final class AerialView extends FrameLayout {
         Aerials.Video v = Aerials.pick(Aerials.all(getContext()), kind, Sun.phase(System.currentTimeMillis()), lastUrl, rnd);
         if (v == null) return;
         lastUrl = v.url;
-        if (coming != null) coming.release();
+        if (coming != null) {
+            coming.release();
+            coming = null;
+        }
         if (oneAtATime && shown != null) {
             // the video on screen gives way to what's beneath first, then the next one loads
             final Slot old = shown;
+            final Aerials.Video nextVideo = v;
             shown = null;
             veil(1f, 500, () -> {
                 old.release();
                 listener.lost();
                 veil(0f, 700, null);
+                startComing(nextVideo, false);
             });
+            return;
         }
-        coming = new Slot(v);
+        startComing(v, false);
+    }
+
+    private void startComing(Aerials.Video v, boolean forceH264) {
+        if (coming != null) coming.release();
+        coming = new Slot(v, forceH264);
         handler.removeCallbacks(giveUp);
         handler.postDelayed(giveUp, GIVE_UP_MS);
     }
@@ -101,8 +112,35 @@ final class AerialView extends FrameLayout {
         veil(1f, ms, null);
     }
 
+    /**
+     * Smoothly hands the screen back to what lies beneath (the photograph or home): if a video is
+     * on screen, dips briefly to black, removes the video surface so the photograph underneath is
+     * uncovered, and fades the veil back open. If no video is showing yet, lets go immediately
+     * without flashing black.
+     */
+    void exit(Runnable done) {
+        handler.removeCallbacksAndMessages(null);
+        if (coming != null) {
+            coming.release();
+            coming = null;
+        }
+        if (shown == null) {
+            veil.animate().cancel();
+            veil.setAlpha(0f);
+            if (done != null) done.run();
+            return;
+        }
+        final Slot old = shown;
+        shown = null;
+        veil(1f, 150, () -> {
+            old.release();
+            veil(0f, 240, done);
+        });
+    }
+
     void release() {
         handler.removeCallbacksAndMessages(null);
+        veil.animate().cancel();
         if (coming != null) coming.release();
         if (shown != null) shown.release();
         coming = shown = null;
@@ -113,11 +151,15 @@ final class AerialView extends FrameLayout {
     /** One video and the surface it plays on: a single pixel, out of sight, until it's ready. */
     private final class Slot implements SurfaceHolder.Callback {
         final Aerials.Video v;
+        final boolean usedHevc;
+        final String streamUrl;
         final SurfaceView view;
         MediaPlayer mp;
 
-        Slot(Aerials.Video v) {
+        Slot(Aerials.Video v, boolean forceH264) {
             this.v = v;
+            usedHevc = !forceH264 && v.usesHevc();
+            streamUrl = usedHevc ? v.hevc : v.url;
             view = new SurfaceView(getContext());
             view.getHolder().addCallback(this);
             // beneath the veil: the video chip draws it, everything above sits on top
@@ -131,7 +173,7 @@ final class AerialView extends FrameLayout {
                 MediaPlayer m = new MediaPlayer();
                 mp = m;
                 m.setSurface(h.getSurface());
-                m.setDataSource(getContext(), Uri.parse(v.stream()));
+                m.setDataSource(getContext(), Uri.parse(streamUrl));
                 m.setLooping(loop);
                 m.setVolume(0f, 0f);
                 m.setOnPreparedListener(x -> {
@@ -177,7 +219,15 @@ final class AerialView extends FrameLayout {
             final MediaPlayer m = mp;
             mp = null;
             if (m == null) return;
+            m.setOnPreparedListener(null);
+            m.setOnInfoListener(null);
+            m.setOnCompletionListener(null);
+            m.setOnErrorListener(null);
             RELEASE.execute(() -> {
+                try {
+                    m.setSurface(null);
+                } catch (RuntimeException ignored) {
+                }
                 try {
                     m.release();
                 } catch (RuntimeException ignored) {
@@ -186,6 +236,7 @@ final class AerialView extends FrameLayout {
         }
 
         void release() {
+            view.getHolder().removeCallback(this);
             releasePlayer();
             removeView(view);
         }
@@ -197,7 +248,10 @@ final class AerialView extends FrameLayout {
         failures = 0;
         // a brief dim, the new video fills the screen, and it fades up
         veil(1f, shown == null ? 650 : 500, () -> {
-            if (s != coming) return;
+            if (s != coming) {
+                s.release();
+                return;
+            }
             if (shown != null) shown.release();
             shown = s;
             coming = null;
@@ -213,6 +267,12 @@ final class AerialView extends FrameLayout {
             coming = null;
             s.release();
             handler.removeCallbacks(giveUp);
+            if (s.usedHevc && s.v.url != null && !s.v.url.equals(s.streamUrl)) {
+                // this TV's HEVC decoder rejected Apple's 2K stream: switch to 1080p H.264 right away
+                Aerials.disableHevc();
+                startComing(s.v, true);
+                return;
+            }
             failures++;
             if (shown != null && !oneAtATime) {
                 // likely two videos at once was too much for this TV: one at a time from now on

@@ -48,6 +48,7 @@ final class ProfilePicker extends FrameLayout {
     private final List<View> faces = new ArrayList<>();
     private final List<Runnable> picks = new ArrayList<>();
     private int at;
+    private boolean shown;
 
     ProfilePicker(Activity a, Backdrop b, Host h) {
         super(a);
@@ -81,14 +82,16 @@ final class ProfilePicker extends FrameLayout {
     }
 
     boolean isOpen() {
-        return getVisibility() == VISIBLE;
+        return shown;
     }
 
     void open() {
+        shown = true;
         build();
         setVisibility(VISIBLE);
+        animate().cancel();
         setAlpha(0f);
-        animate().alpha(1f).setDuration(320).setStartDelay(0).setInterpolator(Ui.SOFT).start();
+        animate().alpha(1f).setDuration(320).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(null).start();
         // each circle rises in a beat after the one before: calm, not a cascade
         for (int i = 0; i < faces.size(); i++) {
             View f = faces.get(i);
@@ -106,14 +109,18 @@ final class ProfilePicker extends FrameLayout {
     }
 
     void close() {
-        if (!isOpen()) return;
-        animate().alpha(0f).setDuration(220).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(() -> setVisibility(GONE)).start();
+        if (!shown) return;
+        shown = false;
+        animate().cancel();
+        animate().alpha(0f).setDuration(220).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(() -> {
+            if (!shown) setVisibility(GONE);
+        }).start();
     }
 
     /** Every key while it's open. */
     boolean key(int code) {
-        if (code == KeyEvent.KEYCODE_DPAD_LEFT) focus(Math.max(0, at - 1));
-        else if (code == KeyEvent.KEYCODE_DPAD_RIGHT) focus(Math.min(faces.size() - 1, at + 1));
+        if (code == KeyEvent.KEYCODE_DPAD_LEFT && !faces.isEmpty()) focus((at - 1 + faces.size()) % faces.size());
+        else if (code == KeyEvent.KEYCODE_DPAD_RIGHT && !faces.isEmpty()) focus((at + 1) % faces.size());
         else if (Pad.isConfirm(code)) {
             if (at < picks.size()) picks.get(at).run();
         } else if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU || code == HomeKeys.KEYCODE_PROFILE_SWITCH) {
@@ -214,6 +221,7 @@ final class ProfilePicker extends FrameLayout {
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), ring = new Paint(Paint.ANTI_ALIAS_FLAG),
                 halo = new Paint(Paint.ANTI_ALIAS_FLAG), text = new Paint(Paint.ANTI_ALIAS_FLAG);
         private float glow;
+        private android.animation.ValueAnimator anim;
         private static final float HALO = 1.3f;
 
         Face(Activity a, String letter, int color, boolean current) {
@@ -230,7 +238,9 @@ final class ProfilePicker extends FrameLayout {
         }
 
         void lit(boolean on) {
+            if (anim != null) anim.cancel();
             android.animation.ValueAnimator va = android.animation.ValueAnimator.ofFloat(glow, on ? 1f : 0f);
+            anim = va;
             va.setDuration(380);
             va.setInterpolator(Ui.SOFT);
             va.addUpdateListener(v -> {

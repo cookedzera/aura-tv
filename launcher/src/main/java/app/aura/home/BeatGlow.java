@@ -23,7 +23,9 @@ final class BeatGlow extends View {
     private final Paint paint = new Paint();
     private Visualizer viz;
     private int color = 0xFFFFE2B8;
-    private float level, target, peak = 1f;
+    private float level, peak = 1f;
+    private volatile float target;
+    private boolean heardSound;
 
     /** Told the bass's strength (0 to 1) on each frame while it moves. */
     interface Pulse {
@@ -31,6 +33,8 @@ final class BeatGlow extends View {
     }
 
     Pulse pulse;
+    /** Told once on the main thread the first time real bass notes arrive from the TV's sound. */
+    Runnable onActive;
     /** Whether the light itself is drawn (over a photograph), or only the {@link Pulse} told. */
     boolean light = true;
 
@@ -118,8 +122,16 @@ final class BeatGlow extends View {
             sum += (float) Math.sqrt(re * re + im * im);
         }
         peak = Math.max(peak * 0.995f, Math.max(sum, 1f));
-        target = Math.min(1f, sum / peak);
-        postInvalidateOnAnimation();
+        float next = Math.min(1f, sum / peak);
+        if (!heardSound && sum > 2f) {
+            heardSound = true;
+            final Runnable r = onActive;
+            if (r != null) post(r);
+        }
+        if (Math.abs(next - target) > 0.005f || Math.abs(next - level) > 0.005f) {
+            target = next;
+            postInvalidateOnAnimation();
+        }
     }
 
     @Override

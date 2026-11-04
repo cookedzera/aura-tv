@@ -60,8 +60,9 @@ final class MusicScene extends FrameLayout {
     private final TextView kicker, title, by, time, clock, date, credit, nextHead, nextTitle;
     private final LinearLayout nextBox, buttons, words;
     private final Line bar;
-    private final Button prev, play, next, sleep;
+    private final Button prev, play, next, sleep, quiet;
     private final TextView[] kinds = new TextView[Aerials.KINDS.length];
+    Runnable onQuiet;
 
     private MediaController controller;
     private MediaMetadata md;
@@ -175,10 +176,13 @@ final class MusicScene extends FrameLayout {
         play = new Button(c, R.drawable.ic_pause, 42);
         next = new Button(c, R.drawable.ic_next, 34);
         sleep = new Button(c, R.drawable.ic_moon, 34);
+        quiet = new Button(c, R.drawable.ic_power, 34);
+        quiet.label(c.getString(R.string.screen_off_keep_sound));
         buttons.addView(prev, wrap(0, 0));
         buttons.addView(play, wrap(12, 0));
         buttons.addView(next, wrap(12, 0));
         buttons.addView(sleep, wrap(22, 0));
+        buttons.addView(quiet, wrap(18, 0));
         col.addView(buttons, wrap(0, 12));
         player.addView(col, new LinearLayout.LayoutParams(WRAP, WRAP) {{
             leftMargin = Ui.dp(18);
@@ -234,14 +238,17 @@ final class MusicScene extends FrameLayout {
             glow = new BeatGlow(getContext());
             glow.setColor(tone);
             glow.pulse = aerial::pulse;
+            glow.onActive = () -> {
+                if (!stopping) aerial.setRest((night() ? 0.26f : 0f) + 0.16f);
+            };
             addView(glow, indexOfChild(wash) + 1, match());
             if (!glow.start()) {
                 removeView(glow);
                 glow = null;
             }
         }
-        // after dark the scene stays a little dimmed, and with the beat it rests dimmed enough to brighten
-        aerial.setRest((night() ? 0.26f : 0f) + (glow != null ? 0.16f : 0f));
+        // after dark the scene stays a little dimmed; if the beat is heard, it dims a touch more so beats can brighten it
+        aerial.setRest(night() ? 0.26f : 0f);
         aerial.next(Aerials.KINDS[Math.max(0, kindAt)]);
         handler.removeCallbacks(tick);
         handler.post(tick);
@@ -262,17 +269,23 @@ final class MusicScene extends FrameLayout {
         }
         controller = null;
         if (glow != null) glow.stop();
-        // the scene dims away in a quarter of a second while home fades in beneath, rather than
-        // vanishing at once with the video
+        // the scene dims away smoothly while home or the photograph beneath comes back, without
+        // ever flashing solid black when no video had loaded yet
         for (int i = 0; i < getChildCount(); i++) {
             View v = getChildAt(i);
-            if (v != aerial) v.animate().alpha(0f).setDuration(240).setStartDelay(0).setInterpolator(Ui.SOFT).start();
+            if (v != aerial) v.animate().alpha(0f).setDuration(220).setStartDelay(0).setInterpolator(Ui.SOFT).start();
         }
-        aerial.dimOut(240);
-        handler.postDelayed(() -> {
+        if (aerial.showing()) {
+            aerial.exit(() -> {
+                aerial.release();
+                if (gone != null) gone.run();
+            });
+        } else {
             aerial.release();
-            if (gone != null) gone.run();
-        }, 240);
+            handler.postDelayed(() -> {
+                if (gone != null) gone.run();
+            }, 220);
+        }
     }
 
     private boolean stopping;
@@ -427,7 +440,9 @@ final class MusicScene extends FrameLayout {
             return;
         }
         long pos = st.getPosition();
-        if (on) pos += (long) ((SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * st.getPlaybackSpeed());
+        long updated = st.getLastPositionUpdateTime();
+        float speed = st.getPlaybackSpeed();
+        if (on && updated > 0) pos += (long) (Math.max(0, SystemClock.elapsedRealtime() - updated) * (speed > 0f ? speed : 1f));
         pos = Math.max(0, Math.min(dur, pos));
         bar.setVisibility(VISIBLE);
         bar.set(pos / (float) dur);
@@ -534,7 +549,8 @@ final class MusicScene extends FrameLayout {
                 handler.removeCallbacks(settleKind);
                 handler.postDelayed(settleKind, KIND_SETTLE_MS);
             } else {
-                button = Math.max(0, Math.min(sleep.getVisibility() == VISIBLE ? 3 : 2, button + d));
+                Button[] vis = visibleButtons();
+                button = Math.max(0, Math.min(vis.length - 1, button + d));
             }
         } else if (Pad.isConfirm(code)) {
             if (onChips) {
@@ -546,6 +562,12 @@ final class MusicScene extends FrameLayout {
         }
         mark();
         return true;
+    }
+
+    private Button[] visibleButtons() {
+        return Power.canSleep(getContext())
+                ? new Button[]{prev, play, next, sleep, quiet}
+                : new Button[]{prev, play, next, quiet};
     }
 
     /** A kind chosen with the remote: kept, and its first scene drifts in once the choice settles. */
@@ -560,10 +582,12 @@ final class MusicScene extends FrameLayout {
 
     private void press() {
         MediaController.TransportControls t = controller != null ? controller.getTransportControls() : null;
-        if (button == 0 && t != null) t.skipToPrevious();
-        else if (button == 1) toggle();
-        else if (button == 2 && t != null) t.skipToNext();
-        else if (button == 3) {
+        Button[] vis = visibleButtons();
+        Button b = button >= 0 && button < vis.length ? vis[button] : null;
+        if (b == prev && t != null) t.skipToPrevious();
+        else if (b == play) toggle();
+        else if (b == next && t != null) t.skipToNext();
+        else if (b == sleep) {
             // through 15, 30 and 60 minutes, then off; the sound fades in the last minute as always
             long left = Power.sleepLeftMs(getContext());
             int nowMin = left <= 0 ? 0 : (int) Math.ceil(left / 60_000.0);
@@ -575,6 +599,8 @@ final class MusicScene extends FrameLayout {
             int nextMin = SLEEP_STEPS[(at + 1) % SLEEP_STEPS.length];
             Power.setSleep(getContext(), nextMin);
             sleep.label(sleepLabel());
+        } else if (b == quiet && onQuiet != null) {
+            onQuiet.run();
         }
     }
 
@@ -601,9 +627,11 @@ final class MusicScene extends FrameLayout {
             pill.setColor(here ? 0xF2FFFFFF : chosen ? 0x33FFFFFF : 0x00000000);
             kinds[i].setBackground(pill);
         }
-        Button[] all = {prev, play, next, sleep};
-        for (int i = 0; i < all.length; i++) all[i].setLit(controls && !onChips && i == button);
         sleep.setVisibility(Power.canSleep(getContext()) ? VISIBLE : GONE);
+        Button[] vis = visibleButtons();
+        if (button >= vis.length) button = vis.length - 1;
+        for (Button b : new Button[]{prev, play, next, sleep, quiet}) b.setLit(false);
+        for (int i = 0; i < vis.length; i++) vis[i].setLit(controls && !onChips && i == button);
     }
 
     // ---- small parts ---------------------------------------------------------------------------

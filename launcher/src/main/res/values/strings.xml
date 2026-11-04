@@ -980,4 +980,8 @@
     <string name="aerial_by_apple">Aerial video by Apple</string>
     <string name="with_data">%1$s · about 2–3 GB of data an hour</string>
     <string name="aerials_use_data">Aerials stream from Apple: about 2–3 GB of data an hour while they show</string>
+    <string name="screen_off_keep_sound">Screen off (keep sound)</string>
+    <string name="screen_off_press_any_button">Screen off · press any button to wake</string>
+    <string name="hold_ok_for_screen_off">Hold OK for screen off</string>
+    <string name="time_left">%1$s left</string>
 </resources>

@@ -303,7 +303,7 @@ final class Adb {
     private static Link link(Context c, boolean mayAsk) throws IOException {
         try {
             return Link.open("127.0.0.1", PORT, key(dir(c)), name(), mayAsk);
-        } catch (ConnectException e) {
+        } catch (IOException e) {
             if (Build.VERSION.SDK_INT < 30 || !Prefs.device(c).getBoolean("adb_paired", false)) throw e;
         }
         int last = Prefs.device(c).getInt("adb_tls_port", 0);
@@ -472,6 +472,7 @@ final class Adb {
     static boolean type(Context c, String text) {
         if (text == null || text.isEmpty() || !on(c)) return false;
         StringBuilder sb = new StringBuilder("input text '");
+        int start = sb.length();
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
             if (ch == ' ') sb.append("%s");
@@ -480,6 +481,7 @@ final class Adb {
             else if (ch == '%' && i + 1 < text.length() && text.charAt(i + 1) == 's') sb.append("%' && input text '");
             else if (ch >= 0x21 && ch <= 0x7e) sb.append(ch);
         }
+        if (sb.length() == start) return false;
         sb.append('\'');
         return run(c, sb.toString()) != null;
     }

@@ -238,11 +238,10 @@ final class Shield {
         if ((m[3] & 0x0F) == 3) return true;
         int answers = (m[6] & 0xFF) << 8 | (m[7] & 0xFF);
         if (answers == 0) return true;
-        int i = 12;
-        while (i < m.length && m[i] != 0) i += (m[i] & 0xFF) + 1;
-        i += 5;
+        int i = 12 + skipName(m, 12) + 4;
         for (int k = 0; k < answers && i + 10 <= m.length; k++) {
             i += (m[i] & 0xC0) == 0xC0 ? 2 : skipName(m, i);
+            if (i + 10 > m.length) break;
             int type = (m[i] & 0xFF) << 8 | (m[i + 1] & 0xFF), len = (m[i + 8] & 0xFF) << 8 | (m[i + 9] & 0xFF);
             i += 10;
             if (type == 1 && len == 4 && i + 4 <= m.length && (m[i] | m[i + 1] | m[i + 2] | m[i + 3]) != 0) return false;

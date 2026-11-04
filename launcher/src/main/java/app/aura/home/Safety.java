@@ -63,10 +63,10 @@ final class Safety {
     static String check(Context c) {
         SharedPreferences p = Prefs.device(c);
         long now = System.currentTimeMillis();
-        List<String> lately = recent(p.getString("crashes", ""), now - WINDOW_MS);
+        boolean again = now - p.getLong("safe_at", 0) < AFTER_MS;
+        List<String> lately = recent(p.getString("crashes", ""), now - (again ? AFTER_MS : WINDOW_MS));
         if (lately.size() < CRASHES) return null;
         p.edit().putString("crashes", "").apply();
-        boolean again = now - p.getLong("safe_at", 0) < AFTER_MS;
         if (!again) {
             p.edit().putLong("safe_at", now).apply();
             Prefs.set(c, Prefs.PARALLAX, false);

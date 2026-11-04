@@ -465,9 +465,20 @@ final class Picks {
             }
             if (!any) break;
         }
-        for (JSONObject p : found) {
-            String yt = trailer(c, p.optString("type"), p.optString("tmdb"));
-            if (yt != null) p.put("yt", yt);
+        // fetch trailer keys on a small pool so thirty picks don't wait for thirty sequential calls
+        java.util.concurrent.ExecutorService pool = Compat.pool("tmdb-trailers", 4);
+        List<java.util.concurrent.Future<String>> trailers = new ArrayList<>(found.size());
+        for (final JSONObject p : found) {
+            final String t = p.optString("type"), id = p.optString("tmdb");
+            trailers.add(pool.submit(() -> trailer(c, t, id)));
+        }
+        pool.shutdown();
+        for (int i = 0; i < found.size(); i++) {
+            try {
+                String yt = trailers.get(i).get();
+                if (yt != null) found.get(i).put("yt", yt);
+            } catch (java.util.concurrent.ExecutionException ignored) {
+            }
         }
         return found;
     }
@@ -689,8 +700,9 @@ final class Picks {
 
     static void signOut(Context c) {
         SharedPreferences p = prefs(c);
-        if (source(c).equals("watchlist")) p.edit().putString(SOURCE, "top").apply();
-        p.edit().remove(SESSION).remove(ACCOUNT).remove(USER).apply();
+        SharedPreferences.Editor ed = p.edit().remove(SESSION).remove(ACCOUNT).remove(USER);
+        if ("watchlist".equals(p.getString(SOURCE, ""))) ed.putString(SOURCE, "top");
+        ed.apply();
     }
 
     // ---- network -------------------------------------------------------------------------------
@@ -754,7 +766,10 @@ final class Picks {
     private static byte[] readAll(InputStream in) throws IOException {
         ByteArrayOutputStream bo = new ByteArrayOutputStream();
         byte[] buf = new byte[16 * 1024];
-        for (int n; (n = in.read(buf)) > 0; ) bo.write(buf, 0, n);
+        for (int n; (n = in.read(buf)) > 0; ) {
+            bo.write(buf, 0, n);
+            if (bo.size() > 4 << 20) throw new IOException("response too large");
+        }
         return bo.toByteArray();
     }
 }

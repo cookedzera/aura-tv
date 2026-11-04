@@ -54,7 +54,7 @@ final class Watched {
      * {@link MediaWatch} heard a playback report: noted if it's a programme. Main thread; the list and
      * the picture are written behind it.
      */
-    static void note(Context ctx, MediaWatch.Playing p, long length, long position) {
+    static synchronized void note(Context ctx, MediaWatch.Playing p, long length, long position) {
         if (ctx == null || p == null || p.title == null || p.title.trim().isEmpty() || p.pkg == null) return;
         if (length < MIN_LENGTH || position <= 0 || LISTENING.contains(p.pkg) || p.pkg.equals(ctx.getPackageName())) return;
         String key = p.pkg + "|" + Continue.key(p.title);
@@ -108,17 +108,23 @@ final class Watched {
         File dir = new File(c.getFilesDir(), DIR);
         if (!dir.isDirectory() && !dir.mkdirs()) return null;
         File f = new File(dir, Integer.toHexString(key.hashCode()) + ".jpg");
-        try (FileOutputStream out = new FileOutputStream(f)) {
+        File part = new File(f.getPath() + ".part");
+        try (FileOutputStream out = new FileOutputStream(part)) {
             int w = Math.min(640, art.getWidth()), h = Math.max(1, Math.round(art.getHeight() * (w / (float) art.getWidth())));
             Bitmap small = w == art.getWidth() ? art : Bitmap.createScaledBitmap(art, w, h, true);
             small.compress(Bitmap.CompressFormat.JPEG, 82, out);
             if (small != art) small.recycle();
-            return f.getName();
         } catch (IOException | RuntimeException e) {
             //noinspection ResultOfMethodCallIgnored
-            f.delete();
+            part.delete();
             return null;
         }
+        if (!part.renameTo(f) && (!f.delete() || !part.renameTo(f))) {
+            //noinspection ResultOfMethodCallIgnored
+            part.delete();
+            return null;
+        }
+        return f.getName();
     }
 
     /** Pictures of titles no longer on the list go. */
@@ -180,14 +186,14 @@ final class Watched {
             it.intent = open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             it.progress = progress;
             long left = Math.max(1, (length - position) / 60_000);
+            it.leftMin = left;
             String by = o.optString("by", "");
+            if (!by.isEmpty() && !by.equalsIgnoreCase(title)) it.desc = by;
             it.sub = (by.isEmpty() || by.equalsIgnoreCase(title) ? "" : by + "  ·  ")
                     + (left < 60 ? Words.get(R.string.min_left, left) : Words.get(R.string.h_min_left, left / 60, left % 60));
             String pic = o.optString("art", "");
             if (!pic.isEmpty()) {
-                BitmapFactory.Options opt = new BitmapFactory.Options();
-                opt.inPreferredConfig = Bitmap.Config.RGB_565;
-                it.art = BitmapFactory.decodeFile(new File(new File(c.getFilesDir(), DIR), pic).getPath(), opt);
+                it.art = Continue.picture(new File(new File(c.getFilesDir(), DIR), pic).getPath(), 320);
             }
             out.add(it);
         }

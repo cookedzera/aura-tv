@@ -80,6 +80,13 @@ public class Cast extends Activity implements Renderer.Player {
             mp = m;
             prepared = true;
             Renderer.durMs = Math.max(0, video.getDuration());
+            long seek = Renderer.pendingSeekMs;
+            if (seek >= 0) {
+                Renderer.pendingSeekMs = -1;
+                long to = Math.max(0, Math.min(seek, Math.max(0, video.getDuration() - 1000)));
+                video.seekTo((int) to);
+                Renderer.posMs = to;
+            }
             if (playWhenReady) play();
             else Renderer.setState("STOPPED");
         });
@@ -198,7 +205,12 @@ public class Cast extends Activity implements Renderer.Player {
 
     @Override
     public void seek(long ms) {
-        if (!prepared) return;
+        if (!prepared) {
+            Renderer.pendingSeekMs = ms;
+            Renderer.posMs = Math.max(0, ms);
+            showTime();
+            return;
+        }
         long to = Math.max(0, Math.min(ms, Math.max(0, video.getDuration() - 1000)));
         video.seekTo((int) to);
         Renderer.posMs = to;

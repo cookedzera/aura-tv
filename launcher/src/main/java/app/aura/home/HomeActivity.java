@@ -224,6 +224,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         @Override
         public void onReceive(Context c, Intent i) {
             Vpn.forget();
+            HomeKeys.packagesChanged();
             reloadApps();
             // an app installed or updated: asked for its home-screen rows, as Google TV's home would
             String act = i.getAction();
@@ -504,12 +505,18 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             Prefs.set(this, Prefs.BEAT, true);
             if (settings.isOpen()) settings.refresh();
         }
+        // Wi-Fi or Bluetooth allowed from Control Center: its pills and status follow at once
+        if ((code == 7 || code == 8) && results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            refreshStatus();
+            if (ccOpen) cc.refresh();
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         resumed = false;
+        if (quietScreen) wakeQuietScreen();
         Trouble.watchMain(false);
         if (!shownThisVisit.isEmpty()) {
             final Set<String> seenNow = new HashSet<>(shownThisVisit);
@@ -613,6 +620,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (quietScreen) {
+            wakeQuietScreen();
+            return;
+        }
         // preview a sky moment: am start -n app.aura.home/.HomeActivity --es aura_moment golden
         String preview = intent.getStringExtra("aura_moment");
         if (preview != null) {
@@ -898,12 +909,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     closeFolder();
                     if (id != null) nameFolder(id, false);
                 }));
+                menuBack = from;
                 menu.show(from, a.label, items);
             }
         });
         root.addView(folderPanel, match());
-        menu = new AppMenu(this, backdrop);
-        root.addView(menu, match());
         switcher = new Switcher(this, backdrop, new Switcher.Host() {
             @Override
             public AppRepo.App find(String pkg) {
@@ -980,6 +990,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         });
         root.addView(switcher, match());
         nowPlaying = new NowPlaying(this, backdrop);
+        nowPlaying.onQuiet = this::quietScreen;
         root.addView(nowPlaying, match());
         weatherSheet = new WeatherSheet(this, backdrop);
         root.addView(weatherSheet, match());
@@ -1012,8 +1023,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
         });
         root.addView(who, match());
-        ask = new Ask(this, backdrop);
-        root.addView(ask, match());
         findPanel = new Find(this, new Find.Host() {
             @Override
             public List<AppRepo.App> apps() {
@@ -1057,6 +1066,31 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
 
             @Override
+            public void hold(AppRepo.App a, Card from) {
+                swallow(heldConfirm);
+                List<AppMenu.Item> items = new ArrayList<>();
+                items.add(new AppMenu.Item(R.drawable.ic_play, getString(R.string.open), () -> {
+                    menu.hide();
+                    closeFind();
+                    launch(a.launch, from, a.label);
+                }));
+                items.add(new AppMenu.Item(R.drawable.ic_apps, getString(R.string.add_to_folder), () -> {
+                    menu.hide();
+                    closeFind();
+                    chooseFolder(a.pkg, a.label, from);
+                }));
+                if (!Profiles.kids(HomeActivity.this)) {
+                    items.add(new AppMenu.Item(R.drawable.ic_info, getString(R.string.app_info), () -> {
+                        menu.hide();
+                        closeFind();
+                        HomeActivity.this.open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + a.pkg)), from);
+                    }));
+                }
+                menuBack = from;
+                menu.show(from, a.label, items);
+            }
+
+            @Override
             public void everywhere(String text) {
                 closeFind();
                 Intent i = new Intent("android.search.action.GLOBAL_SEARCH").putExtra(android.app.SearchManager.QUERY, text)
@@ -1069,6 +1103,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
         });
         root.addView(findPanel, match());
+        menu = new AppMenu(this, backdrop);
+        root.addView(menu, match());
+        ask = new Ask(this, backdrop);
+        root.addView(ask, match());
+        quietVeil = new View(this);
+        quietVeil.setBackgroundColor(0xFF000000);
+        quietVeil.setAlpha(0f);
+        quietVeil.setVisibility(View.GONE);
+        root.addView(quietVeil, match());
         buildHud();
         buildMoment();
 
@@ -2906,6 +2949,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.label = it.title;
             s.fresh = fresh != null;
             s.key = key;
+            s.note = itemNote(it);
             s.decline = watching ? getString(R.string.hide_from_the_stack) : getString(R.string.not_interested);
             // what you're watching stays a little longer than a suggestion
             s.dwellMs = watching ? 9_000 : 7_000;
@@ -2990,6 +3034,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.label = p.name + " trailer";
             s.dwellMs = 6_000;
             s.key = Continue.key(p.name);
+            s.note = p.about != null && !p.about.isEmpty()
+                    ? (p.line != null && !p.line.isEmpty() ? p.line + "\n" + p.about : p.about) : p.line;
             s.decline = getString(R.string.not_interested);
             picks.add(s);
         }
@@ -3072,6 +3118,22 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void openBluetooth() {
         openCc(false);
         cc.showBluetoothSoon();
+    }
+
+    /** A few lines about a show or episode for its hold-OK menu: time left, episode line, and synopsis. */
+    private String itemNote(Continue.Item it) {
+        if (it == null) return null;
+        StringBuilder sb = new StringBuilder();
+        if (it.leftMin > 0) sb.append(getString(R.string.time_left, Words.minutes(it.leftMin)));
+        if (it.sub != null && !it.sub.isEmpty() && (sb.length() == 0 || !it.sub.contains("left"))) {
+            if (sb.length() > 0) sb.append("  ·  ");
+            sb.append(it.sub);
+        }
+        if (it.desc != null && !it.desc.isEmpty() && !it.desc.equals(it.sub) && !it.desc.equals(it.title)) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(it.desc);
+        }
+        return sb.length() > 0 ? sb.toString() : null;
     }
 
     /** A release of the show you're partway through: names matched loosely, ignoring case and punctuation. */
@@ -3488,6 +3550,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (photo) story.reveal(0);
         });
         scene = made[0];
+        scene.onQuiet = this::quietScreen;
         // above the photograph and its story, which it covers
         root.addView(scene, root.indexOfChild(story) + 1, match());
         story.hide(400);
@@ -3572,6 +3635,35 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (SystemClock.uptimeMillis() - splashAt > 9000) dropSplash.run();
             return true;
         }
+        // screen off with the sound kept on: volume and media keys work in the dark; any other press wakes the screen
+        if (quietScreen) {
+            if (isVolumeKey(code)) return super.dispatchKeyEvent(e);
+            if (code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_MEDIA_PLAY
+                    || code == KeyEvent.KEYCODE_MEDIA_PAUSE || code == KeyEvent.KEYCODE_MEDIA_NEXT
+                    || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS || code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+                    || code == KeyEvent.KEYCODE_MEDIA_REWIND) {
+                if (down && e.getRepeatCount() == 0) {
+                    MediaWatch.Playing p = MediaWatch.now(this);
+                    if (p != null && p.controller != null) {
+                        if (code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_MEDIA_PLAY || code == KeyEvent.KEYCODE_MEDIA_PAUSE) {
+                            if (p.playing) p.controller.getTransportControls().pause();
+                            else p.controller.getTransportControls().play();
+                        } else if (code == KeyEvent.KEYCODE_MEDIA_NEXT || code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) {
+                            p.controller.getTransportControls().skipToNext();
+                        } else {
+                            p.controller.getTransportControls().skipToPrevious();
+                        }
+                    }
+                }
+                return true;
+            }
+            if (!down) {
+                if (code == swallowUp) swallowUp = -1;
+                return true;
+            }
+            wakeQuietScreen();
+            return swallow(code);
+        }
         // teaching a remote button (Settings, Remote buttons): it may reach this window and not the service
         if (HomeKeys.teaching() && HomeKeys.teachable(code)) {
             if (down && e.getRepeatCount() == 0) HomeKeys.taught(code, e.getScanCode());
@@ -3587,6 +3679,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (!down) return true;
             welcome.key(code);
             return swallow(code);
+        }
+        if (menu.isOpen() && findPanel.isOpen()) {
+            if (down && (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU)) {
+                menu.hide();
+                if (menuBack != null && menuBack.isShown()) menuBack.requestFocus();
+                return swallow(code);
+            }
+            if (down && Pad.isConfirm(code) && e.getRepeatCount() > 0) return true;
+            return super.dispatchKeyEvent(e);
         }
         // finding an app: the field, the keyboard and the results have the keys; Back leaves it
         if (findPanel.isOpen()) {
@@ -3977,7 +4078,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     }
                     Intent go = TopShelf.launchFor(it, it.pkg != null ? find(it.pkg) : a);
                     if (go != null) launch(go, shelf.cards.isEmpty() ? cells.get(gridAt).card : shelf.cards.get(shelfAt), it.title);
-                });
+                }, this::openShelfMenu);
                 for (Widget w : widgets) w.animate().alpha(0f).setDuration(240).setStartDelay(0).setInterpolator(Ui.SOFT).start();
             });
         });
@@ -4269,6 +4370,53 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     // ---- app menu ----------------------------------------------------------------------------
 
     private AppMenu menu;
+    private View menuBack;
+
+    /** Hold OK on a Top Shelf card: its synopsis and remaining time, with Play and Hide / Not interested. */
+    private void openShelfMenu(Continue.Item it, Card card) {
+        if (editing || ccOpen || menu.isOpen() || it == null || card == null) return;
+        handler.removeCallbacks(rack);
+        handler.removeCallbacks(goPhoto);
+        swallow(heldConfirm);
+        final AppRepo.App a = it.pkg != null ? find(it.pkg) : (gridAt >= 0 && gridAt < cells.size() ? find(cells.get(gridAt).tag) : null);
+        List<AppMenu.Item> items = new ArrayList<>();
+        items.add(new AppMenu.Item(R.drawable.ic_play, getString(it.nowPlaying || it.progress > 0f ? R.string.resume : R.string.open), () -> {
+            closeMenu(card);
+            if (it.nowPlaying) {
+                MediaWatch.Playing p = MediaWatch.now(HomeActivity.this);
+                if (p != null && p.controller != null) {
+                    if (!p.playing) p.controller.getTransportControls().play();
+                    openNowPlaying();
+                    return;
+                }
+            }
+            Intent go = TopShelf.launchFor(it, a);
+            if (go != null) launch(go, card, it.title);
+        }));
+        if (it.nowPlaying) {
+            items.add(new AppMenu.Item(R.drawable.ic_moon, getString(R.string.screen_off_keep_sound), () -> {
+                closeMenu(card);
+                quietScreen();
+            }));
+        } else if (it.title != null && !it.title.isEmpty()) {
+            final String key = Continue.key(it.title);
+            boolean watching = it.progress > 0f;
+            items.add(new AppMenu.Item(R.drawable.ic_hide, getString(watching ? R.string.hide_from_the_stack : R.string.not_interested), () -> {
+                closeMenu(card);
+                Taste.decline(getApplicationContext(), key);
+                TopShelf.clearCache();
+                hud(R.drawable.ic_hide, getString(R.string.it_wont_come_back_settings));
+                refreshWidgets(true);
+                if (zone == SHELF || zone == GRID && rowOf(gridAt) == 0 && !cells.isEmpty()) {
+                    shelf.clearShown();
+                    shelfFor(gridAt);
+                }
+            }));
+        }
+        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        menuBack = card;
+        menu.show(card, it.title != null ? it.title : "", itemNote(it), items);
+    }
 
     /** Hold OK on an app: move it, hide it, see its details in Android's settings, or uninstall it. */
     private void openMenu() {
@@ -4291,6 +4439,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 hud(R.drawable.ic_hide, getString(R.string.name_is_hidden_hidden_apps, name));
             }));
             home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+            menuBack = card;
             menu.show(card, name, items);
             return;
         }
@@ -4329,6 +4478,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 hud(R.drawable.ic_apps, getString(R.string.folder_removed, label));
             }));
             home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+            menuBack = card;
             menu.show(card, label, items);
             return;
         }
@@ -4360,6 +4510,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }));
         }
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        menuBack = card;
         menu.show(card, label, items);
     }
 
@@ -4402,7 +4553,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             hud(R.drawable.ic_check, getString(R.string.tvos_style_settings_home_screen));
         }));
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        menu.show(w, name, items);
+        menuBack = w;
+        String head = card != null && card.title != null && !card.title.isEmpty() ? card.title : name;
+        menu.show(w, head, card != null ? card.note : null, items);
     }
 
     /** Swaps a widget with its neighbour on screen; hidden widgets keep their place in the order. */
@@ -4473,6 +4626,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             nameFolder(f.id, true);
         }));
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        menuBack = card;
         menu.show(card, getString(R.string.add_name_to, label), items);
     }
 
@@ -4600,7 +4754,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private boolean menuKey(int code, KeyEvent e) {
         if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU) {
-            closeMenu(cells.isEmpty() ? null : cells.get(Math.min(gridAt, cells.size() - 1)).card);
+            View back = menuBack != null ? menuBack : (cells.isEmpty() ? null : cells.get(Math.min(gridAt, cells.size() - 1)).card);
+            menuBack = null;
+            closeMenu(back);
             return swallow(code);
         }
         // the opening press repeating, or a sideways step out of the list: nothing to do
@@ -4819,6 +4975,61 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     @Override
     public void photoMode() {
         handler.postDelayed(() -> setPhoto(true), 450);
+    }
+
+    private View quietVeil;
+    private boolean quietScreen;
+
+    /**
+     * Screen off while music or a podcast keeps playing: a pitch-black curtain covers the screen,
+     * the backlight drops to its lowest step, and everything moving behind it rests until any
+     * non-volume/media key is pressed.
+     */
+    @Override
+    public void quietScreen() {
+        if (quietScreen) return;
+        if (ccOpen) closeCc(false);
+        quietScreen = true;
+        handler.removeCallbacks(rack);
+        handler.removeCallbacks(goPhoto);
+        backdrop.stop();
+        stack.stop();
+        stopPreview();
+        try {
+            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.screenBrightness = 0.01f;
+            getWindow().setAttributes(lp);
+        } catch (RuntimeException ignored) {
+        }
+        if (quietVeil != null) {
+            quietVeil.animate().cancel();
+            quietVeil.setVisibility(View.VISIBLE);
+            quietVeil.animate().alpha(1f).setDuration(380).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(null).start();
+        }
+        showHud(R.drawable.ic_moon, getString(R.string.screen_off_press_any_button), 2200);
+    }
+
+    private void wakeQuietScreen() {
+        if (!quietScreen) return;
+        quietScreen = false;
+        try {
+            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+            getWindow().setAttributes(lp);
+        } catch (RuntimeException ignored) {
+        }
+        if (quietVeil != null) {
+            quietVeil.animate().cancel();
+            quietVeil.animate().alpha(0f).setDuration(260).setStartDelay(0).setInterpolator(Ui.SOFT)
+                    .withEndAction(() -> {
+                        if (!quietScreen) quietVeil.setVisibility(View.GONE);
+                    }).start();
+        }
+        if (resumed) {
+            backdrop.start();
+            if (Prefs.on(this, Prefs.STACK_AUTO) && fyW.getVisibility() == View.VISIBLE) stack.start();
+            wake();
+        }
     }
 
     @Override

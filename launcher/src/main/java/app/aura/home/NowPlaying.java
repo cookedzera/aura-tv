@@ -48,10 +48,12 @@ final class NowPlaying extends FrameLayout {
     private final TextView app, title, by, elapsed, left;
     private final HomeActivity.Meter bar;
     private final LinearLayout controls;
-    private final Pad prev, play, next;
+    private final Pad prev, play, next, quiet;
     private final ImageView playIcon;
     private MediaController controller;
     private String shownTitle;
+    private boolean open;
+    Runnable onQuiet;
 
     private final MediaController.Callback watch = new MediaController.Callback() {
         @Override
@@ -165,6 +167,7 @@ final class NowPlaying extends FrameLayout {
         prev = button(R.drawable.ic_prev, 42);
         play = button(R.drawable.ic_pause, 52);
         next = button(R.drawable.ic_next, 42);
+        quiet = button(R.drawable.ic_moon, 42);
         playIcon = (ImageView) play.getChildAt(0);
         prev.onClick = () -> transport(t -> t.skipToPrevious());
         next.onClick = () -> transport(t -> t.skipToNext());
@@ -176,9 +179,17 @@ final class NowPlaying extends FrameLayout {
                 else t.play();
             });
         };
+        quiet.onClick = () -> {
+            if (controls.getAlpha() < 0.5f) {
+                poke();
+                return;
+            }
+            if (onQuiet != null) onQuiet.run();
+        };
         buttons.addView(prev, buttonLp(42, 0));
         buttons.addView(play, buttonLp(52, 26));
         buttons.addView(next, buttonLp(42, 26));
+        buttons.addView(quiet, buttonLp(42, 26));
         controls.addView(buttons, lp(0, 16));
         col.addView(controls, lp(0, 24));
 
@@ -186,19 +197,27 @@ final class NowPlaying extends FrameLayout {
     }
 
     boolean isOpen() {
-        return getVisibility() == VISIBLE;
+        return open;
     }
 
     /** Opens on {@code c}'s session; false if nothing is playing any more. */
     boolean open(MediaController c) {
         if (c == null) return false;
+        if (controller != null) {
+            try {
+                controller.unregisterCallback(watch);
+            } catch (RuntimeException ignored) {
+            }
+        }
+        open = true;
         controller = c;
         controller.registerCallback(watch, handler);
         shownTitle = null;
         show();
+        animate().cancel();
         setVisibility(VISIBLE);
         setAlpha(0f);
-        animate().alpha(1f).setDuration(420).setStartDelay(0).setInterpolator(Ui.SOFT).start();
+        animate().alpha(1f).setDuration(420).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(null).start();
         art.setTranslationY(Ui.dp(16));
         art.setAlpha(0f);
         art.animate().translationY(0f).alpha(1f).setDuration(820).setStartDelay(80).setInterpolator(Ui.EMPHASIZED).start();
@@ -210,16 +229,24 @@ final class NowPlaying extends FrameLayout {
     }
 
     void close() {
-        if (!isOpen()) return;
+        if (!open) return;
+        open = false;
         handler.removeCallbacks(tick);
         handler.removeCallbacks(rest);
-        if (controller != null) controller.unregisterCallback(watch);
+        if (controller != null) {
+            try {
+                controller.unregisterCallback(watch);
+            } catch (RuntimeException ignored) {
+            }
+        }
         controller = null;
         lastArt = null;
         lastArtUri = null;
         artFor = null;
         animate().alpha(0f).setDuration(260).setStartDelay(0).setInterpolator(Ui.SOFT)
-                .withEndAction(() -> setVisibility(GONE)).start();
+                .withEndAction(() -> {
+                    if (!open) setVisibility(GONE);
+                }).start();
     }
 
     /** A button was pressed: the controls come back, and rest again after a while. */
@@ -242,6 +269,11 @@ final class NowPlaying extends FrameLayout {
     }
 
     private void transport(Action a) {
+        // if the buttons had faded away while resting, the first press wakes them rather than acting blind
+        if (controls.getAlpha() < 0.5f) {
+            poke();
+            return;
+        }
         if (controller != null) a.run(controller.getTransportControls());
     }
 
@@ -405,8 +437,10 @@ final class NowPlaying extends FrameLayout {
             return;
         }
         long pos = st.getPosition();
-        if (st.getState() == PlaybackState.STATE_PLAYING) {
-            pos += (long) ((SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * st.getPlaybackSpeed());
+        long updated = st.getLastPositionUpdateTime();
+        float speed = st.getPlaybackSpeed();
+        if (st.getState() == PlaybackState.STATE_PLAYING && updated > 0) {
+            pos += (long) (Math.max(0, SystemClock.elapsedRealtime() - updated) * (speed > 0f ? speed : 1f));
         }
         pos = Math.max(0, Math.min(dur, pos));
         bar.setVisibility(VISIBLE);

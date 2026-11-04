@@ -63,6 +63,8 @@ final class SmartStack extends FrameLayout {
         String key;
         /** Holding OK offers to leave it out with these words ("Not interested"), or null. */
         String decline;
+        /** A few lines about the episode or film (and how much is left), shown on hold-OK. */
+        String note;
         /** What OK does when it isn't opening something (a sheet in Control Center), or null. */
         Runnable action;
     }

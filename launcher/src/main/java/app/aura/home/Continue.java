@@ -30,10 +30,11 @@ import android.text.TextUtils;
  */
 final class Continue {
     static final class Item {
-        String title, sub, kicker, pkg;
+        String title, sub, kicker, pkg, desc;
         Bitmap art;
         Intent intent;
         float progress;
+        long leftMin;
         boolean nowPlaying, posterCard;
 
         /** The same item (and the same picture), to change without changing anyone else's. */
@@ -43,9 +44,11 @@ final class Continue {
             c.sub = sub;
             c.kicker = kicker;
             c.pkg = pkg;
+            c.desc = desc;
             c.art = art;
             c.intent = intent;
             c.progress = progress;
+            c.leftMin = leftMin;
             c.nowPlaying = nowPlaying;
             c.posterCard = posterCard;
             return c;
@@ -63,6 +66,7 @@ final class Continue {
             TvContract.WatchNextPrograms.COLUMN_DURATION_MILLIS,
             TvContract.WatchNextPrograms.COLUMN_INTENT_URI,
             TvContract.WatchNextPrograms.COLUMN_PACKAGE_NAME,
+            TvContract.WatchNextPrograms.COLUMN_SHORT_DESCRIPTION,
     };
 
     private Continue() { }
@@ -125,12 +129,17 @@ final class Continue {
                 it.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 long pos = cur.getLong(6), dur = cur.getLong(7);
                 it.progress = dur > 0 ? Math.min(1f, pos / (float) dur) : 0f;
+                String shortDesc = cur.getString(10);
+                if (shortDesc != null && !shortDesc.trim().isEmpty() && !shortDesc.trim().equalsIgnoreCase(it.title)) {
+                    it.desc = shortDesc.trim();
+                }
                 List<String> parts = new ArrayList<>();
                 String season = cur.getString(2), episode = cur.getString(3);
                 if (season != null && !season.isEmpty()) parts.add("S" + season);
                 if (episode != null && !episode.isEmpty()) parts.add("E" + episode);
                 if (dur > 0 && pos > 0) {
                     long left = Math.max(1, (dur - pos) / 60_000);
+                    it.leftMin = left;
                     parts.add(left < 60 ? Words.get(R.string.min_left, left) : Words.get(R.string.h_min_left, left / 60, left % 60));
                 } else if (cur.getString(1) != null && !cur.getString(1).isEmpty()) {
                     parts.add(cur.getString(1));
@@ -180,9 +189,22 @@ final class Continue {
      * first, for Top Shelf. Some TVs only let their own launcher read these: then this is empty.
      * YouTube Music and TizenTube share YouTube's preview rows when they publish none of their own.
      */
+    private static final Object PREVIEWS_LOCK = new Object();
+    private static final Map<String, List<Item>> previewsCached = new HashMap<>();
+    private static final Map<String, Long> previewsAt = new HashMap<>();
+
     static List<Item> previews(Context c, String pkg, int max) {
         List<Item> out = new ArrayList<>();
-        if (android.os.Build.VERSION.SDK_INT < 26 || !Compat.granted(c, "android.permission.READ_TV_LISTINGS")) return out;
+        if (pkg == null || max <= 0 || android.os.Build.VERSION.SDK_INT < 26 || !Compat.granted(c, "android.permission.READ_TV_LISTINGS")) return out;
+        long now = android.os.SystemClock.elapsedRealtime();
+        synchronized (PREVIEWS_LOCK) {
+            List<Item> hit = previewsCached.get(pkg);
+            Long at = previewsAt.get(pkg);
+            if (hit != null && at != null && now - at < 60_000 && hit.size() >= max) {
+                for (int i = 0; i < hit.size() && i < max; i++) out.add(hit.get(i).copy());
+                return out;
+            }
+        }
         boolean ytMusic = "com.google.android.youtube.tvmusic".equals(pkg);
         boolean ytClient = "io.gh.reisxd.tizentube.cobalt".equals(pkg)
                 || "com.liskovsoft.smarttubetv".equals(pkg)
@@ -213,6 +235,7 @@ final class Continue {
                 Item it = new Item();
                 it.title = title;
                 it.pkg = pkg;
+                if (desc != null && !desc.trim().isEmpty() && !desc.trim().equalsIgnoreCase(title)) it.desc = desc.trim();
                 try {
                     it.intent = Intent.parseUri(intentUri, Intent.URI_INTENT_SCHEME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 } catch (java.net.URISyntaxException e) {
@@ -232,6 +255,7 @@ final class Continue {
                 if (episode != null && !episode.isEmpty()) parts.add("E" + episode);
                 if (it.progress > 0f) {
                     long left = Math.max(1, (dur - pos) / 60_000);
+                    it.leftMin = left;
                     parts.add(left < 60 ? Words.get(R.string.min_left, left) : Words.get(R.string.h_min_left, left / 60, left % 60));
                 } else if (desc != null && !desc.isEmpty()) {
                     parts.add(desc);
@@ -255,14 +279,25 @@ final class Continue {
             uris.addAll(fallbackUris);
         }
         // anything partway through in this app's channel rises to the front so you can resume it at once
-        for (int pass = 0; pass < 2 && out.size() < max; pass++) {
-            for (int i = 0; i < raw.size() && out.size() < max; i++) {
+        List<Item> candidates = new ArrayList<>();
+        List<String> candidateUris = new ArrayList<>();
+        int want = Math.max(READ, max) + 2;
+        for (int pass = 0; pass < 2 && candidates.size() < want; pass++) {
+            for (int i = 0; i < raw.size() && candidates.size() < want; i++) {
                 Item it = raw.get(i);
                 if ((pass == 0) != (it.progress > 0f)) continue;
-                it.art = load(c, uris.get(i));
-                if (it.art != null) out.add(it);
+                candidates.add(it);
+                candidateUris.add(uris.get(i));
             }
         }
+        loadAll(c, candidates, candidateUris);
+        List<Item> kept = new ArrayList<>();
+        for (Item it : candidates) if (it.art != null && kept.size() < Math.max(READ, max)) kept.add(it);
+        synchronized (PREVIEWS_LOCK) {
+            previewsCached.put(pkg, kept);
+            previewsAt.put(pkg, now);
+        }
+        for (int i = 0; i < kept.size() && i < max; i++) out.add(kept.get(i).copy());
         return out;
     }
 
@@ -334,18 +369,22 @@ final class Continue {
         if (skip == null) skip = Collections.emptySet();
         long now = android.os.SystemClock.elapsedRealtime();
         int id = (apps.hashCode() * 31 + skip.hashCode()) * 31 + max;
-        synchronized (Continue.class) {
-            if (channelsCached != null && channelsId == id && now - channelsAt < 60_000) return channelsCached;
+        List<Item> all;
+        synchronized (CHANNELS_LOCK) {
+            all = channelsCached != null && channelsId == id && now - channelsAt < 60_000 ? channelsCached : null;
+            if (all == null) {
+                all = readChannels(c, apps, skip, max);
+                channelsCached = all;
+                channelsId = id;
+                channelsAt = now;
+            }
         }
-        List<Item> out = readChannels(c, apps, skip, max);
-        synchronized (Continue.class) {
-            channelsCached = out;
-            channelsId = id;
-            channelsAt = now;
-        }
+        List<Item> out = new ArrayList<>(all.size());
+        for (int i = 0; i < all.size() && i < max; i++) out.add(all.get(i).copy());
         return out;
     }
 
+    private static final Object CHANNELS_LOCK = new Object();
     private static List<Item> channelsCached;
     private static int channelsId;
     private static long channelsAt;
@@ -393,15 +432,20 @@ final class Continue {
                 it.title = title;
                 it.pkg = pkg;
                 it.progress = dur > 0 && pos > 0 ? Math.min(1f, pos / (float) dur) : 0f;
+                String shortDesc = cur.getString(3);
+                if (shortDesc != null && !shortDesc.trim().isEmpty() && !shortDesc.trim().equalsIgnoreCase(title)) {
+                    it.desc = shortDesc.trim();
+                }
                 List<String> parts = new ArrayList<>();
                 String season = cur.getString(1), episode = cur.getString(2);
                 if (season != null && !season.isEmpty()) parts.add("S" + season);
                 if (episode != null && !episode.isEmpty()) parts.add("E" + episode);
                 if (it.progress > 0f) {
                     long left = Math.max(1, (dur - pos) / 60_000);
+                    it.leftMin = left;
                     parts.add(left < 60 ? Words.get(R.string.min_left, left) : Words.get(R.string.h_min_left, left / 60, left % 60));
-                } else if (parts.isEmpty() && cur.getString(3) != null) {
-                    parts.add(cur.getString(3));
+                } else if (parts.isEmpty() && shortDesc != null) {
+                    parts.add(shortDesc);
                 }
                 it.sub = TextUtils.join("  ·  ", parts);
                 // what the row is called says what it is, even when the app leaves out the progress
@@ -518,6 +562,7 @@ final class Continue {
         android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
         o.inJustDecodeBounds = true;
         android.graphics.BitmapFactory.decodeFile(path, o);
+        if (o.outWidth <= 0 || o.outHeight <= 0) return null;
         o.inJustDecodeBounds = false;
         o.inSampleSize = 1;
         while (o.outWidth / (o.inSampleSize * 2) >= minWidth) o.inSampleSize *= 2;

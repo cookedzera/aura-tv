@@ -44,6 +44,9 @@ final class Find extends FrameLayout {
 
         void open(AppRepo.App a, View from);
 
+        default void hold(AppRepo.App a, Card from) {
+        }
+
         /** The TV's own search, for what isn't an app. */
         void everywhere(String text);
     }
@@ -84,6 +87,7 @@ final class Find extends FrameLayout {
         glass.setColorFilter(0xCCFFFFFF);
         bar.addView(glass, new LinearLayout.LayoutParams(Ui.dp(20), Ui.dp(20)));
         field = new EditText(c);
+        field.setId(View.generateViewId());
         field.setSingleLine(true);
         field.setBackground(null);
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
@@ -139,6 +143,7 @@ final class Find extends FrameLayout {
         everywhere.setGravity(Gravity.CENTER);
         row.addView(everywhere, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         row.onClick = () -> host.everywhere(field.getText().toString());
+        row.setId(View.generateViewId());
         everywhereRow = row;
         LinearLayout.LayoutParams el = new LinearLayout.LayoutParams(Ui.dp(360), Ui.dp(38));
         el.topMargin = Ui.dp(40);
@@ -163,8 +168,9 @@ final class Find extends FrameLayout {
     void open(String typed) {
         shown = true;
         setVisibility(VISIBLE);
+        animate().cancel();
         setAlpha(0f);
-        animate().alpha(1f).setDuration(240).setStartDelay(0).setInterpolator(Ui.SOFT).start();
+        animate().alpha(1f).setDuration(240).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(null).start();
         field.setText(typed);
         field.setSelection(field.length());
         fill(typed);
@@ -180,8 +186,10 @@ final class Find extends FrameLayout {
     void close() {
         if (!shown) return;
         shown = false;
+        first = null;
         Compat.svc(getContext(), InputMethodManager.class).hideSoftInputFromWindow(field.getWindowToken(), 0);
         field.clearFocus();
+        animate().cancel();
         animate().alpha(0f).setDuration(180).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(() -> {
             if (shown) return;
             setVisibility(GONE);
@@ -210,19 +218,25 @@ final class Find extends FrameLayout {
         }
         results.removeAllViews();
         first = found.isEmpty() ? null : found.get(0);
+        Card firstCard = null;
         for (AppRepo.App a : found) {
             LinearLayout item = new LinearLayout(getContext());
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER_HORIZONTAL);
             item.setClipChildren(false);
             Card card = new Card(getContext(), host.art(a), a.color, 14);
+            card.setId(View.generateViewId());
+            card.setNextFocusUpId(field.getId());
             if (host.glass() && a.art == null) card.glass = host.backdrop();
             card.tvos = Prefs.tvos(getContext()) || Prefs.tileStyle(getContext()).equals("tvos");
             card.sway = !Perf.light(getContext());
             card.onClick = () -> host.open(a, card);
+            card.onLongClick = () -> host.hold(a, card);
+            if (firstCard == null) firstCard = card;
             item.addView(card, new LinearLayout.LayoutParams(Ui.dp(W), Ui.dp(H)));
             TextView name = Ui.text(getContext(), 12, Ui.medium, 0xD9FFFFFF);
             name.setText(a.label);
+            name.setSingleLine(true);
             name.setMaxWidth(Ui.dp(W));
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
             LinearLayout.LayoutParams nl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -234,6 +248,7 @@ final class Find extends FrameLayout {
         }
         everywhereRow.setVisibility(query.isEmpty() ? GONE : VISIBLE);
         everywhere.setText(getContext().getString(R.string.search_the_tv_for, q.trim()));
+        field.setNextFocusDownId(firstCard != null ? firstCard.getId() : !query.isEmpty() ? everywhereRow.getId() : View.NO_ID);
     }
 
     /** Lower case, accents folded: "Pokémon" is found by "pokemon". */

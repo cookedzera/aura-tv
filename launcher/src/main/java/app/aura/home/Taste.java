@@ -110,6 +110,7 @@ final class Taste {
                 // a rest that's over starts the count again
                 if (v == null || now - v.optLong(1, now) > REST_MS) v = new JSONArray().put(0).put(now);
                 v.put(0, v.optInt(0) + 1);
+                v.put(1, now);
                 s.seen.remove(k);
                 s.seen.put(k, v);
             }

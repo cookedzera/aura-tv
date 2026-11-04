@@ -69,7 +69,7 @@ final class Renderer {
     /** What's loaded and how far along, kept by {@link Cast} while it plays; read by controllers. */
     static volatile String uri = "", meta = "", title = "", mime = "", by = "";
     static volatile String state = "NO_MEDIA_PRESENT";
-    static volatile long posMs, durMs;
+    static volatile long posMs, durMs, pendingSeekMs = -1;
     /** The player on screen, when there is one: commands from the network go to it. */
     static volatile Player player;
 
@@ -95,6 +95,7 @@ final class Renderer {
     private final Random rnd = new Random();
     private volatile ServerSocket http;
     private volatile MulticastSocket ssdp;
+    private volatile Thread starter;
     private volatile boolean on;
     private WifiManager.MulticastLock lock;
 
@@ -136,10 +137,14 @@ final class Renderer {
         if (want && running == null) {
             running = new Renderer(c);
             final Renderer r = running;
-            new SafeThread(r::start, "dlna-start").start();
+            Thread t = new SafeThread(r::start, "dlna-start");
+            r.starter = t;
+            t.start();
         } else if (!want && running != null) {
             final Renderer r = running;
             running = null;
+            Thread t = r.starter;
+            if (t != null) t.interrupt();
             new SafeThread(r::stop, "dlna-stop").start();
         }
     }
@@ -205,12 +210,9 @@ final class Renderer {
                 ms.setReuseAddress(true);
                 ms.bind(new InetSocketAddress(InetAddress.getByName("0.0.0.0"), SSDP_PORT));
                 NetworkInterface ni = lan(app);
-                if (ni != null) {
-                    ms.setNetworkInterface(ni);
-                    ms.joinGroup(new InetSocketAddress(InetAddress.getByName(GROUP), SSDP_PORT), ni);
-                } else {
-                    ms.joinGroup(InetAddress.getByName(GROUP));
-                }
+                if (ni == null) throw new IOException("no local network yet");
+                ms.setNetworkInterface(ni);
+                ms.joinGroup(new InetSocketAddress(InetAddress.getByName(GROUP), SSDP_PORT), ni);
                 return ms;
             } catch (IOException e) {
                 close(ms);
@@ -229,6 +231,9 @@ final class Renderer {
 
     private void stop() {
         on = false;
+        Thread t = starter;
+        if (t != null && t != Thread.currentThread()) t.interrupt();
+        main.removeCallbacksAndMessages(null);
         notifyAll("ssdp:byebye");
         close(ssdp);
         close(http);
@@ -355,7 +360,9 @@ final class Renderer {
             InputStream in = new BufferedInputStream(s.getInputStream());
             String[] req = line(in).split(" ");
             Map<String, String> head = new HashMap<>();
+            int lines = 0;
             for (String h; !(h = line(in)).isEmpty(); ) {
+                if (++lines > 64) return;
                 int colon = h.indexOf(':');
                 if (colon > 0) head.put(h.substring(0, colon).trim().toLowerCase(Locale.ROOT), h.substring(colon + 1).trim());
             }
@@ -458,6 +465,10 @@ final class Renderer {
                     main.post(() -> {
                         Player p = player;
                         if (p != null) p.seek(ms);
+                        else {
+                            pendingSeekMs = ms;
+                            posMs = ms;
+                        }
                     });
                     break;
                 }
@@ -578,7 +589,14 @@ final class Renderer {
 
     /** A new address to play (and what the sender says it is): the player, if open, loads it. */
     private void take(String u, String m) {
-        uri = u == null ? "" : u.trim();
+        String candidate = u == null ? "" : u.trim();
+        String lower = candidate.toLowerCase(Locale.ROOT);
+        if (!candidate.isEmpty() && !lower.startsWith("http://") && !lower.startsWith("https://")) {
+            uri = "";
+            return;
+        }
+        uri = candidate;
+        pendingSeekMs = -1;
         meta = m == null ? "" : m;
         String didl = meta;
         title = tag(didl, "dc:title");
@@ -638,12 +656,23 @@ final class Renderer {
             }
             old.until = until;
         } else {
+            if (subs.size() >= 32) {
+                long now = System.currentTimeMillis();
+                for (Map.Entry<String, Sub> e : subs.entrySet()) {
+                    if (e.getValue().until < now) subs.remove(e.getKey());
+                }
+                if (subs.size() >= 32) {
+                    raw(s, "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    return;
+                }
+            }
+            String peerHost = s.getInetAddress() != null ? s.getInetAddress().getHostAddress() : null;
             List<URL> cbs = new ArrayList<>();
             Matcher m = Pattern.compile("<([^>]+)>").matcher(head.get("callback") != null ? head.get("callback") : "");
-            while (m.find()) {
+            while (m.find() && cbs.size() < 2) {
                 try {
                     URL u = new URL(m.group(1));
-                    if ("http".equals(u.getProtocol())) cbs.add(u);
+                    if ("http".equals(u.getProtocol()) && (peerHost == null || peerHost.equals(u.getHost()))) cbs.add(u);
                 } catch (IOException ignored) {
                 }
             }
@@ -903,10 +932,12 @@ final class Renderer {
 
     private static String line(InputStream in) throws IOException {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
-        for (int c; (c = in.read()) != -1 && c != '\n'; ) {
+        int c;
+        while ((c = in.read()) != -1 && c != '\n') {
             if (c != '\r') b.write(c);
             if (b.size() > 8192) throw new IOException("header too long");
         }
+        if (c == -1 && b.size() == 0) throw new java.io.EOFException();
         return b.toString("ISO-8859-1");
     }
 

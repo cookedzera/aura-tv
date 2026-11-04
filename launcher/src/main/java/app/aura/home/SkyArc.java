@@ -23,6 +23,7 @@ final class SkyArc extends View {
 
     SkyArc(Context c) {
         super(c);
+        if (android.os.Build.VERSION.SDK_INT < 28) setLayerType(LAYER_TYPE_SOFTWARE, null);
         track.setStyle(Paint.Style.STROKE);
         track.setStrokeWidth(Ui.dpf(1.4f));
         track.setColor(0x47FFFFFF);

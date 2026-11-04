@@ -980,4 +980,8 @@
     <string name="aerial_by_apple">Vídeo aéreo de Apple</string>
     <string name="with_data">%1$s · unos 2–3 GB de datos por hora</string>
     <string name="aerials_use_data">Las vistas aéreas se transmiten desde Apple: unos 2–3 GB de datos por hora mientras se ven</string>
+    <string name="screen_off_keep_sound">Pantalla apagada (con sonido)</string>
+    <string name="screen_off_press_any_button">Pantalla apagada · pulsa cualquier botón para volver</string>
+    <string name="hold_ok_for_screen_off">Mantén OK para apagar pantalla</string>
+    <string name="time_left">quedan %1$s</string>
 </resources>

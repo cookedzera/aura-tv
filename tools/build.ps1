@@ -13,7 +13,7 @@ $src = Join-Path $proj "src\main"
 $out = Join-Path $proj "build"
 $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } elseif ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { "$env:LOCALAPPDATA\Android\Sdk" }
 $bt = Get-ChildItem "$sdk\build-tools" -Directory | Sort-Object { [version]($_.Name -replace '[^0-9.]', '') } | Select-Object -Last 1 -ExpandProperty FullName
-$jar = Get-ChildItem "$sdk\platforms" -Directory | Sort-Object Name | Select-Object -Last 1 | ForEach-Object { Join-Path $_.FullName "android.jar" }
+$jar = Get-ChildItem "$sdk\platforms" -Directory | Sort-Object { [int]($_.Name -replace '[^0-9]', '') } | Select-Object -Last 1 | ForEach-Object { Join-Path $_.FullName "android.jar" }
 # any JDK 11+; Android Studio's bundled one is used when JAVA_HOME isn't set
 if (-not $env:JAVA_HOME) { $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr" }
 $env:Path = "$env:JAVA_HOME\bin;$env:Path"

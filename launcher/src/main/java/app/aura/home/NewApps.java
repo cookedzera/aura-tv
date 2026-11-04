@@ -27,22 +27,37 @@ final class NewApps {
         SharedPreferences p = Prefs.device(c);
         Set<String> now = new HashSet<>();
         for (AppRepo.App a : apps) now.add(a.pkg);
-        Set<String> known = p.getStringSet(KNOWN, null), fresh = new HashSet<>(p.getStringSet(FRESH, new HashSet<>()));
-        if (known == null) {
+        Set<String> saved = p.getStringSet(KNOWN, null), fresh = new HashSet<>(p.getStringSet(FRESH, new HashSet<>()));
+        if (saved == null) {
             // the first look: everything already here is simply there
             p.edit().putStringSet(KNOWN, now).apply();
             return;
         }
+        Set<String> known = new HashSet<>(saved);
         boolean changed = false;
         for (String pkg : now) {
-            if (!known.contains(pkg)) {
+            if (known.add(pkg)) {
                 fresh.add(pkg);
                 changed = true;
             }
         }
-        // uninstalled ones are forgotten, so a reinstall counts as new again
-        changed |= fresh.retainAll(now) | !known.equals(now);
-        if (changed) p.edit().putStringSet(KNOWN, now).putStringSet(FRESH, fresh).apply();
+        // uninstalled ones are forgotten, so a reinstall counts as new again; an app briefly
+        // disappearing while Play Store updates it shouldn't get a dot if it's still installed
+        android.content.pm.PackageManager pm = c.getPackageManager();
+        java.util.Iterator<String> it = known.iterator();
+        while (it.hasNext()) {
+            String pkg = it.next();
+            if (!now.contains(pkg)) {
+                try {
+                    pm.getPackageInfo(pkg, 0);
+                } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+                    it.remove();
+                    fresh.remove(pkg);
+                    changed = true;
+                }
+            }
+        }
+        if (changed) p.edit().putStringSet(KNOWN, known).putStringSet(FRESH, fresh).apply();
         for (AppRepo.App a : apps) a.fresh = fresh.contains(a.pkg);
     }
 

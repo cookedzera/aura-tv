@@ -123,6 +123,14 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         float alpha;
         float s0, s1, x0, x1, y0, y1;
         final Matrix m = new Matrix();
+
+        /** Frees the large full-screen bitmaps as soon as the slide leaves the screen; {@code blur} stays for {@link #lastBlur}. */
+        void recycle() {
+            if (steady != null && steady != sharp && steady != soft) steady.recycle();
+            if (soft != null && soft != sharp) soft.recycle();
+            if (sharp != null) sharp.recycle();
+            steady = soft = sharp = null;
+        }
     }
 
     private final List<Wallpaper> walls = new ArrayList<>(), builtIn = new ArrayList<>();
@@ -253,6 +261,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         Choreographer.getInstance().removeFrameCallback(this);
         if (incoming != null) {
             play(current, false);
+            if (current != null) current.recycle();
             current = incoming;
             current.alpha = 1f;
             incoming = null;
@@ -272,6 +281,9 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     void trim(int level) {
         if (running || level < ComponentCallbacks2.TRIM_MEMORY_MODERATE) return;
         play(current, false);
+        play(incoming, false);
+        if (current != null) current.recycle();
+        if (incoming != null) incoming.recycle();
         current = null;
         incoming = null;
         loading = false;
@@ -438,6 +450,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             accent = Ui.mix(accentFrom, accentTo, incoming.alpha);
             if (f >= 1f) {
                 play(current, false);
+                if (current != null) current.recycle();
                 current = incoming;
                 incoming = null;
                 current.alpha = 1f;
@@ -609,7 +622,10 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             }
             final Slide s = made;
             main.post(() -> {
-                if (gen != generation) return;
+                if (gen != generation) {
+                    if (s != null) s.recycle();
+                    return;
+                }
                 loading = false;
                 index = idx;
                 if (s == null) {
@@ -717,6 +733,10 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             nextAt = now + showMs;
             if (intro < 1f) introStart = now;
         } else {
+            if (incoming != null) {
+                play(incoming, false);
+                incoming.recycle();
+            }
             s.alpha = 0f;
             incoming = s;
             accentFrom = accent;

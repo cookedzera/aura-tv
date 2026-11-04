@@ -32,7 +32,7 @@ public class Ambient extends DreamService implements Backdrop.Listener {
     private Scene scene;
     /** Apple's aerial videos, in the aerial scenes; null in the others. */
     private AerialView aerial;
-    private boolean ticking, photos, dreaming, firstCaption = true;
+    private boolean ticking, photos, dreaming;
     private int turn;
     private final BroadcastReceiver tick = new BroadcastReceiver() {
         @Override
@@ -246,8 +246,10 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         Runnable room = makeRoom;
         if (room != null && tight(this)) room.run();
         startScene();
-        registerReceiver(tick, new IntentFilter(Intent.ACTION_TIME_TICK));
-        ticking = true;
+        if (!ticking) {
+            registerReceiver(tick, new IntentFilter(Intent.ACTION_TIME_TICK));
+            ticking = true;
+        }
         story.weather(Weather.now(this));
         story.tick(Calendar.getInstance());
         story.reveal(1400);
@@ -364,6 +366,7 @@ public class Ambient extends DreamService implements Backdrop.Listener {
             return;
         }
         veil.animate().alpha(1f).setDuration(900).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(() -> {
+            if (!dreaming || stage == null) return;
             build(kind);
             veil.animate().alpha(0f).setDuration(1400).setStartDelay(300).setInterpolator(Ui.SOFT).withEndAction(null).start();
         }).start();
@@ -394,10 +397,15 @@ public class Ambient extends DreamService implements Backdrop.Listener {
                 @Override
                 public void lost() {
                     photos = true;
-                    if (dreaming) backdrop.start();
-                    progress.setVisibility(View.VISIBLE);
+                    if (dreaming && backdrop != null) {
+                        backdrop.start();
+                        Backdrop.Wallpaper w = backdrop.wallpaper();
+                        if (w != null && story != null) story.set(w, true);
+                    }
+                    if (progress != null) progress.setVisibility(View.VISIBLE);
                 }
             });
+            aerial.setRest(Sun.phase(System.currentTimeMillis()) == Sun.Phase.NIGHT ? 0.26f : 0f);
             stage.addView(aerial, full());
         }
         if (kind.equals("sayings") || kind.equals("aerial_sayings")) {

@@ -65,9 +65,18 @@ final class AppRepo {
         Map<String, ResolveInfo> found = new LinkedHashMap<>();
         Map<String, String> category = new HashMap<>();
         for (String cat : new String[]{Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER}) {
-            for (ResolveInfo ri : pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(cat), 0)) {
+            List<ResolveInfo> resolved;
+            try {
+                resolved = pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(cat), 0);
+            } catch (RuntimeException e) {
+                Trouble.caught("queryIntentActivities", e);
+                continue;
+            }
+            if (resolved == null) continue;
+            for (ResolveInfo ri : resolved) {
+                if (ri == null || ri.activityInfo == null || ri.activityInfo.applicationInfo == null) continue;
                 String pkg = ri.activityInfo.packageName;
-                if (pkg.equals(c.getPackageName()) || found.containsKey(pkg)) continue;
+                if (pkg == null || pkg.equals(c.getPackageName()) || found.containsKey(pkg)) continue;
                 found.put(pkg, ri);
                 category.put(pkg, cat);
             }
@@ -123,7 +132,7 @@ final class AppRepo {
         a.pkg = ai.packageName;
         a.label = String.valueOf(ri.loadLabel(pm)).trim();
         a.banner = loadBannerHighRes(pm, ai, maxDensity);
-        a.icon = loadIconHighRes(pm, ri, ai);
+        a.icon = loadIconHighRes(pm, ri, ai, maxDensity);
         a.color = colorOf(a.banner != null ? a.banner : a.icon);
         a.category = category;
         a.cls = ai.name;
@@ -141,6 +150,7 @@ final class AppRepo {
     // ---- the saved copy, for the moment after the TV starts ----------------------------------
 
     private static final String SAVED = "apps";
+    private static final Object SAVE_LOCK = new Object();
 
     /**
      * The app list as it was last read, with each banner and icon as a picture of its own: read
@@ -149,32 +159,34 @@ final class AppRepo {
      * list follows. Null when there's none, or it can't be read. Off the main thread.
      */
     static List<App> saved(Context c) {
-        File dir = new File(c.getFilesDir(), SAVED);
-        try {
-            JSONArray a = new JSONArray(read(new File(dir, "index.json")));
-            android.content.res.Resources res = c.getResources();
-            List<App> out = new ArrayList<>();
-            for (int i = 0; i < a.length(); i++) {
-                JSONObject o = a.getJSONObject(i);
-                App x = new App();
-                x.pkg = o.getString("pkg");
-                x.label = o.getString("label");
-                x.cls = o.getString("cls");
-                x.category = o.getString("cat");
-                x.src = o.optString("src", "");
-                x.color = o.getInt("color");
-                x.launch = launchFor(x.pkg, x.cls, x.category);
-                x.banner = picture(res, new File(dir, x.pkg + ".b.png"), o.optInt("bd", 0));
-                x.icon = picture(res, new File(dir, x.pkg + ".i.png"), o.optInt("id", 0));
-                if (x.banner == null && x.icon == null) return null;
-                x.art = Art.load(c, x.pkg);
-                out.add(x);
+        synchronized (SAVE_LOCK) {
+            File dir = new File(c.getFilesDir(), SAVED);
+            try {
+                JSONArray a = new JSONArray(read(new File(dir, "index.json")));
+                android.content.res.Resources res = c.getResources();
+                List<App> out = new ArrayList<>();
+                for (int i = 0; i < a.length(); i++) {
+                    JSONObject o = a.getJSONObject(i);
+                    App x = new App();
+                    x.pkg = o.getString("pkg");
+                    x.label = o.getString("label");
+                    x.cls = o.getString("cls");
+                    x.category = o.getString("cat");
+                    x.src = o.optString("src", "");
+                    x.color = o.getInt("color");
+                    x.launch = launchFor(x.pkg, x.cls, x.category);
+                    x.banner = picture(res, new File(dir, x.pkg + ".b.png"), o.optInt("bd", 0));
+                    x.icon = picture(res, new File(dir, x.pkg + ".i.png"), o.optInt("id", 0));
+                    if (x.banner == null && x.icon == null) return null;
+                    x.art = Art.load(c, x.pkg);
+                    out.add(x);
+                }
+                if (out.isEmpty()) return null;
+                NewApps.flag(c, out);
+                return out;
+            } catch (IOException | JSONException | RuntimeException | OutOfMemoryError e) {
+                return null;
             }
-            if (out.isEmpty()) return null;
-            NewApps.flag(c, out);
-            return out;
-        } catch (IOException | JSONException | RuntimeException | OutOfMemoryError e) {
-            return null;
         }
     }
 
@@ -191,44 +203,46 @@ final class AppRepo {
     /** Keeps {@code list} for the next start, unless it's what's kept already. Off the main thread, at low priority. */
     static void save(Context c, List<App> list) {
         if (list == null || list.isEmpty()) return;
-        File dir = new File(c.getFilesDir(), SAVED);
-        String sig = signature(list);
-        File index = new File(dir, "index.json");
-        try {
-            if (index.isFile() && sig.equals(new JSONObject(read(new File(dir, "sig.json"))).optString("sig"))) return;
-        } catch (IOException | JSONException ignored) {
-            // made again below
-        }
-        if (!dir.isDirectory() && !dir.mkdirs()) return;
-        try {
-            JSONArray a = new JSONArray();
-            java.util.Set<String> keep = new java.util.HashSet<>();
-            for (App x : list) {
-                if (x.cls == null || x.category == null) continue;
-                JSONObject o = new JSONObject().put("pkg", x.pkg).put("label", x.label).put("cls", x.cls)
-                        .put("cat", x.category).put("src", x.src != null ? x.src : "").put("color", x.color);
-                int bd = write(x.banner, new File(dir, x.pkg + ".b.png"), 640, 360);
-                int id = write(x.icon, new File(dir, x.pkg + ".i.png"), 256, 256);
-                if (bd < 0 && id < 0) continue;
-                if (bd >= 0) {
-                    o.put("bd", bd);
-                    keep.add(x.pkg + ".b.png");
-                }
-                if (id >= 0) {
-                    o.put("id", id);
-                    keep.add(x.pkg + ".i.png");
-                }
-                a.put(o);
+        synchronized (SAVE_LOCK) {
+            File dir = new File(c.getFilesDir(), SAVED);
+            String sig = signature(list);
+            File index = new File(dir, "index.json");
+            try {
+                if (index.isFile() && sig.equals(new JSONObject(read(new File(dir, "sig.json"))).optString("sig"))) return;
+            } catch (IOException | JSONException ignored) {
+                // made again below
             }
-            writeText(index, a.toString());
-            writeText(new File(dir, "sig.json"), new JSONObject().put("sig", sig).toString());
-            File[] files = dir.listFiles();
-            //noinspection ResultOfMethodCallIgnored
-            if (files != null) for (File f : files) if (f.getName().endsWith(".png") && !keep.contains(f.getName())) f.delete();
-        } catch (IOException | JSONException | RuntimeException | OutOfMemoryError e) {
-            // no copy this time: the next start reads the apps as before
-            //noinspection ResultOfMethodCallIgnored
-            index.delete();
+            if (!dir.isDirectory() && !dir.mkdirs()) return;
+            try {
+                JSONArray a = new JSONArray();
+                java.util.Set<String> keep = new java.util.HashSet<>();
+                for (App x : list) {
+                    if (x.cls == null || x.category == null) continue;
+                    JSONObject o = new JSONObject().put("pkg", x.pkg).put("label", x.label).put("cls", x.cls)
+                            .put("cat", x.category).put("src", x.src != null ? x.src : "").put("color", x.color);
+                    int bd = write(x.banner, new File(dir, x.pkg + ".b.png"), 640, 360);
+                    int id = write(x.icon, new File(dir, x.pkg + ".i.png"), 256, 256);
+                    if (bd < 0 && id < 0) continue;
+                    if (bd >= 0) {
+                        o.put("bd", bd);
+                        keep.add(x.pkg + ".b.png");
+                    }
+                    if (id >= 0) {
+                        o.put("id", id);
+                        keep.add(x.pkg + ".i.png");
+                    }
+                    a.put(o);
+                }
+                writeText(index, a.toString());
+                writeText(new File(dir, "sig.json"), new JSONObject().put("sig", sig).toString());
+                File[] files = dir.listFiles();
+                //noinspection ResultOfMethodCallIgnored
+                if (files != null) for (File f : files) if (f.getName().endsWith(".png") && !keep.contains(f.getName())) f.delete();
+            } catch (IOException | JSONException | RuntimeException | OutOfMemoryError e) {
+                // no copy this time: the next start reads the apps as before
+                //noinspection ResultOfMethodCallIgnored
+                index.delete();
+            }
         }
     }
 
@@ -313,12 +327,12 @@ final class AppRepo {
         return b != null ? b : ai.applicationInfo.loadBanner(pm);
     }
 
-    /** Loads the highest-density icon (640dpi xxxhdpi) available in the package's resources. */
-    private static Drawable loadIconHighRes(PackageManager pm, ResolveInfo ri, ActivityInfo ai) {
+    /** Loads the highest-density icon the screen needs from the package's resources. */
+    private static Drawable loadIconHighRes(PackageManager pm, ResolveInfo ri, ActivityInfo ai, int maxDensity) {
         int resId = ri.getIconResource();
         if (resId == 0) resId = ai.getIconResource();
         if (resId != 0) {
-            Drawable d = forDensity(pm, ai.applicationInfo, resId, DisplayMetrics.DENSITY_XXXHIGH);
+            Drawable d = forDensity(pm, ai.applicationInfo, resId, maxDensity);
             if (d != null) return d;
         }
         return ri.loadIcon(pm);
@@ -358,18 +372,18 @@ final class AppRepo {
         Drawable copy = d.getConstantState() != null ? d.getConstantState().newDrawable().mutate() : d;
         copy.setBounds(0, 0, 32, 18);
         copy.draw(new Canvas(b));
+        int[] px = new int[32 * 18];
+        b.getPixels(px, 0, 32, 0, 0, 32, 18);
+        b.recycle();
         float[] hsv = new float[3];
         double sx = 0, sy = 0, wsum = 0;
-        for (int y = 0; y < 18; y++) {
-            for (int x = 0; x < 32; x++) {
-                int c = b.getPixel(x, y);
-                if (Color.alpha(c) < 128) continue;
-                Color.colorToHSV(c, hsv);
-                double w = hsv[1] * hsv[2] * hsv[2];
-                sx += Math.cos(Math.toRadians(hsv[0])) * w;
-                sy += Math.sin(Math.toRadians(hsv[0])) * w;
-                wsum += w;
-            }
+        for (int c : px) {
+            if (Color.alpha(c) < 128) continue;
+            Color.colorToHSV(c, hsv);
+            double w = hsv[1] * hsv[2] * hsv[2];
+            sx += Math.cos(Math.toRadians(hsv[0])) * w;
+            sy += Math.sin(Math.toRadians(hsv[0])) * w;
+            wsum += w;
         }
         if (wsum < 8) return 0xFFB8C4D6;
         float hue = (float) ((Math.toDegrees(Math.atan2(sy, sx)) + 360) % 360);

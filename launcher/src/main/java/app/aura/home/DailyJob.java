@@ -13,42 +13,47 @@ import java.io.File;
 public class DailyJob extends JobService {
     /** The space station flyovers' download job, from before the screensaver kept only photographs and quotes. */
     private static final int OLD_FLYOVER_JOB = 43;
+    private static final java.util.concurrent.atomic.AtomicBoolean busy = new java.util.concurrent.atomic.AtomicBoolean();
     private Thread worker;
 
     @Override
     public boolean onStartJob(JobParameters params) {
-        if (params.getJobId() == OLD_FLYOVER_JOB) return false;
+        if (params.getJobId() == OLD_FLYOVER_JOB || !busy.compareAndSet(false, true)) return false;
         final android.content.Context c = getApplicationContext();
         worker = new SafeThread(() -> {
-            // downloads and photo resizing, well behind whatever is on screen
-            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
-            boolean complete = true;
-            // each step on its own: one that fails (offline, a source that changed its answers)
-            // no longer skips the ones after it, and Android always hears the job is done
-            step("retire", () -> {
-                retireScenes();
-                return true;
-            });
-            // one small request, first: the photo import below spaces its requests and takes minutes
-            step("update-check", () -> {
-                Updater.notice(c);
-                return true;
-            });
-            complete &= step("daily", () -> Daily.run(c));
-            // then a few photographs for the wall, from the sources switched on
-            complete &= step("photos", () -> Gallery.run(c));
-            complete &= step("picks", () -> {
-                Picks.refresh(c, false);
-                return true;
-            });
-            complete &= step("new-today", () -> {
-                Fresh.refresh(c);
-                return true;
-            });
-            // stopped by Android (onStopJob): it already knows
-            if (Thread.currentThread().isInterrupted()) return;
-            // a one-off catch-up that hit a network failure asks to be retried later
-            jobFinished(params, !complete && params.getJobId() == Daily.JOB_NOW);
+            try {
+                // downloads and photo resizing, well behind whatever is on screen
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                boolean complete = true;
+                // each step on its own: one that fails (offline, a source that changed its answers)
+                // no longer skips the ones after it, and Android always hears the job is done
+                step("retire", () -> {
+                    retireScenes();
+                    return true;
+                });
+                // one small request, first: the photo import below spaces its requests and takes minutes
+                step("update-check", () -> {
+                    Updater.notice(c);
+                    return true;
+                });
+                complete &= step("daily", () -> Daily.run(c));
+                // then a few photographs for the wall, from the sources switched on
+                complete &= step("photos", () -> Gallery.run(c));
+                complete &= step("picks", () -> {
+                    Picks.refresh(c, false);
+                    return true;
+                });
+                complete &= step("new-today", () -> {
+                    Fresh.refresh(c);
+                    return true;
+                });
+                // stopped by Android (onStopJob): it already knows
+                if (Thread.currentThread().isInterrupted()) return;
+                // a one-off catch-up that hit a network failure asks to be retried later
+                jobFinished(params, !complete && params.getJobId() == Daily.JOB_NOW);
+            } finally {
+                busy.set(false);
+            }
         }, "daily-photos");
         worker.start();
         return true;

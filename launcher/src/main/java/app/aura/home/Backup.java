@@ -29,7 +29,8 @@ final class Backup {
             "adb_ok", "adb_open", "keys_lag", "keys_healing", "crashes", "safe_at", "setup_note", "welcome_resume",
             "update_ver", "update_seen", "update_told", "listings_asked", "tmdb_session", "tmdb_account", "tmdb_user",
             "pick_made_for", "pick_count", "pick_at", "geo_at", "wx_at", "wx", "saver_prev", "sleepAt", "sleepVol", "sleepSet",
-            "sleepEnd", "known_pkgs", "new_pkgs", "welcomed", "keys_wanted", "adb_paired", "adb_tls_port", "set_light", "parent_pin"));
+            "sleepEnd", "known_pkgs", "new_pkgs", "welcomed", "keys_wanted", "adb_paired", "adb_tls_port", "set_light",
+            "parent_pin", "watched", "wx_json", "wx_temp", "wx_code", "wx_day", "wx_f", "tidied_76"));
 
     private Backup() { }
 
@@ -81,10 +82,17 @@ final class Backup {
         int n = 0;
         for (Iterator<String> it = files.keys(); it.hasNext(); ) {
             String name = it.next();
-            if (!name.equals("aura") && !name.startsWith("aura_") || name.equals("aura_usage")) continue;
+            if (!name.matches("aura(_[a-z0-9]+)?") || name.equals("aura_usage")) continue;
             JSONObject o = files.getJSONObject(name);
-            SharedPreferences.Editor ed = c.getSharedPreferences(name, Context.MODE_PRIVATE).edit();
-            if (!name.equals("aura")) ed.clear();
+            SharedPreferences sp = c.getSharedPreferences(name, Context.MODE_PRIVATE);
+            SharedPreferences.Editor ed = sp.edit();
+            if (!name.equals("aura")) {
+                ed.clear();
+            } else {
+                for (String existing : sp.getAll().keySet()) {
+                    if (!LOCAL.contains(existing)) ed.remove(existing);
+                }
+            }
             for (Iterator<String> ks = o.keys(); ks.hasNext(); ) {
                 String k = ks.next();
                 if (LOCAL.contains(k)) continue;

@@ -27,7 +27,9 @@ final class Tiles {
     private static final Map<String, Bitmap> LOGOS = new HashMap<>();
 
     static void trim() {
-        LOGOS.clear();
+        synchronized (LOGOS) {
+            LOGOS.clear();
+        }
     }
 
     private Tiles() { }
@@ -293,12 +295,15 @@ final class Tiles {
         // a pane not laid out yet (or hidden, as the widgets are in the tvOS style) has nothing to draw into
         if (w <= 0 || h <= 0) return;
         String key = a.pkg + "@" + w + "x" + h;
-        if (!LOGOS.containsKey(key)) {
-            Bitmap lifted = a.banner != null ? lift(a.banner, w, h) : null;
-            if (lifted == null && a.icon != null) lifted = liftIcon(a.icon, h);
-            LOGOS.put(key, lifted != null ? withShadow(lifted) : null);
+        Bitmap logo;
+        synchronized (LOGOS) {
+            if (!LOGOS.containsKey(key)) {
+                Bitmap lifted = a.banner != null ? lift(a.banner, w, h) : null;
+                if (lifted == null && a.icon != null) lifted = liftIcon(a.icon, h);
+                LOGOS.put(key, lifted != null ? withShadow(lifted) : null);
+            }
+            logo = LOGOS.get(key);
         }
-        Bitmap logo = LOGOS.get(key);
         if (logo != null) {
             c.save();
             if (logo.getWidth() == w) {
@@ -370,9 +375,15 @@ final class Tiles {
             step += colorStep(px[y * w], px[(y - 1) * w]) + colorStep(px[y * w + w - 1], px[(y - 1) * w + w - 1]);
             steps += 2;
         }
-        if (step / (double) steps > 14.0) return null;
+        if (step / (double) steps > 14.0) {
+            b.recycle();
+            return null;
+        }
         int[] out = key(px, w, 1, 1, w - 2, h - 2);
-        if (out == null) return null;
+        if (out == null) {
+            b.recycle();
+            return null;
+        }
         b.setPixels(out, 0, w, 0, 0, w, h);
         return b;
     }
@@ -556,15 +567,16 @@ final class Tiles {
 
     private static void banner(Canvas c, Drawable d, int w, int h) {
         c.drawColor(0xFF1E1C1A);
-        int iw = d.getIntrinsicWidth(), ih = d.getIntrinsicHeight();
+        Drawable copy = d.getConstantState() != null ? d.getConstantState().newDrawable().mutate() : d;
+        int iw = copy.getIntrinsicWidth(), ih = copy.getIntrinsicHeight();
         if (iw > 0 && ih > 0) {
             float s = Math.max(w / (float) iw, h / (float) ih);
             int dw = Math.round(iw * s), dh = Math.round(ih * s);
-            d.setBounds((w - dw) / 2, (h - dh) / 2, (w - dw) / 2 + dw, (h - dh) / 2 + dh);
+            copy.setBounds((w - dw) / 2, (h - dh) / 2, (w - dw) / 2 + dw, (h - dh) / 2 + dh);
         } else {
-            d.setBounds(0, 0, w, h);
+            copy.setBounds(0, 0, w, h);
         }
-        d.draw(c);
+        copy.draw(c);
     }
 
     private static void icon(Canvas c, Drawable icon, int color, int w, int h) {
@@ -573,8 +585,9 @@ final class Tiles {
                 Shader.TileMode.CLAMP));
         c.drawRect(0, 0, w, h, p);
         if (icon == null) return;
+        Drawable copy = icon.getConstantState() != null ? icon.getConstantState().newDrawable().mutate() : icon;
         int s = Math.round(h * 0.58f);
-        icon.setBounds((w - s) / 2, (h - s) / 2, (w + s) / 2, (h + s) / 2);
-        icon.draw(c);
+        copy.setBounds((w - s) / 2, (h - s) / 2, (w + s) / 2, (h + s) / 2);
+        copy.draw(c);
     }
 }

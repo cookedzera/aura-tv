@@ -21,10 +21,13 @@ final class Power {
     static final long FADE_MS = 60_000;
     static final int FADE_STEPS = 12;
 
+    private static volatile long cachedSleepAt = -1;
+    private static volatile long lastPendingCheckAt;
+
     private Power() { }
 
     private static SharedPreferences prefs(Context c) {
-        return c.getSharedPreferences("aura", Context.MODE_PRIVATE);
+        return Prefs.device(c);
     }
 
     private static boolean admin(Context c) {
@@ -57,9 +60,13 @@ final class Power {
 
     static void schedule(Context c, String action, int step, long at) {
         AlarmManager am = Compat.svc(c, AlarmManager.class);
-        // Doze, and the alarm that pierces it, arrived in Android 6
-        if (android.os.Build.VERSION.SDK_INT >= 23) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, intent(c, action, step));
-        else am.setExact(AlarmManager.RTC_WAKEUP, at, intent(c, action, step));
+        if (am == null) return;
+        try {
+            // Doze, and the alarm that pierces it, arrived in Android 6
+            if (android.os.Build.VERSION.SDK_INT >= 23) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, intent(c, action, step));
+            else am.setExact(AlarmManager.RTC_WAKEUP, at, intent(c, action, step));
+        } catch (RuntimeException ignored) {
+        }
     }
 
     /** Whether an alarm of this kind is still set: after a restart there are none, whatever was saved. */
@@ -80,6 +87,8 @@ final class Power {
         long at = System.currentTimeMillis() + left + 20_000;
         schedule(c, FADE, 0, Math.max(System.currentTimeMillis() + 1_000, at - FADE_MS));
         prefs(c).edit().putLong("sleepAt", at).putBoolean("sleepEnd", true).apply();
+        cachedSleepAt = at;
+        lastPendingCheckAt = System.currentTimeMillis();
         return true;
     }
 
@@ -90,19 +99,24 @@ final class Power {
     static void setSleep(Context c, int minutes) {
         prefs(c).edit().remove("sleepEnd").apply();
         AlarmManager am = Compat.svc(c, AlarmManager.class);
-        for (String a : new String[]{FADE, SLEEP, RESTORE}) {
-            PendingIntent pi = intent(c, a, 0);
-            am.cancel(pi);
-            pi.cancel();
+        if (am != null) {
+            for (String a : new String[]{FADE, SLEEP, RESTORE}) {
+                PendingIntent pi = intent(c, a, 0);
+                am.cancel(pi);
+                pi.cancel();
+            }
         }
         restoreVolume(c);
         if (minutes <= 0) {
             prefs(c).edit().remove("sleepAt").apply();
+            cachedSleepAt = 0;
             return;
         }
         long now = System.currentTimeMillis(), at = now + minutes * 60_000L;
         schedule(c, FADE, 0, Math.max(now + 1_000, at - FADE_MS));
         prefs(c).edit().putLong("sleepAt", at).apply();
+        cachedSleepAt = at;
+        lastPendingCheckAt = now;
     }
 
     /** One step of the fade; the first step remembers the volume to come back to. */
@@ -149,6 +163,7 @@ final class Power {
 
     static void sleepNow(Context c) {
         prefs(c).edit().remove("sleepAt").remove("sleepEnd").apply();
+        cachedSleepAt = 0;
         // put the volume back once the panel is off, so it's normal the next time the TV wakes. Had
         // nothing switched it off, the sound stays faded rather than coming back loud in the night:
         // it's put back when Aura is next on screen
@@ -165,20 +180,36 @@ final class Power {
         SharedPreferences p = prefs(c);
         if (!p.contains("sleepVol")) return;
         try {
-            Compat.svc(c, AudioManager.class).setStreamVolume(AudioManager.STREAM_MUSIC, p.getInt("sleepVol", 0), 0);
+            AudioManager am = Compat.svc(c, AudioManager.class);
+            if (am != null) am.setStreamVolume(AudioManager.STREAM_MUSIC, p.getInt("sleepVol", 0), 0);
         } catch (SecurityException ignored) {
         }
-        p.edit().remove("sleepVol").apply();
+        p.edit().remove("sleepVol").remove("sleepSet").apply();
     }
 
     static long sleepLeftMs(Context c) {
         SharedPreferences p = prefs(c);
-        if (!p.contains("sleepAt")) return 0;
-        long left = p.getLong("sleepAt", 0) - System.currentTimeMillis();
-        // the TV restarted since it was set: the alarms went with it
-        if (left <= 0 || !pending(c, FADE) && !pending(c, SLEEP)) {
-            p.edit().remove("sleepAt").apply();
+        if (!p.contains("sleepAt")) {
+            cachedSleepAt = 0;
             return 0;
+        }
+        long now = System.currentTimeMillis();
+        long at = p.getLong("sleepAt", 0);
+        long left = at - now;
+        if (left <= 0) {
+            p.edit().remove("sleepAt").apply();
+            cachedSleepAt = 0;
+            return 0;
+        }
+        // the TV restarted since it was set: the alarms went with it (checked once, not on every tick)
+        if (cachedSleepAt != at || now - lastPendingCheckAt > 60_000L) {
+            lastPendingCheckAt = now;
+            if (!pending(c, FADE) && !pending(c, SLEEP)) {
+                p.edit().remove("sleepAt").apply();
+                cachedSleepAt = 0;
+                return 0;
+            }
+            cachedSleepAt = at;
         }
         return left;
     }

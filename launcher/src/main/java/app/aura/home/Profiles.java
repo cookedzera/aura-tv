@@ -37,6 +37,7 @@ final class Profiles {
     /** Each new profile takes the next of these colours for its badge. */
     private static final int[] COLORS = {0xFF6E8BFF, 0xFFFF8A65, 0xFF4CD9A0, 0xFFE57BD8, 0xFFFFC857};
     private static volatile String current;
+    private static volatile List<Profile> cachedAll;
 
     private Profiles() { }
 
@@ -47,6 +48,7 @@ final class Profiles {
     /** Read afresh next time (a backup was just restored). */
     static void forget() {
         current = null;
+        cachedAll = null;
     }
 
     static String current(Context c) {
@@ -62,6 +64,16 @@ final class Profiles {
     }
 
     static List<Profile> all(Context c) {
+        List<Profile> known = cachedAll;
+        if (known != null) {
+            List<Profile> copy = new ArrayList<>(known.size());
+            for (Profile p : known) {
+                Profile cp = new Profile(p.id, p.name, p.color);
+                cp.kids = p.kids;
+                copy.add(cp);
+            }
+            return copy;
+        }
         List<Profile> out = new ArrayList<>();
         try {
             JSONArray a = new JSONArray(store(c).getString("list", "[]"));
@@ -74,20 +86,36 @@ final class Profiles {
         } catch (JSONException ignored) {
         }
         if (out.isEmpty()) out.add(new Profile(MAIN, c.getString(R.string.me), COLORS[0]));
+        List<Profile> cache = new ArrayList<>(out.size());
+        for (Profile p : out) {
+            Profile cp = new Profile(p.id, p.name, p.color);
+            cp.kids = p.kids;
+            cache.add(cp);
+        }
+        cachedAll = java.util.Collections.unmodifiableList(cache);
         return out;
     }
 
     static String name(Context c) {
-        for (Profile p : all(c)) if (p.id.equals(current(c))) return p.name;
+        List<Profile> list = cachedAll != null ? cachedAll : all(c);
+        String cur = current(c);
+        for (Profile p : list) if (p.id.equals(cur)) return p.name;
         return c.getString(R.string.me);
     }
 
     private static void save(Context c, List<Profile> list) {
         JSONArray a = new JSONArray();
+        List<Profile> cache = new ArrayList<>(list.size());
         try {
-            for (Profile p : list) a.put(new JSONObject().put("id", p.id).put("name", p.name).put("color", p.color).put("kids", p.kids));
+            for (Profile p : list) {
+                a.put(new JSONObject().put("id", p.id).put("name", p.name).put("color", p.color).put("kids", p.kids));
+                Profile cp = new Profile(p.id, p.name, p.color);
+                cp.kids = p.kids;
+                cache.add(cp);
+            }
         } catch (JSONException ignored) {
         }
+        cachedAll = java.util.Collections.unmodifiableList(cache);
         store(c).edit().putString("list", a.toString()).apply();
     }
 
@@ -108,8 +136,9 @@ final class Profiles {
 
     /** The profile in use is a kids' one: grown-up things ask for the PIN. */
     static boolean kids(Context c) {
+        List<Profile> list = cachedAll != null ? cachedAll : all(c);
         String cur = current(c);
-        for (Profile p : all(c)) if (p.id.equals(cur)) return p.kids;
+        for (Profile p : list) if (p.id.equals(cur)) return p.kids;
         return false;
     }
 

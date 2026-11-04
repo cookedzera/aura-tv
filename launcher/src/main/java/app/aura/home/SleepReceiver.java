@@ -11,6 +11,6 @@ public class SleepReceiver extends BroadcastReceiver {
         String a = i.getAction();
         if (Power.FADE.equals(a)) Power.fadeStep(c, i.getIntExtra("step", 0));
         else if (Power.RESTORE.equals(a)) Power.restoreVolume(c);
-        else Power.sleepNow(c);
+        else if (Power.SLEEP.equals(a)) Power.sleepNow(c);
     }
 }

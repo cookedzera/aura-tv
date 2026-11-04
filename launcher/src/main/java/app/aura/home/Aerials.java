@@ -37,11 +37,20 @@ final class Aerials {
 
         /** The copy to stream: HEVC (a third smaller, so it starts sooner) where the TV decodes it in hardware. */
         String stream() {
-            return hevc != null && hevcInHardware() ? hevc : url;
+            return usesHevc() ? hevc : url;
+        }
+
+        boolean usesHevc() {
+            return hevc != null && !hevcFailed && hevcInHardware();
         }
     }
 
     private static List<Video> all;
+    private static volatile boolean hevcFailed;
+
+    static void disableHevc() {
+        hevcFailed = true;
+    }
 
     private Aerials() { }
 
@@ -85,7 +94,13 @@ final class Aerials {
                 String n = info.getName().toLowerCase(java.util.Locale.ROOT);
                 if (n.startsWith("omx.google.") || n.startsWith("c2.android.") || n.contains(".sw.")) continue;
                 if (android.os.Build.VERSION.SDK_INT >= 29 && !info.isHardwareAccelerated()) continue;
-                for (String t : info.getSupportedTypes()) if ("video/hevc".equalsIgnoreCase(t)) found = true;
+                for (String t : info.getSupportedTypes()) {
+                    if (!"video/hevc".equalsIgnoreCase(t)) continue;
+                    // Apple's HEVC streams are 2560x1440: a 1080p-only decoder must fall back to the 1080p H.264 stream
+                    android.media.MediaCodecInfo.CodecCapabilities caps = info.getCapabilitiesForType(t);
+                    android.media.MediaCodecInfo.VideoCapabilities vc = caps != null ? caps.getVideoCapabilities() : null;
+                    if (vc == null || vc.areSizeAndRateSupported(2560, 1440, 24)) found = true;
+                }
             }
         } catch (RuntimeException ignored) {
         }

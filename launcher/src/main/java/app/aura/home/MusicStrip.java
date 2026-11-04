@@ -103,6 +103,12 @@ final class MusicStrip extends LinearLayout {
 
     /** Follows {@code c} until its music stops; {@code gone} is told then. */
     void start(MediaController c, Runnable gone) {
+        if (controller != null) {
+            try {
+                controller.unregisterCallback(watch);
+            } catch (RuntimeException ignored) {
+            }
+        }
         controller = c;
         onGone = gone;
         c.registerCallback(watch, handler);
@@ -204,7 +210,9 @@ final class MusicStrip extends LinearLayout {
             return;
         }
         long pos = st.getPosition();
-        if (on) pos += (long) ((SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * st.getPlaybackSpeed());
+        long updated = st.getLastPositionUpdateTime();
+        float speed = st.getPlaybackSpeed();
+        if (on && updated > 0) pos += (long) (Math.max(0, SystemClock.elapsedRealtime() - updated) * (speed > 0f ? speed : 1f));
         pos = Math.max(0, Math.min(dur, pos));
         bar.setVisibility(VISIBLE);
         bar.set(pos / (float) dur);

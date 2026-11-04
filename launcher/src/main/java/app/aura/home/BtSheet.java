@@ -162,6 +162,17 @@ final class BtSheet extends GlassFrame {
         setVisibility(View.GONE);
     }
 
+    void release() {
+        close();
+        if (bt != null && a2dp != null) {
+            try {
+                bt.closeProfileProxy(BluetoothProfile.A2DP, a2dp);
+            } catch (RuntimeException ignored) {
+            }
+            a2dp = null;
+        }
+    }
+
     /** The connected headphones' name for the Control Center caption, or "Bluetooth" when none is connected. */
     String connectedName() {
         if (bt == null || !bt.isEnabled()) return act.getString(R.string.bluetooth_off);

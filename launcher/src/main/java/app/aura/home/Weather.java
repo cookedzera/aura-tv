@@ -84,7 +84,7 @@ final class Weather {
     private static String cachedJson;
     private static long cachedHour = -1;
 
-    static Forecast forecast(Context c) {
+    static synchronized Forecast forecast(Context c) {
         String json = prefs(c).getString("wx_json", null);
         if (json == null) return null;
         long hNow = System.currentTimeMillis() / 3_600_000L;

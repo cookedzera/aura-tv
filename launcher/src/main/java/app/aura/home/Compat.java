@@ -110,32 +110,44 @@ final class Compat {
     @SuppressWarnings("deprecation")
     static boolean onWifi(ConnectivityManager cm, boolean wired) {
         if (cm == null) return false;
-        if (Build.VERSION.SDK_INT >= 23) {
-            android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(cm.getActiveNetwork());
-            return nc != null && (nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
-                    || wired && nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET));
+        try {
+            if (Build.VERSION.SDK_INT >= 23) {
+                android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(cm.getActiveNetwork());
+                return nc != null && (nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+                        || wired && nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET));
+            }
+            android.net.NetworkInfo ni = cm.getActiveNetworkInfo();
+            return ni != null && ni.isConnected() && (ni.getType() == ConnectivityManager.TYPE_WIFI
+                    || wired && ni.getType() == ConnectivityManager.TYPE_ETHERNET);
+        } catch (RuntimeException e) {
+            return false;
         }
-        android.net.NetworkInfo ni = cm.getActiveNetworkInfo();
-        return ni != null && ni.isConnected() && (ni.getType() == ConnectivityManager.TYPE_WIFI
-                || wired && ni.getType() == ConnectivityManager.TYPE_ETHERNET);
     }
 
     /** True when any network is up. */
     @SuppressWarnings("deprecation")
     static boolean online(ConnectivityManager cm) {
         if (cm == null) return false;
-        if (Build.VERSION.SDK_INT >= 23) {
-            // connected isn't online: a network with no way out (a router without internet) doesn't count
-            android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(cm.getActiveNetwork());
-            return nc != null && nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        try {
+            if (Build.VERSION.SDK_INT >= 23) {
+                // connected isn't online: a network with no way out (a router without internet) doesn't count
+                android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(cm.getActiveNetwork());
+                return nc != null && nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            }
+            android.net.NetworkInfo ni = cm.getActiveNetworkInfo();
+            return ni != null && ni.isConnected();
+        } catch (RuntimeException e) {
+            return false;
         }
-        android.net.NetworkInfo ni = cm.getActiveNetworkInfo();
-        return ni != null && ni.isConnected();
     }
 
     /** Whether a job with this id is waiting; getPendingJob arrived in Android 7. */
     static boolean pending(JobScheduler js, int id) {
-        for (android.app.job.JobInfo j : js.getAllPendingJobs()) if (j.getId() == id) return true;
+        if (js == null) return false;
+        try {
+            for (android.app.job.JobInfo j : js.getAllPendingJobs()) if (j.getId() == id) return true;
+        } catch (RuntimeException ignored) {
+        }
         return false;
     }
 }

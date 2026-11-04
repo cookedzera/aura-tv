@@ -78,4 +78,18 @@ public class LogicTest {
         assertFalse(Updater.newer("7.6", "7.6.1"));
         assertFalse(Updater.newer("7.6.1", "7.6.1"));
     }
+
+    @Test
+    public void hevcFallbackAndProfileCache() {
+        Context c = RuntimeEnvironment.getApplication();
+        Aerials.Video v = Aerials.all(c).get(0);
+        Aerials.disableHevc();
+        assertFalse("once a 2K HEVC stream fails on a budget decoder, H.264 is used", v.usesHevc());
+        assertEquals(v.url, v.stream());
+        int before = Profiles.all(c).size();
+        Profiles.Profile added = Profiles.add(c, "Test Room");
+        assertEquals(before + 1, Profiles.all(c).size());
+        Profiles.remove(c, added.id);
+        assertEquals(before, Profiles.all(c).size());
+    }
 }

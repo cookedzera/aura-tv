@@ -80,6 +80,7 @@ final class Mine {
         JSONArray index = readIndex(c), out = new JSONArray();
         for (int i = 0; i < index.length(); i++) {
             JSONObject o = index.optJSONObject(i);
+            if (o == null) continue;
             try {
                 out.put(new JSONObject().put("id", o.optString("id")).put("title", o.optString("place")).put("gif", o.optBoolean("gif")));
             } catch (JSONException ignored) {
@@ -114,13 +115,25 @@ final class Mine {
             // an iPhone's HEIC photo: Android reads those from 9 on; before that, say what to change
             if (still == null) throw new Unsupported(c.getString(isHeif(part) ? R.string.heic_needs_android_9 : R.string.not_a_photo_the_tv_can_read));
             File out = new File(dir(c), id + (gif ? ".gif" : ".jpg"));
-            Bitmap shown = gif ? still : compose(rotate(still, orientation(part)));
+            Bitmap rotated = gif ? still : rotate(still, orientation(part));
+            if (rotated != still) still.recycle();
+            Bitmap shown = gif ? rotated : compose(rotated);
+            if (shown != rotated) rotated.recycle();
             if (gif) {
-                if (!part.renameTo(out)) throw new IOException("couldn't keep the GIF");
+                if (!part.renameTo(out)) {
+                    shown.recycle();
+                    throw new IOException("couldn't keep the GIF");
+                }
             } else {
                 save(shown, out, 90);
             }
-            save(cover(shown, TW, TH), thumb(c, id), 82);
+            Bitmap th = cover(shown, TW, TH);
+            save(th, thumb(c, id), 82);
+            th.recycle();
+            Bitmap sample = cover(shown, 96, 54);
+            int accentColor = AppRepo.colorOf(new BitmapDrawable(c.getResources(), sample)) & 0xFFFFFF;
+            sample.recycle();
+            shown.recycle();
             JSONObject e = new JSONObject();
             e.put("id", id);
             e.put("kind", "mine");
@@ -133,13 +146,14 @@ final class Mine {
             e.put("region", c.getString(gif ? R.string.your_gif : R.string.your_photo) + " · " + Words.date("d MMMM", System.currentTimeMillis()));
             e.put("line", "");
             e.put("mood", "day");
-            e.put("accent", String.format(Locale.ROOT, "#%06X",
-                    AppRepo.colorOf(new BitmapDrawable(c.getResources(), cover(shown, 96, 54))) & 0xFFFFFF));
+            e.put("accent", String.format(Locale.ROOT, "#%06X", accentColor));
             synchronized (LOCK) {
                 JSONArray index = readIndex(c), next = new JSONArray().put(e);
                 for (int i = 0; i < index.length(); i++) {
-                    if (next.length() < KEEP) next.put(index.optJSONObject(i));
-                    else forget(c, index.optJSONObject(i));
+                    JSONObject item = index.optJSONObject(i);
+                    if (item == null) continue;
+                    if (next.length() < KEEP) next.put(item);
+                    else forget(c, item);
                 }
                 write(c, next);
             }
@@ -158,6 +172,7 @@ final class Mine {
             boolean found = false;
             for (int i = 0; i < index.length(); i++) {
                 JSONObject o = index.optJSONObject(i);
+                if (o == null) continue;
                 if (o.optString("id").equals(id)) {
                     forget(c, o);
                     found = true;
@@ -186,6 +201,7 @@ final class Mine {
     }
 
     private static void forget(Context c, JSONObject o) {
+        if (o == null) return;
         //noinspection ResultOfMethodCallIgnored
         new File(o.optString("path")).delete();
         //noinspection ResultOfMethodCallIgnored
@@ -268,11 +284,14 @@ final class Mine {
         Bitmap out = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(out);
         Paint p = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
-        Bitmap bg = Backdrop.blur(cover(b, 384, 216));
+        Bitmap cov = cover(b, 384, 216);
+        Bitmap bg = Backdrop.blur(cov);
+        if (cov != bg) cov.recycle();
         p.setColorFilter(new LightingColorFilter(0x7A7A7A, 0));
         Matrix m = new Matrix();
         m.setScale(W / (float) bg.getWidth(), H / (float) bg.getHeight());
         cv.drawBitmap(bg, m, p);
+        bg.recycle();
         p.setColorFilter(null);
 
         // small enough that the backdrop's slow zoom never crops it
@@ -308,8 +327,18 @@ final class Mine {
     }
 
     private static void save(Bitmap b, File f, int quality) throws IOException {
-        try (FileOutputStream fo = new FileOutputStream(f)) {
+        File tmp = new File(f.getPath() + ".tmp");
+        try (FileOutputStream fo = new FileOutputStream(tmp)) {
             if (!b.compress(Bitmap.CompressFormat.JPEG, quality, fo)) throw new IOException("couldn't save");
+        } catch (IOException e) {
+            //noinspection ResultOfMethodCallIgnored
+            tmp.delete();
+            throw e;
+        }
+        if (!tmp.renameTo(f)) {
+            //noinspection ResultOfMethodCallIgnored
+            tmp.delete();
+            throw new IOException("couldn't save");
         }
     }
 

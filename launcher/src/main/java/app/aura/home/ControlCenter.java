@@ -69,6 +69,9 @@ final class ControlCenter {
 
         /** What's playing, large. */
         void nowPlaying();
+
+        /** Turns the screen pitch black while keeping sound playing. */
+        void quietScreen();
     }
 
     private static final int U = 84, G = 14;
@@ -152,6 +155,7 @@ final class ControlCenter {
     private final TextView wifiCap, btCap, sleepCap, photoCap;
     private final Round wifi, bt, sleep, photo;
     private final Slider volume;
+    private final FrameLayout inputs;
     private final LinearLayout segments;
     private final Pad picture, sound, boost, settings, standby;
     private final Ring ring;
@@ -470,7 +474,7 @@ final class ControlCenter {
 
 
         // 2x1: inputs
-        FrameLayout inputs = place(module(a), 0, 2, 2, 1);
+        inputs = place(module(a), 0, 2, 2, 1);
         TextView il = Ui.caps(a, 7, 0x8CFFFFFF, 0.24f);
         il.setText(act.getString(R.string.inputs));
         FrameLayout.LayoutParams ill = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -523,6 +527,7 @@ final class ControlCenter {
         wifi.onClick = this::showWifi;
         bt.onClick = this::showBt;
         sleep.onClick = this::cycleSleep;
+        sleep.onLongClick = host::quietScreen;
         photo.onClick = () -> {
             host.closeCc(true);
             host.photoMode();
@@ -534,6 +539,7 @@ final class ControlCenter {
         });
         settings.onClick = () -> host.guarded(() -> launch(new Intent(Settings.ACTION_SETTINGS), settings));
         standby.onClick = this::standby;
+        standby.onLongClick = host::quietScreen;
         // what's holding memory is best seen, and closed, in recent apps
         boost.onClick = host::recents;
         panel.setVisibility(View.GONE);
@@ -734,7 +740,7 @@ final class ControlCenter {
     private final Runnable notesChanged = this::notesArrived;
 
     private void notesArrived() {
-        if (panel.getVisibility() == View.VISIBLE) refreshNotes();
+        if (panel.getVisibility() == View.VISIBLE) refresh();
     }
 
     /** The home screen is going: nothing static keeps pointing back at it. */
@@ -745,7 +751,7 @@ final class ControlCenter {
         if (MediaWatch.onNotes == notesChanged) MediaWatch.onNotes = null;
         // a sheet still open as home goes: its Wi-Fi or Bluetooth listener goes with it
         if (wifiSheet.isOpen()) wifiSheet.close();
-        if (btSheet.isOpen()) btSheet.close();
+        btSheet.release();
     }
 
     /** Apps' names and icons for the rows, looked up once: decoding an icon each refresh cost frames as the board opened. */
@@ -1219,19 +1225,23 @@ final class ControlCenter {
 
     private void buildSegmentsNow() {
         TvInputManager tim = (TvInputManager) act.getSystemService(Context.TV_INPUT_SERVICE);
-        if (tim == null) return;
+        if (tim == null) {
+            inputs.setVisibility(View.GONE);
+            return;
+        }
         List<TvInputInfo> list = new ArrayList<>();
         for (TvInputInfo info : tim.getTvInputList()) {
             // hiding an input in the TV's settings arrived in Android 7
             if (info.isPassthroughInput() && (android.os.Build.VERSION.SDK_INT < 24 || !info.isHidden(act))) list.add(info);
         }
+        inputs.setVisibility(list.isEmpty() ? View.GONE : View.VISIBLE);
         java.util.Collections.sort(list, (x, y) -> {
             int tx = x.getType() == TvInputInfo.TYPE_HDMI ? 0 : 1, ty = y.getType() == TvInputInfo.TYPE_HDMI ? 0 : 1;
             return tx != ty ? tx - ty : label(x).compareTo(label(y));
         });
-        // the buttons are only rebuilt when an input or its state actually changed
+        // the buttons are only rebuilt when an input, its state, or its CEC name actually changed
         StringBuilder sig = new StringBuilder();
-        for (TvInputInfo info : list) sig.append(info.getId()).append('=').append(tim.getInputState(info.getId())).append('|');
+        for (TvInputInfo info : list) sig.append(info.getId()).append('=').append(tim.getInputState(info.getId())).append(':').append(label(info)).append('|');
         if (sig.toString().equals(segmentsSig)) return;
         segmentsSig = sig.toString();
         View focused = act.getCurrentFocus();
@@ -1330,11 +1340,11 @@ final class ControlCenter {
 
     /** Round toggle: tinted when on, translucent when off; focus lifts it and draws a bright rim. */
     static final class Round extends View {
-        Runnable onClick;
+        Runnable onClick, onLongClick;
         private final Drawable glyph;
         private final int activeColor;
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), rim = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private boolean on;
+        private boolean on, longFired;
         private float focus;
         private ValueAnimator anim;
 
@@ -1385,13 +1395,28 @@ final class ControlCenter {
 
         @Override
         public boolean onKeyDown(int code, KeyEvent e) {
-            return Pad.isConfirm(code) || super.onKeyDown(code, e);
+            if (Pad.isConfirm(code)) {
+                if (e.getRepeatCount() == 0) e.startTracking();
+                return true;
+            }
+            return super.onKeyDown(code, e);
+        }
+
+        @Override
+        public boolean onKeyLongPress(int code, KeyEvent e) {
+            if (Pad.isConfirm(code) && onLongClick != null) {
+                longFired = true;
+                onLongClick.run();
+                return true;
+            }
+            return super.onKeyLongPress(code, e);
         }
 
         @Override
         public boolean onKeyUp(int code, KeyEvent e) {
             if (Pad.isConfirm(code)) {
-                if (!e.isCanceled() && onClick != null) onClick.run();
+                if (!longFired && !e.isCanceled() && onClick != null) onClick.run();
+                longFired = false;
                 return true;
             }
             return super.onKeyUp(code, e);

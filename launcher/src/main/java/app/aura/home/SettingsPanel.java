@@ -194,13 +194,18 @@ final class SettingsPanel {
         return true;
     }
 
+    private boolean open;
+    private String builtPage = "";
+
     boolean isOpen() {
-        return panel.getVisibility() == View.VISIBLE;
+        return open && panel.getVisibility() == View.VISIBLE;
     }
 
     void open() {
+        open = true;
         page = "";
         entry = null;
+        panel.animate().cancel();
         build();
         panel.setVisibility(View.VISIBLE);
         panel.setAlpha(0f);
@@ -245,6 +250,8 @@ final class SettingsPanel {
     }
 
     void close() {
+        open = false;
+        authToken = null;
         thumbs.clear();
         stopDrop();
         // closed while waiting for a remote button: the next press stays an ordinary one
@@ -255,7 +262,9 @@ final class SettingsPanel {
         }
         hideKeyboard();
         panel.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
-                .withEndAction(() -> panel.setVisibility(View.GONE)).start();
+                .withEndAction(() -> {
+                    if (!open) panel.setVisibility(View.GONE);
+                }).start();
     }
 
     /** Back leaves the city field, then the hidden-apps page; returns false when the panel should close. */
@@ -365,6 +374,9 @@ final class SettingsPanel {
 
     private void build() {
         String keep = focusedTag();
+        final int sy = scroll.getScrollY();
+        final boolean samePage = page.equals(builtPage);
+        builtPage = page;
         rows.removeAllViews();
         note.setMaxLines(page.equals("updates") ? 18 : 4);
         // the release notes have the whole column to themselves
@@ -981,6 +993,8 @@ final class SettingsPanel {
             for (int i = 0; i < rows.getChildCount(); i++) if (keep.equals(rows.getChildAt(i).getTag())) kept = rows.getChildAt(i).requestFocus();
             if (!kept && isOpen()) focusFirst();
         }
+        if (samePage && sy > 0) scroll.post(() -> scroll.scrollTo(0, sy));
+        else if (!samePage && sy > 0) scroll.scrollTo(0, 0);
     }
 
     // ---- tonight's pick -------------------------------------------------------------------------

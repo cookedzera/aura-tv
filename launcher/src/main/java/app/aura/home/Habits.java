@@ -74,8 +74,10 @@ final class Habits {
         Map<String, Float> score = new HashMap<>();
         if (!granted(c)) return score;
         UsageStatsManager usm = Compat.svc(c, UsageStatsManager.class);
+        if (usm == null) return score;
         long now = System.currentTimeMillis();
         UsageEvents events = usm.queryEvents(now - 28 * DAY, now);
+        if (events == null) return score;
         UsageEvents.Event e = new UsageEvents.Event();
         Calendar cal = Calendar.getInstance();
         int hour = cal.get(Calendar.HOUR_OF_DAY);
@@ -87,8 +89,8 @@ final class Habits {
             events.getNextEvent(e);
             if (e.getEventType() != UsageEvents.Event.MOVE_TO_FOREGROUND) continue;
             String p = e.getPackageName();
+            if (p == null || p.equals(self)) continue;
             long t = e.getTimeStamp();
-            if (p.equals(self)) continue;
             // one visit, not every screen inside the app
             boolean sameVisit = p.equals(lastPkg) && t - lastT < 10 * 60_000L;
             lastPkg = p;
@@ -115,21 +117,11 @@ final class Habits {
      * or null. Used for "Jump back in".
      */
     static Object[] recent(Context c, java.util.Set<String> allowed) {
-        if (!granted(c)) return null;
-        UsageStatsManager usm = Compat.svc(c, UsageStatsManager.class);
-        long now = System.currentTimeMillis();
-        UsageEvents events = usm.queryEvents(now - 7 * DAY, now);
-        UsageEvents.Event e = new UsageEvents.Event();
-        String pkg = null;
-        long when = 0;
-        while (events.hasNextEvent()) {
-            events.getNextEvent(e);
-            if (e.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND && allowed.contains(e.getPackageName())) {
-                pkg = e.getPackageName();
-                when = e.getTimeStamp();
-            }
-        }
-        return pkg == null ? null : new Object[]{pkg, when};
+        if (!granted(c) || allowed == null || allowed.isEmpty()) return null;
+        java.util.LinkedHashMap<String, Long> list = recentList(c, allowed, 1);
+        if (list.isEmpty()) return null;
+        Map.Entry<String, Long> first = list.entrySet().iterator().next();
+        return new Object[]{first.getKey(), first.getValue()};
     }
 
     /**
@@ -151,11 +143,14 @@ final class Habits {
             long from = now - 7 * DAY;
             if (seenTo > 0 && seenTo <= now) from = Math.max(from, seenTo - 60_000);
             else seen.clear();
-            UsageEvents events = Compat.svc(c, UsageStatsManager.class).queryEvents(from, now);
+            UsageStatsManager usm = Compat.svc(c, UsageStatsManager.class);
+            UsageEvents events = usm != null ? usm.queryEvents(from, now) : null;
             UsageEvents.Event e = new UsageEvents.Event();
-            while (events.hasNextEvent()) {
+            while (events != null && events.hasNextEvent()) {
                 events.getNextEvent(e);
-                if (e.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) seen.put(e.getPackageName(), e.getTimeStamp());
+                if (e.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND && e.getPackageName() != null) {
+                    seen.put(e.getPackageName(), e.getTimeStamp());
+                }
             }
             seenTo = now;
             for (Map.Entry<String, Long> s : seen.entrySet()) {
@@ -186,7 +181,7 @@ final class Habits {
     }
 
     /** An app was just opened from Aura: remembered for the switcher even across restarts. */
-    static void opened(Context c, String pkg) {
+    static synchronized void opened(Context c, String pkg) {
         if (pkg == null) return;
         android.content.SharedPreferences p = c.getSharedPreferences("aura_usage", Context.MODE_PRIVATE);
         Map<String, Long> kept = read(p.getString("recent", "{}"));
@@ -201,7 +196,7 @@ final class Habits {
     }
 
     /** Closed from the switcher: out of the list until it's next opened. */
-    static void close(Context c, String pkg) {
+    static synchronized void close(Context c, String pkg) {
         android.content.SharedPreferences p = c.getSharedPreferences("aura_usage", Context.MODE_PRIVATE);
         Map<String, Long> closed = read(p.getString("closed", "{}"));
         closed.put(pkg, System.currentTimeMillis());
@@ -267,9 +262,12 @@ final class Habits {
             // first look today: whatever Android still holds from earlier boots is the starting point
             carried = new HashMap<>();
             UsageStatsManager usm = Compat.svc(c, UsageStatsManager.class);
-            for (UsageStats s : usm.queryAndAggregateUsageStats(midnight, now).values()) {
-                long before = s.getTotalTimeInForeground() - (thisBoot.containsKey(s.getPackageName()) ? thisBoot.get(s.getPackageName()) : 0);
-                if (before > 0) carried.put(s.getPackageName(), before);
+            Map<String, UsageStats> agg = usm != null ? usm.queryAndAggregateUsageStats(midnight, now) : null;
+            if (agg != null) {
+                for (UsageStats s : agg.values()) {
+                    long before = s.getTotalTimeInForeground() - (thisBoot.containsKey(s.getPackageName()) ? thisBoot.get(s.getPackageName()) : 0);
+                    if (before > 0) carried.put(s.getPackageName(), before);
+                }
             }
         } else {
             carried = read(p.getString("carried", "{}"));
@@ -299,14 +297,16 @@ final class Habits {
     private static Map<String, Long> foreground(Context c, long from, long to) {
         Map<String, Long> out = new HashMap<>();
         if (to <= from) return out;
-        UsageEvents events = Compat.svc(c, UsageStatsManager.class).queryEvents(from, to);
+        UsageStatsManager usm = Compat.svc(c, UsageStatsManager.class);
+        UsageEvents events = usm != null ? usm.queryEvents(from, to) : null;
+        if (events == null) return out;
         UsageEvents.Event e = new UsageEvents.Event();
         String front = null;
         long since = from;
         while (events.hasNextEvent()) {
             events.getNextEvent(e);
             int type = e.getEventType();
-            if (type == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+            if (type == UsageEvents.Event.MOVE_TO_FOREGROUND && e.getPackageName() != null) {
                 if (front != null && !front.equals(e.getPackageName())) add(out, front, e.getTimeStamp() - since);
                 if (front == null || !front.equals(e.getPackageName())) since = e.getTimeStamp();
                 front = e.getPackageName();

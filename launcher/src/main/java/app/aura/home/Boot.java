@@ -17,6 +17,7 @@ public class Boot extends BroadcastReceiver {
     public void onReceive(Context c, Intent i) {
         if (!Intent.ACTION_BOOT_COMPLETED.equals(i.getAction())) return;
         final Context app = c.getApplicationContext();
+        Power.restoreVolume(app);
         // the TV went off in the moment the service was being switched off and on again: back on
         if (Prefs.device(app).getBoolean("keys_healing", false)) {
             HomeKeys.set(app, true);
@@ -31,8 +32,8 @@ public class Boot extends BroadcastReceiver {
         // on, yet it may not have started: given a few seconds, then switched off and on again
         final PendingResult wait = goAsync();
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            if (!HomeKeys.live) HomeKeys.heal(app);
-            wait.finish();
-        }, 8000);
+            if (!HomeKeys.live) HomeKeys.heal(app, wait::finish);
+            else wait.finish();
+        }, 4500);
     }
 }

@@ -46,7 +46,7 @@ final class Folders {
 
     private Folders() { }
 
-    static Map<String, Folder> all(Context c) {
+    static synchronized Map<String, Folder> all(Context c) {
         Map<String, Folder> out = new LinkedHashMap<>();
         try {
             JSONObject o = new JSONObject(Prefs.of(c).getString(KEY, "{}"));
@@ -76,25 +76,28 @@ final class Folders {
     }
 
     /** The folder holding {@code pkg}, or null. */
-    static Folder of(Context c, String pkg) {
+    static synchronized Folder of(Context c, String pkg) {
         for (Folder f : all(c).values()) if (f.apps.contains(pkg)) return f;
         return null;
     }
 
     /** A new folder with the first unused name, holding {@code pkg}; returns it. */
-    static Folder create(Context c, String pkg) {
+    static synchronized Folder create(Context c, String pkg) {
         Map<String, Folder> all = all(c);
         String[] names = names(c);
         String name = names[0];
         for (String n : names) {
             boolean used = false;
-            for (Folder f : all.values()) if (f.name.equals(n)) used = true;
+            for (Folder f : all.values()) if (f.name.equalsIgnoreCase(n)) used = true;
             if (!used) {
                 name = n;
                 break;
             }
         }
-        Folder f = new Folder(Long.toString(System.currentTimeMillis(), 36), name);
+        long t = System.currentTimeMillis();
+        String id = Long.toString(t, 36);
+        while (all.containsKey(id)) id = Long.toString(++t, 36);
+        Folder f = new Folder(id, name);
         removeEverywhere(all, pkg);
         f.apps.add(pkg);
         all.put(f.id, f);
@@ -102,7 +105,7 @@ final class Folders {
         return f;
     }
 
-    static void add(Context c, String id, String pkg) {
+    static synchronized void add(Context c, String id, String pkg) {
         Map<String, Folder> all = all(c);
         Folder f = all.get(id);
         if (f == null) return;
@@ -111,14 +114,14 @@ final class Folders {
         save(c, all);
     }
 
-    static void remove(Context c, String pkg) {
+    static synchronized void remove(Context c, String pkg) {
         Map<String, Folder> all = all(c);
         removeEverywhere(all, pkg);
         save(c, all);
     }
 
     /** Any name you like (typed with the keyboard, or one of the suggestions). */
-    static void rename(Context c, String id, String name) {
+    static synchronized void rename(Context c, String id, String name) {
         Map<String, Folder> all = all(c);
         Folder f = all.get(id);
         if (f == null || name == null || name.trim().isEmpty()) return;
@@ -127,7 +130,7 @@ final class Folders {
     }
 
     /** The preset names no folder uses yet, to offer as one-press names. */
-    static List<String> suggestions(Context c) {
+    static synchronized List<String> suggestions(Context c) {
         List<String> out = new ArrayList<>();
         Map<String, Folder> all = all(c);
         for (String n : names(c)) {
@@ -139,7 +142,7 @@ final class Folders {
     }
 
     /** Every app back on the grid. */
-    static void dissolve(Context c, String id) {
+    static synchronized void dissolve(Context c, String id) {
         Map<String, Folder> all = all(c);
         all.remove(id);
         save(c, all);

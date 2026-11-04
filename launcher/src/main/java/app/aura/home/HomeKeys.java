@@ -192,6 +192,18 @@ public class HomeKeys extends AccessibilityService {
         }
     }
 
+    /** An app was installed, updated or removed: check packages and launchers afresh next time. */
+    static void packagesChanged() {
+        HomeKeys s = running;
+        if (s == null) return;
+        s.handler.post(() -> {
+            s.openable.clear();
+            s.activities.clear();
+            s.others = HomeRole.others(s);
+            s.homeReadAt = -1;
+        });
+    }
+
     /**
      * The TV's own launcher came up anyway: Aura over it at once. Three times in ten seconds is a
      * tug of war (something keeps opening it on purpose), so then it's left alone for a minute.
@@ -517,13 +529,13 @@ public class HomeKeys extends AccessibilityService {
             if (up && !e.isCanceled()) {
                 String over = front != null && !front.equals(getPackageName()) ? front : "";
                 if (key == KEYCODE_PROFILE_SWITCH) open("aura_profiles", "");
-                else open("aura_cc", over);
+                else if (!Profiles.kids(this)) open("aura_cc", over);
             }
             return true;
         }
         if (key == KeyEvent.KEYCODE_APP_SWITCH || key == KeyEvent.KEYCODE_ALL_APPS) {
             // both halves are kept from Android; Aura answers on the release
-            if (up && !e.isCanceled()) {
+            if (up && !e.isCanceled() && !(key == KeyEvent.KEYCODE_ALL_APPS && Profiles.kids(this))) {
                 String over = front != null && !front.equals(getPackageName()) ? front : null;
                 if (key == KeyEvent.KEYCODE_ALL_APPS) open("aura_apps", "");
                 else if (over != null) open("aura_switcher", over);
@@ -555,6 +567,8 @@ public class HomeKeys extends AccessibilityService {
                 firstUpAt = SystemClock.uptimeMillis();
                 handler.removeCallbacks(goHome);
                 handler.postDelayed(goHome, TWICE_MS);
+            } else {
+                refilterSoon();
             }
             return true;
         }
@@ -579,15 +593,6 @@ public class HomeKeys extends AccessibilityService {
             return own;
         }
         taken = true;
-        if (waiting && released && SystemClock.uptimeMillis() - firstUpAt < TWICE_MS + 60) {
-            // the second press: the switcher, over the app
-            handler.removeCallbacks(goHome);
-            handler.removeCallbacks(held);
-            waiting = false;
-            // whatever went wrong, Home still goes home
-            if (!open("aura_switcher", front)) home();
-            return true;
-        }
         waiting = true;
         firstFront = front;
         released = false;
@@ -640,6 +645,11 @@ public class HomeKeys extends AccessibilityService {
 
     @Override
     public void onInterrupt() {
+        volumeHeld = 0;
+        handler.removeCallbacks(volumeRepeat);
+        handler.removeCallbacks(settleShot);
+        handler.removeCallbacks(settleShotLate);
+        handler.removeCallbacks(refilter);
         handler.removeCallbacks(held);
         handler.removeCallbacks(goHome);
         if (waiting) goHome.run();
@@ -649,6 +659,11 @@ public class HomeKeys extends AccessibilityService {
     @Override
     public boolean onUnbind(Intent intent) {
         HomeCover.hide(false);
+        volumeHeld = 0;
+        handler.removeCallbacks(volumeRepeat);
+        handler.removeCallbacks(settleShot);
+        handler.removeCallbacks(settleShotLate);
+        handler.removeCallbacks(refilter);
         handler.removeCallbacks(held);
         handler.removeCallbacks(goHome);
         if (waiting) goHome.run();
@@ -903,24 +918,34 @@ public class HomeKeys extends AccessibilityService {
      * switching, once per start of its process.
      */
     static void heal(Context c) {
+        heal(c, null);
+    }
+
+    static void heal(Context c, Runnable done) {
         final Context app = c.getApplicationContext();
         // a restart cut short (Aura killed between off and on) left it off: on again, first thing
         if (Prefs.device(app).getBoolean("keys_healing", false)) {
             set(app, true);
             Prefs.device(app).edit().putBoolean("keys_healing", false).apply();
+            if (done != null) done.run();
             return;
         }
-        if (healTried || live || !on(c)) return;
+        if (healTried || live || !on(c)) {
+            if (done != null) done.run();
+            return;
+        }
         healTried = true;
         // written before switching off, so the switch back on survives Aura being killed in between
         Prefs.device(app).edit().putBoolean("keys_healing", true).commit();
         if (!set(app, false)) {
             Prefs.device(app).edit().putBoolean("keys_healing", false).apply();
+            if (done != null) done.run();
             return;
         }
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             set(app, true);
             Prefs.device(app).edit().putBoolean("keys_healing", false).apply();
+            if (done != null) done.run();
         }, 400);
     }
 }

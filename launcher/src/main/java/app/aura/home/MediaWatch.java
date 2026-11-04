@@ -66,8 +66,8 @@ public class MediaWatch extends NotificationListenerService {
     private static MediaSessionManager.OnActiveSessionsChangedListener sessionListener;
     private static volatile boolean listening;
     private static Playing lastAny;
-    private static String cachedUri;
-    private static Bitmap cachedBmp;
+    private static volatile String cachedUri;
+    private static volatile Bitmap cachedBmp;
 
     @Override
     public void onListenerConnected() {
@@ -535,17 +535,19 @@ public class MediaWatch extends NotificationListenerService {
 
     /**
      * The player's last reported metadata (with its picture), from its own reports while it's
-     * watched; asked of the player only when none has come.
+     * watched; asked of the player only when it isn't in the watched list.
      */
     static MediaMetadata meta(MediaController m) {
+        if (m == null) return null;
         MediaMetadata md = metaOf.get(m);
-        return md != null ? md : m.getMetadata();
+        return md != null || watched.contains(m) ? md : m.getMetadata();
     }
 
     /** The player's last reported state (where it was, and when), the same way. */
     static PlaybackState state(MediaController m) {
+        if (m == null) return null;
         PlaybackState st = stateOf.get(m);
-        return st != null ? st : m.getPlaybackState();
+        return st != null || watched.contains(m) ? st : m.getPlaybackState();
     }
 
     /** The most relevant live media session (playing first, else paused), or null. Main thread is fine: no I/O. */
@@ -568,7 +570,24 @@ public class MediaWatch extends NotificationListenerService {
             if (best == null) return null;
             MediaMetadata md = metaOf.get(best);
             PlaybackState st = stateOf.get(best);
-            return md != null && st != null ? record(c, best, md, st) : null;
+            if (md == null || st == null) return null;
+            Playing snap;
+            synchronized (byPkg) {
+                Playing cur = byPkg.get(best.getPackageName());
+                snap = cur != null ? cur.copy() : null;
+            }
+            if (snap == null) return record(c, best, md, st);
+            int s = st.getState();
+            snap.playing = s == PlaybackState.STATE_PLAYING || s == PlaybackState.STATE_BUFFERING;
+            snap.controller = best;
+            long length = md.getLong(MediaMetadata.METADATA_KEY_DURATION);
+            long at = st.getPosition();
+            if (s == PlaybackState.STATE_PLAYING && st.getLastPositionUpdateTime() > 0) {
+                float speed = st.getPlaybackSpeed() > 0 ? st.getPlaybackSpeed() : 1f;
+                at += (long) (Math.max(0, SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * speed);
+            }
+            if (length > 0 && at > 0) snap.progress = Math.min(1f, Math.max(0f, at / (float) length));
+            return snap;
         }
         MediaSessionManager msm = Compat.svc(c, MediaSessionManager.class);
         if (msm == null) return null;

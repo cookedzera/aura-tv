@@ -35,16 +35,18 @@ final class SpeedTest {
     /** Runs the whole test; call off the main thread. */
     void run(Listener l) {
         long ping = ping();
+        if (stop.get()) return;
         l.onUpdate("ping", ping, 0, 0, false);
         double down = transfer(false, ping, 0, l);
         double up = stop.get() ? 0 : transfer(true, ping, down, l);
-        l.onUpdate("done", ping, down, up, true);
+        if (!stop.get()) l.onUpdate("done", ping, down, up, true);
     }
 
     /** The median time for an empty request over a warm connection. */
     private long ping() {
         long[] t = new long[6];
-        for (int i = 0; i < t.length && !stop.get(); i++) {
+        for (int i = 0; i < t.length; i++) {
+            if (stop.get()) return -1;
             long a = SystemClock.elapsedRealtime();
             try {
                 HttpURLConnection c = open(DOWN + 0);

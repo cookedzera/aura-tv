@@ -119,7 +119,10 @@ final class Ask extends FrameLayout {
             p.focusScale = 1.06f;
             TextView t = p.tint(Ui.text(getContext(), 12, Ui.semibold, 0xFFFFFFFF), 0.9f);
             t.setText(s);
-            t.setPadding(Ui.dp(14), 0, Ui.dp(14), 0);
+            t.setSingleLine(true);
+            t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            t.setMaxWidth(Ui.dp(122));
+            t.setPadding(Ui.dp(12), 0, Ui.dp(12), 0);
             t.setGravity(Gravity.CENTER);
             p.addView(t, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
             p.onClick = () -> finish(s);
@@ -130,8 +133,9 @@ final class Ask extends FrameLayout {
         chips.setVisibility(chips.getChildCount() > 0 ? VISIBLE : GONE);
         shown = true;
         setVisibility(VISIBLE);
+        animate().cancel();
         setAlpha(0f);
-        animate().alpha(1f).setDuration(220).setStartDelay(0).setInterpolator(Ui.SOFT).start();
+        animate().alpha(1f).setDuration(220).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(null).start();
         card.setTranslationY(-Ui.dp(14));
         card.animate().translationY(0f).setDuration(420).setStartDelay(0).setInterpolator(Ui.EMPHASIZED).start();
         field.requestFocus();
