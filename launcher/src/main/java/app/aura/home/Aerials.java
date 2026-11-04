@@ -96,10 +96,11 @@ final class Aerials {
                 if (android.os.Build.VERSION.SDK_INT >= 29 && !info.isHardwareAccelerated()) continue;
                 for (String t : info.getSupportedTypes()) {
                     if (!"video/hevc".equalsIgnoreCase(t)) continue;
-                    // Apple's HEVC streams are 2560x1440: a 1080p-only decoder must fall back to the 1080p H.264 stream
+                    // Apple's HEVC copies are 1920x1080 at 24 frames (read from the files themselves, despite
+                    // "2K" in their names): a decoder that can't play that size keeps to the H.264 copies
                     android.media.MediaCodecInfo.CodecCapabilities caps = info.getCapabilitiesForType(t);
                     android.media.MediaCodecInfo.VideoCapabilities vc = caps != null ? caps.getVideoCapabilities() : null;
-                    if (vc == null || vc.areSizeAndRateSupported(2560, 1440, 24)) found = true;
+                    if (vc == null || vc.areSizeAndRateSupported(1920, 1080, 24)) found = true;
                 }
             }
         } catch (RuntimeException ignored) {

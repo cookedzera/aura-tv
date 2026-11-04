@@ -42,6 +42,9 @@ final class ProfileButton {
     /** Starts listening if Aura may read the log (granting {@code READ_LOGS} over local ADB if needed). */
     static synchronized void start(Context ctx) {
         if (proc != null) return;
+        // from Android 13 every read of the log asks the viewer first, in a system window over
+        // whatever's on screen: the profile button and held volume keep to what the TV does there
+        if (android.os.Build.VERSION.SDK_INT >= 33) return;
         final Context c = ctx.getApplicationContext();
         if (!granted(c)) {
             if (!grantTried && Adb.on(c)) {

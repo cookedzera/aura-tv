@@ -85,9 +85,11 @@ public class HomeKeys extends AccessibilityService {
     /**
      * As Android's own repeat: a short pause after the press (380 ms from hardware key-down to
      * account for {@code KeyboardInterceptor}'s 150 ms chord delay, or 230 ms after
-     * {@code WindowManager}'s first volume step), then a smooth step every 90 ms, never past 8 s.
+     * {@code WindowManager}'s first volume step), then a smooth step every 90 ms, never past 3 s.
+     * The release is read from the TV's log: should it ever be missed, 3 s of steps stops well short
+     * of full volume (8 s, as before, was enough to go from quiet to the loudest it goes).
      */
-    private static final long VOLUME_HW_WAIT_MS = 380, VOLUME_WM_WAIT_MS = 230, VOLUME_STEP_MS = 90, VOLUME_MAX_MS = 8000;
+    private static final long VOLUME_HW_WAIT_MS = 380, VOLUME_WM_WAIT_MS = 230, VOLUME_STEP_MS = 90, VOLUME_MAX_MS = 3000;
     private final Runnable volumeRepeat = new Runnable() {
         @Override
         public void run() {

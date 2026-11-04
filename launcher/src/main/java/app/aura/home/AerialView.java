@@ -268,7 +268,7 @@ final class AerialView extends FrameLayout {
             s.release();
             handler.removeCallbacks(giveUp);
             if (s.usedHevc && s.v.url != null && !s.v.url.equals(s.streamUrl)) {
-                // this TV's HEVC decoder rejected Apple's 2K stream: switch to 1080p H.264 right away
+                // this TV's HEVC decoder refused the HEVC copy after all: the H.264 one, right away
                 Aerials.disableHevc();
                 startComing(s.v, true);
                 return;
