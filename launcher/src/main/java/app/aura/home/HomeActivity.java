@@ -408,6 +408,21 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         settings.show("wallpaper");
     }
 
+    /**
+     * The home screen, to bring forward with something to show (put in its extras). Where Aura is
+     * the TV's home app it's asked for as Home itself: named directly, Android 10 and later doesn't
+     * count it as the home screen and builds a whole second copy in a task of its own, and those
+     * piled up, a hundred and more after a day of the switcher and Control Center over apps, holding
+     * memory a 1.5 GB TV can't spare. Where another launcher keeps Home, it's named directly, which
+     * brings back the one copy there is.
+     */
+    static Intent intentFor(Context c) {
+        Intent i = HomeRole.held(c)
+                ? new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(c.getPackageName())
+                : new Intent(c, HomeActivity.class);
+        return i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    }
+
     /** Android's answer to "Make Aura your home". */
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
@@ -662,7 +677,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         // Home held inside an app (HomeKeys): Control Center over it, Back returns to the app
         String ccFor = intent.getStringExtra("aura_cc");
-        String act = intent.getAction();
+        // the TV's own panel and inputs buttons arrive through PanelBridge, their action carried along
+        String act = intent.hasExtra("aura_panel") ? intent.getStringExtra("aura_panel") : intent.getAction();
         if ("android.app.action.TOGGLE_NOTIFICATION_HANDLER_PANEL".equals(act)
                 || "android.app.action.OPEN_NOTIFICATION_HANDLER_PANEL".equals(act)
                 || "com.amazon.tv.action.NAVIGATE_TO_INPUTS".equals(act)) {

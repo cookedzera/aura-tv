@@ -149,7 +149,7 @@ final class Power {
                 b = new android.app.Notification.Builder(c);
             }
             PendingIntent openPi = PendingIntent.getActivity(c, 78,
-                    new Intent(c, HomeActivity.class).putExtra("aura_cc", "").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    HomeActivity.intentFor(c).putExtra("aura_cc", ""),
                     (android.os.Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0) | PendingIntent.FLAG_UPDATE_CURRENT);
             b.setSmallIcon(R.drawable.ic_moon)
                     .setContentTitle(title)

@@ -292,9 +292,9 @@ public class HomeKeys extends AccessibilityService {
     /** Aura, with what to show; false when it couldn't be started. */
     private boolean open(String extra, String over) {
         try {
-            startActivity(new Intent(this, HomeActivity.class)
+            startActivity(HomeActivity.intentFor(this)
                     .putExtra(extra, over)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION));
+                    .addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION));
             return true;
         } catch (RuntimeException ex) {
             return false;
@@ -304,10 +304,10 @@ public class HomeKeys extends AccessibilityService {
     /** Opens Aura straight to the app picker for a held remote button. */
     private void openKeyPicker(int code, int scan) {
         try {
-            startActivity(new Intent(this, HomeActivity.class)
+            startActivity(HomeActivity.intentFor(this)
                     .putExtra("aura_key_code", code)
                     .putExtra("aura_key_scan", scan)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION));
+                    .addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION));
         } catch (RuntimeException ignored) {
         }
     }

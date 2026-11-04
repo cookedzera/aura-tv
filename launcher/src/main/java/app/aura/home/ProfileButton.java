@@ -155,8 +155,8 @@ final class ProfileButton {
 
     private static void open(Context c) {
         try {
-            c.startActivity(new Intent(c, HomeActivity.class).putExtra("aura_profiles", "")
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION));
+            c.startActivity(HomeActivity.intentFor(c).putExtra("aura_profiles", "")
+                    .addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION));
         } catch (RuntimeException ignored) {
         }
     }

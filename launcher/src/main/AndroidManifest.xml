@@ -64,6 +64,17 @@
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+        </activity>
+
+        <!-- The TV's own notifications and inputs buttons: handed on to the one home screen. Sent
+             to the home screen directly, Android made a second copy of it each time -->
+        <activity
+            android:name=".PanelBridge"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
             <intent-filter>
                 <action android:name="android.app.action.TOGGLE_NOTIFICATION_HANDLER_PANEL" />
                 <action android:name="android.app.action.OPEN_NOTIFICATION_HANDLER_PANEL" />
