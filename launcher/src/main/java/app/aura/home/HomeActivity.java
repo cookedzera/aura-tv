@@ -3699,6 +3699,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             wakeQuietScreen();
             return swallow(code);
         }
+        if (isVolumeKey(code)) return super.dispatchKeyEvent(e);
         // teaching a remote button (Settings, Remote buttons): it may reach this window and not the service
         if (HomeKeys.teaching() && HomeKeys.teachable(code)) {
             if (down && e.getRepeatCount() == 0) HomeKeys.taught(code, e.getScanCode());

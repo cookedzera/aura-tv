@@ -477,8 +477,8 @@ final class Adb {
         if (Build.VERSION.SDK_INT >= 33) s.add(new String[]{c.getString(R.string.accessibility), "appops set " + p + " ACCESS_RESTRICTED_SETTINGS allow"});
         s.add(new String[]{c.getString(R.string.block_ads_animations), "pm grant " + p + " android.permission.WRITE_SECURE_SETTINGS"});
         s.add(new String[]{c.getString(R.string.wi_fi_name), "pm grant " + p + " android.permission.DUMP"});
-        // the firmware takes the remote's profile button for Google TV's picker: the log is how Aura knows
-        if (Safety.hasGoogleTvHome(c)) s.add(new String[]{c.getString(R.string.profile_button), "pm grant " + p + " android.permission.READ_LOGS"});
+        // the firmware takes the remote's profile button and accessibility key filter swallows TV volume repeats: the log is how Aura knows
+        s.add(new String[]{c.getString(R.string.profile_button), "pm grant " + p + " android.permission.READ_LOGS"});
         s.add(new String[]{c.getString(R.string.memory), "pm grant " + p + " android.permission.PACKAGE_USAGE_STATS"});
         s.add(new String[]{c.getString(R.string.smart_stack_today), "appops set " + p + " GET_USAGE_STATS allow"});
         if (Build.VERSION.SDK_INT >= 23) s.add(new String[]{c.getString(R.string.wi_fi_sheet), "pm grant " + p + " android.permission.ACCESS_FINE_LOCATION"});

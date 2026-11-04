@@ -140,6 +140,32 @@ public class FireTvTest {
         assertEquals("volume stops stepping once released", afterUpVol,
                 am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC));
 
+        // Android TV KeyboardInterceptor path: ProfileButton log lines drive held volume & clamp Spotify TV bounce
+        android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+        am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 10, 0);
+        ProfileButton.parseLine(c, main, "D/KeyEventManager( 1101): KEY_EVENT_ACTION_DOWN: key= 25");
+        ShadowLooper.idleMainLooper(150, TimeUnit.MILLISECONDS);
+        am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 9, 0);
+        ProfileButton.parseLine(c, main, "I/volume_changed(  742): [3,10,9,15,WindowManager]");
+        ShadowLooper.idleMainLooper(450, TimeUnit.MILLISECONDS);
+        int rampedDown = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+        assertTrue("TV hardware log path steps volume down repeatedly (now " + rampedDown + ")", rampedDown < 9);
+
+        // Background app (e.g. Spotify TV) tries to bounce volume back up to 9 during active hold
+        am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 9, 0);
+        ProfileButton.parseLine(c, main, "I/volume_changed(  742): [3," + rampedDown + ",9,15,com.spotify.tv.android]");
+        ShadowLooper.idleMainLooper(20, TimeUnit.MILLISECONDS);
+        assertEquals("stale background volume bounce is clamped back to expectedVolume",
+                rampedDown, am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC));
+
+        // Hardware KEY_EVENT_ACTION_UP stops repeat immediately
+        ProfileButton.parseLine(c, main, "D/KeyEventManager( 1101): KEY_EVENT_ACTION_UP: key= 25");
+        ShadowLooper.idleMainLooper(20, TimeUnit.MILLISECONDS);
+        int finalDown = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+        ShadowLooper.idleMainLooper(400, TimeUnit.MILLISECONDS);
+        assertEquals("volume stops stepping after KEY_EVENT_ACTION_UP",
+                finalDown, am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC));
+
         // Kids profile maps blocked YouTube button to YouTube Kids when installed
         ShadowPackageManager pm = shadowOf(c.getPackageManager());
         ComponentName ytk = new ComponentName("com.google.android.youtube.tvkids", "com.google.android.youtube.tvkids.MainActivity");

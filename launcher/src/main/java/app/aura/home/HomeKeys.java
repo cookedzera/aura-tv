@@ -75,30 +75,56 @@ public class HomeKeys extends AccessibilityService {
     /** A volume button held down (its key code), and since when; 0 when none. */
     private int volumeHeld;
     private long volumeSince;
+    private boolean hasHardwareKeyLog;
+    private int expectedVolume = -1;
+    private int lastVolumeDir;
+    private long lastVolumeStepAt;
+    private long windowVolumeDownAt;
+    private int ignoreShowDialogs;
+    private long ignoreShowDialogUntil;
     /**
-     * As Android's own repeat: a short pause after the press (< 400 ms InputDispatcher repeat
-     * timeout on Realtek/Amlogic TVs), then a smooth step every 95 ms, never past 8 s (a lost release).
+     * As Android's own repeat: a short pause after the press (380 ms from hardware key-down to
+     * account for {@code KeyboardInterceptor}'s 150 ms chord delay, or 230 ms after
+     * {@code WindowManager}'s first volume step), then a smooth step every 90 ms, never past 8 s.
      */
-    private static final long VOLUME_WAIT_MS = 320, VOLUME_STEP_MS = 95, VOLUME_MAX_MS = 8000;
+    private static final long VOLUME_HW_WAIT_MS = 380, VOLUME_WM_WAIT_MS = 230, VOLUME_STEP_MS = 90, VOLUME_MAX_MS = 8000;
     private final Runnable volumeRepeat = new Runnable() {
         @Override
         public void run() {
-            if (volumeHeld == 0 || SystemClock.uptimeMillis() - volumeSince > VOLUME_MAX_MS) {
+            long now = SystemClock.uptimeMillis();
+            if (volumeHeld == 0 || !filtering || now - volumeSince > VOLUME_MAX_MS) {
                 volumeHeld = 0;
                 return;
             }
             android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
-            if (am == null) return;
-            int dir = volumeHeld == KeyEvent.KEYCODE_VOLUME_UP
-                    ? android.media.AudioManager.ADJUST_RAISE : android.media.AudioManager.ADJUST_LOWER;
+            if (am == null || am.isVolumeFixed()) {
+                volumeHeld = 0;
+                return;
+            }
+            int dir = volumeHeld == KeyEvent.KEYCODE_VOLUME_UP ? 1 : -1;
             try {
-                int before = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
-                am.adjustSuggestedStreamVolume(dir, android.media.AudioManager.STREAM_MUSIC,
-                        android.media.AudioManager.FLAG_SHOW_UI);
-                if (!am.isVolumeFixed() && am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) == before) {
-                    am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, dir,
-                            android.media.AudioManager.FLAG_SHOW_UI);
+                int cur = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+                int max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC);
+                int base = expectedVolume >= 0 && (cur - expectedVolume) * dir < 0
+                        && Math.abs(cur - expectedVolume) <= 4 ? expectedVolume : cur;
+                int target = Math.max(0, Math.min(max, base + dir));
+                if (target == base) {
+                    expectedVolume = target;
+                    volumeHeld = 0;
+                    return;
                 }
+                int flags = 0;
+                if (hasHardwareKeyLog) {
+                    flags = android.media.AudioManager.FLAG_SHOW_UI;
+                } else if (now - windowVolumeDownAt > 1800 && now > ignoreShowDialogUntil) {
+                    flags = android.media.AudioManager.FLAG_SHOW_UI;
+                    ignoreShowDialogs++;
+                    ignoreShowDialogUntil = now + 150;
+                }
+                expectedVolume = target;
+                lastVolumeDir = dir;
+                lastVolumeStepAt = now;
+                am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, target, flags);
             } catch (RuntimeException ex) {
                 volumeHeld = 0;
                 return;
@@ -106,6 +132,109 @@ public class HomeKeys extends AccessibilityService {
             handler.postDelayed(this, VOLUME_STEP_MS);
         }
     };
+
+    /**
+     * Called by {@link ProfileButton} when a volume key down/up is observed in system logs
+     * (necessary on Android TV because {@code KeyboardInterceptor} consumes volume keys inside
+     * {@code AccessibilityInputFilter} before {@link #onKeyEvent} or {@code InputDispatcher} key
+     * repeats ever run).
+     */
+    static void onVolumeKey(int key, boolean up, boolean fromHardwareLog) {
+        HomeKeys s = running;
+        if (s != null) s.volumeKey(key, up, fromHardwareLog);
+    }
+
+    private void volumeKey(int key, boolean up, boolean fromHardwareLog) {
+        if (fromHardwareLog) hasHardwareKeyLog = true;
+        if (up) {
+            volumeHeld = 0;
+            handler.removeCallbacks(volumeRepeat);
+            return;
+        }
+        long now = SystemClock.uptimeMillis();
+        if (expectedVolume < 0 || now - lastVolumeStepAt > 600) {
+            android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am != null) {
+                try {
+                    expectedVolume = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }
+        lastVolumeDir = key == KeyEvent.KEYCODE_VOLUME_UP ? 1 : -1;
+        lastVolumeStepAt = now;
+        if (!filtering) return;
+        volumeHeld = key;
+        volumeSince = now;
+        handler.removeCallbacks(volumeRepeat);
+        handler.postDelayed(volumeRepeat, fromHardwareLog ? VOLUME_HW_WAIT_MS : VOLUME_WM_WAIT_MS);
+    }
+
+    /**
+     * Called by {@link ProfileButton} when {@code AudioService} logs a {@code STREAM_MUSIC}
+     * {@code volume_changed} event (`[3,old,new,max,caller]`). Tracks the user's volume ramp and
+     * clamps stale background {@code setStreamVolume} bounces (e.g. Spotify TV).
+     */
+    static void onSystemVolumeChanged(int oldVal, int newVal, int maxVal, String caller) {
+        HomeKeys s = running;
+        if (s == null || caller == null) return;
+        long now = SystemClock.uptimeMillis();
+        if ("WindowManager".equals(caller)) {
+            int dir = Integer.compare(newVal, oldVal);
+            s.expectedVolume = newVal;
+            if (dir != 0) s.lastVolumeDir = dir;
+            s.lastVolumeStepAt = now;
+            s.windowVolumeDownAt = now;
+            s.ignoreShowDialogs = 1;
+            s.ignoreShowDialogUntil = now + 100;
+            if (s.filtering && !s.hasHardwareKeyLog && s.volumeHeld == 0 && dir != 0) {
+                onVolumeKey(dir > 0 ? KeyEvent.KEYCODE_VOLUME_UP : KeyEvent.KEYCODE_VOLUME_DOWN, false, false);
+            }
+            return;
+        }
+        if (caller.equals(s.getPackageName()) || caller.contains("systemui") || caller.contains("tv.settings")) {
+            s.lastVolumeStepAt = now;
+            return;
+        }
+        // A background app (e.g. com.spotify.tv.android) called setStreamVolume while the user is
+        // actively ramping volume with the remote: clamp back to expectedVolume so it never bounces.
+        if (s.expectedVolume >= 0 && now - s.lastVolumeStepAt < 750 && newVal != s.expectedVolume) {
+            android.media.AudioManager am = (android.media.AudioManager) s.getSystemService(AUDIO_SERVICE);
+            if (am != null) {
+                try {
+                    am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, s.expectedVolume, 0);
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }
+    }
+
+    /**
+     * Called by {@link ProfileButton} when {@code SystemUI} logs {@code vol.Events}
+     * ({@code writeEvent key STREAM_MUSIC} or {@code writeEvent show_dialog volume_changed}).
+     * On {@code ACTION_UP}, {@code AudioService.handleVolumeKey} calls {@code postVolumeChanged}
+     * with {@code FLAG_SHOW_UI | FLAG_FROM_KEY} without changing the volume level.
+     */
+    static void onSystemVolumeDialogEvent(boolean isKeyEvent) {
+        HomeKeys s = running;
+        if (s == null || s.volumeHeld == 0 || s.hasHardwareKeyLog) return;
+        long now = SystemClock.uptimeMillis();
+        if (isKeyEvent) {
+            if (now - s.volumeSince > 120 && now - s.windowVolumeDownAt > 120) {
+                s.volumeHeld = 0;
+                s.handler.removeCallbacks(s.volumeRepeat);
+            }
+            return;
+        }
+        if (s.ignoreShowDialogs > 0 && now < s.ignoreShowDialogUntil) {
+            s.ignoreShowDialogs--;
+            return;
+        }
+        if (now - s.volumeSince > 120 && now - s.windowVolumeDownAt > 120) {
+            s.volumeHeld = 0;
+            s.handler.removeCallbacks(s.volumeRepeat);
+        }
+    }
     /** A mapped remote button held down: short press opens its app, holding reassigns it. */
     private int mappedKeyDown = -1, mappedScanDown = -1;
     private boolean mappedHoldFired;
@@ -281,6 +410,12 @@ public class HomeKeys extends AccessibilityService {
     }
 
     @Override
+    public void onCreate() {
+        super.onCreate();
+        running = this;
+    }
+
+    @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
         live = true;
@@ -310,6 +445,7 @@ public class HomeKeys extends AccessibilityService {
             im.registerInputDeviceListener(devices, handler);
         }
         pad = padConnected();
+        if (front == null) front = lastForeground();
         refilter();
         ProfileButton.start(this);
     }
@@ -444,6 +580,10 @@ public class HomeKeys extends AccessibilityService {
         boolean want = teaching != null || !pad && (front == null ? takeover()
                 : !front.equals(getPackageName()) || !keys(this).isEmpty() || takeover());
         if (want == filtering) return;
+        if (!want) {
+            volumeHeld = 0;
+            handler.removeCallbacks(volumeRepeat);
+        }
         AccessibilityServiceInfo info = getServiceInfo();
         if (info == null) return;
         if (want) info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
@@ -522,29 +662,16 @@ public class HomeKeys extends AccessibilityService {
                 return true;
             }
         }
-        // held volume: Android re-sends every key that passes through here, and a re-sent key gets no
-        // repeats of its own (or sends a single repeatCount=1 before stopping), so holding Volume moved
-        // it one step. Handled before screenshots so Volume never triggers takeScreenshot().
+        // held volume on devices that do deliver volume keys to onKeyEvent (non-mUseTvRouting builds):
+        // Android re-sends every key that passes through here, and a re-sent key gets no repeats of its own.
         if (key == KeyEvent.KEYCODE_VOLUME_UP || key == KeyEvent.KEYCODE_VOLUME_DOWN) {
             if (up || e.isCanceled()) {
-                volumeHeld = 0;
-                handler.removeCallbacks(volumeRepeat);
+                volumeKey(key, true, false);
                 return false;
             }
             if (e.getRepeatCount() == 0) {
-                handler.removeCallbacks(volumeRepeat);
-                volumeHeld = key;
-                volumeSince = SystemClock.uptimeMillis();
-                handler.postDelayed(volumeRepeat, VOLUME_WAIT_MS);
+                volumeKey(key, false, false);
                 return false;
-            }
-            // held repeat: keep volumeRepeat running and swallow the hardware repeat so re-injection
-            // never resets the hold or causes double-steps while volumeRepeat steps smoothly
-            if (volumeHeld != key) {
-                volumeHeld = key;
-                volumeSince = SystemClock.uptimeMillis();
-                handler.removeCallbacks(volumeRepeat);
-                handler.post(volumeRepeat);
             }
             return true;
         }
