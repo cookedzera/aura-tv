@@ -126,6 +126,40 @@ public class FireStickTest {
         run(1500);
         press(a, KeyEvent.KEYCODE_BACK, 1);
         run(800);
+        // Screen off with sound kept on: media keys pass through in the dark, any other key wakes it
+        a.quietScreen();
+        run(500);
+        press(a, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 1);
+        press(a, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, 1);
+        press(a, KeyEvent.KEYCODE_MEDIA_REWIND, 1);
+        press(a, KeyEvent.KEYCODE_DPAD_CENTER, 1);
+        run(400);
+        // Hold OK on the Smart Stack and on a Top Shelf card (with synopsis and time left)
+        Field fyWf = HomeActivity.class.getDeclaredField("fyW");
+        fyWf.setAccessible(true);
+        Widget fyW = (Widget) fyWf.get(a);
+        call(a, "openWidgetMenu", new Class<?>[]{Widget.class}, fyW);
+        run(300);
+        press(a, KeyEvent.KEYCODE_BACK, 1);
+        run(300);
+        Continue.Item item = new Continue.Item();
+        item.title = "The Bear";
+        item.sub = "S3 E1 · Tomorrow";
+        item.desc = "Carmy pushes the kitchen toward a star.";
+        item.leftMin = 28;
+        item.progress = 0.4f;
+        item.pkg = "com.disney.disneyplus";
+        Card sampleCard = new Card(a, null, 0xFF3366FF, 16f);
+        call(a, "openShelfMenu", new Class<?>[]{Continue.Item.class, Card.class}, item, sampleCard);
+        run(300);
+        press(a, KeyEvent.KEYCODE_BACK, 1);
+        run(300);
+        // Find an app and close
+        call(a, "openFind", new Class<?>[]{String.class}, "net");
+        run(400);
+        press(a, KeyEvent.KEYCODE_DPAD_DOWN, 2);
+        press(a, KeyEvent.KEYCODE_BACK, 1);
+        run(400);
         // behind an app and back, as after watching something
         ac.pause().stop();
         run(500);

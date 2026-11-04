@@ -1931,8 +1931,13 @@ final class SettingsPanel {
             for (Intent i : new Intent[]{
                     new Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES", android.net.Uri.parse("package:" + act.getPackageName())),
                     new Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES"),
-                    new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)}) {
-                if (opened || i.resolveActivity(act.getPackageManager()) == null) continue;
+                    new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS),
+                    fire ? new Intent("amazon.intent.action.MAINSETTINGS")
+                            .setClassName("com.amazon.tv.launcher", "com.amazon.tv.launcher.ui.MainSettingsActivity") : null}) {
+                if (opened || i == null) continue;
+                android.content.pm.ResolveInfo ri = act.getPackageManager().resolveActivity(i, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+                String cls = ri != null && ri.activityInfo != null ? ri.activityInfo.name : null;
+                if (cls == null || cls.contains("Dummy") || cls.contains("CTS")) continue;
                 try {
                     HomeKeys.letTvHomePass();
                     act.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));

@@ -68,4 +68,41 @@ public class FireTvTest {
         assertNull(plain.getComponent());
         ac.pause().stop().destroy();
     }
+
+    @Test
+    public void fireTvUpdateAndRemoteAndYoutubePaths() throws Exception {
+        Context c = RuntimeEnvironment.getApplication();
+        ShadowPackageManager pm = shadowOf(c.getPackageManager());
+        pm.setSystemFeature("amazon.hardware.fire_tv", true);
+        // Fire OS answers Developer Options with CTSDummySettingsHandler; Aura should open Amazon's MainSettingsActivity instead
+        activity(pm, "com.amazon.tv.settings.v2", "com.amazon.tv.settings.v2.compliance.CTSDummySettingsHandler",
+                Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS, Intent.CATEGORY_DEFAULT);
+        activity(pm, "com.amazon.tv.launcher", "com.amazon.tv.launcher.ui.MainSettingsActivity",
+                "amazon.intent.action.MAINSETTINGS", Intent.CATEGORY_DEFAULT);
+        // Fire TV YouTube package for Tonight's Pick trailers
+        ComponentName ytCn = new ComponentName("com.amazon.firetv.youtube", "com.amazon.firetv.youtube.MainActivity");
+        pm.addActivityIfNotPresent(ytCn);
+        IntentFilter yf = new IntentFilter(Intent.ACTION_VIEW);
+        yf.addCategory(Intent.CATEGORY_DEFAULT);
+        yf.addDataScheme("https");
+        yf.addDataAuthority("www.youtube.com", null);
+        pm.addIntentFilterForActivity(ytCn, yf);
+
+        org.json.JSONObject jo = new org.json.JSONObject();
+        jo.put("name", "Severance");
+        jo.put("yt", "xEQP4VVuyrY");
+        jo.put("query", "Severance");
+        Picks.Pick pick = new Picks.Pick(jo);
+        Intent trailer = Picks.watch(c, pick);
+        assertEquals("com.amazon.firetv.youtube", trailer.getPackage());
+
+        // NowPlaying responds to Fire TV remote Play/Pause, Rewind, and Fast-Forward keys
+        Backdrop b = new Backdrop(c);
+        NowPlaying np = new NowPlaying(c, b);
+        assertTrue(np.key( android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE));
+        assertTrue(np.key(android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD));
+        assertTrue(np.key(android.view.KeyEvent.KEYCODE_MEDIA_REWIND));
+        assertFalse(np.key(android.view.KeyEvent.KEYCODE_DPAD_UP));
+        b.release();
+    }
 }

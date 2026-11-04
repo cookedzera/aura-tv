@@ -98,7 +98,8 @@ final class TopShelf extends FrameLayout {
         }
         boolean ytClient = "io.gh.reisxd.tizentube.cobalt".equals(pkg)
                 || "com.liskovsoft.smarttubetv".equals(pkg)
-                || "com.liskovsoft.smarttubetv.beta".equals(pkg);
+                || "com.liskovsoft.smarttubetv.beta".equals(pkg)
+                || "com.amazon.firetv.youtube".equals(pkg);
         if (base == null) {
             base = new ArrayList<>();
             Taste.View taste = Taste.view(c);

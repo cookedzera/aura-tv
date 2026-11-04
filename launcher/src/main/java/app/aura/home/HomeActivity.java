@@ -3715,6 +3715,23 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         // a music scene: the remote works its player; Back with the controls away goes home
         if (photo && scene != null && !isVolumeKey(code) && scene.key(code)) return swallow(code);
+        // photo mode with the small music bar (scenes off, or an older TV): media keys work the song without waking home
+        if (photo && photoMusic != null && isMediaKey(code)) {
+            if (e.getRepeatCount() == 0) {
+                MediaWatch.Playing p = MediaWatch.now(this);
+                if (p != null && p.controller != null) {
+                    if (code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_MEDIA_PLAY || code == KeyEvent.KEYCODE_MEDIA_PAUSE) {
+                        if (p.playing) p.controller.getTransportControls().pause();
+                        else p.controller.getTransportControls().play();
+                    } else if (code == KeyEvent.KEYCODE_MEDIA_NEXT || code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) {
+                        p.controller.getTransportControls().skipToNext();
+                    } else {
+                        p.controller.getTransportControls().skipToPrevious();
+                    }
+                }
+            }
+            return swallow(code);
+        }
         boolean wasResting = photo;
         wake();
         if (wasResting && !isVolumeKey(code)) return swallow(code);
@@ -3726,7 +3743,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 closeNowPlaying();
                 return swallow(code);
             }
-            // only the three buttons take focus; up and down have nowhere to go
+            if (first && nowPlaying.key(code)) return swallow(code);
+            // only the four buttons take focus; up and down have nowhere to go
             if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) return true;
             return super.dispatchKeyEvent(e);
         }
@@ -4000,6 +4018,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private static boolean isVolumeKey(int code) {
         return code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN || code == KeyEvent.KEYCODE_VOLUME_MUTE;
+    }
+
+    private static boolean isMediaKey(int code) {
+        return code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_MEDIA_PLAY
+                || code == KeyEvent.KEYCODE_MEDIA_PAUSE || code == KeyEvent.KEYCODE_MEDIA_NEXT
+                || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS || code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+                || code == KeyEvent.KEYCODE_MEDIA_REWIND;
     }
 
     // ---- top shelf ---------------------------------------------------------------------------
@@ -5502,9 +5527,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             public List<AppRepo.App> sample() {
                 List<AppRepo.App> out = new ArrayList<>();
                 // apps nearly everyone knows show the looks best, then whatever is first on this TV
-                for (String pkg : new String[]{"com.netflix.ninja", "com.google.android.youtube.tv", "com.amazon.amazonvideo.livingroom", "in.startv.hotstar"}) {
+                for (String pkg : new String[]{"com.netflix.ninja", "com.google.android.youtube.tv", "com.amazon.firetv.youtube",
+                        "com.amazon.amazonvideo.livingroom", "com.amazon.avod.thirdpartyclient", "com.amazon.avod", "in.startv.hotstar"}) {
                     AppRepo.App a = find(pkg);
-                    if (a != null) out.add(a);
+                    if (a != null && out.size() < 4 && !out.contains(a)) out.add(a);
                 }
                 for (String tag : AppRepo.order(prefs)) {
                     AppRepo.App a = find(tag);

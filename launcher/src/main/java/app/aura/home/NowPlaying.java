@@ -259,6 +259,32 @@ final class NowPlaying extends FrameLayout {
         handler.postDelayed(rest, REST_MS);
     }
 
+    /** Dedicated media buttons on the remote (including Fire TV's Rewind and Fast-Forward) work at once. */
+    boolean key(int code) {
+        MediaController.TransportControls t = controller != null ? controller.getTransportControls() : null;
+        switch (code) {
+            case android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+            case android.view.KeyEvent.KEYCODE_MEDIA_PLAY:
+            case android.view.KeyEvent.KEYCODE_MEDIA_PAUSE:
+                if (t != null) {
+                    PlaybackState st = MediaWatch.state(controller);
+                    if (st != null && st.getState() == PlaybackState.STATE_PLAYING) t.pause();
+                    else t.play();
+                }
+                return true;
+            case android.view.KeyEvent.KEYCODE_MEDIA_NEXT:
+            case android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
+                if (t != null) t.skipToNext();
+                return true;
+            case android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+            case android.view.KeyEvent.KEYCODE_MEDIA_REWIND:
+                if (t != null) t.skipToPrevious();
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private Bitmap lastArt;
     private String lastArtUri, fetching;
     /** The song the cover on show belongs to. */

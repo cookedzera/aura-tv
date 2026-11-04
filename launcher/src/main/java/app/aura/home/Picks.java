@@ -267,20 +267,25 @@ final class Picks {
     /** Its trailer: straight to the video on YouTube when TMDB named one, else a search there, else the TV's own search. */
     static Intent watch(Context c, Pick p) {
         PackageManager pm = c.getPackageManager();
+        String[] ytPkgs = {"com.google.android.youtube.tv", "com.amazon.firetv.youtube",
+                "io.gh.reisxd.tizentube.cobalt", "com.liskovsoft.smarttubetv", "com.liskovsoft.smarttubetv.beta"};
         if (!p.yt.isEmpty()) {
             Uri video = Uri.parse("https://www.youtube.com/watch?v=" + p.yt);
-            Intent v = new Intent(Intent.ACTION_VIEW, video).setPackage("com.google.android.youtube.tv");
-            if (v.resolveActivity(pm) != null) return v;
-            // no Android TV YouTube (Fire TV has its own, under another name): whatever app here opens
-            // YouTube's links, as long as it isn't only a browser
+            for (String pkg : ytPkgs) {
+                Intent v = new Intent(Intent.ACTION_VIEW, video).setPackage(pkg);
+                if (v.resolveActivity(pm) != null) return v;
+            }
+            // no TV YouTube client: whatever app here opens YouTube's links, as long as it isn't only a browser
             Intent any = new Intent(Intent.ACTION_VIEW, video);
             android.content.pm.ResolveInfo ri = pm.resolveActivity(any, PackageManager.MATCH_DEFAULT_ONLY);
             if (ri != null && ri.activityInfo != null && !"android".equals(ri.activityInfo.packageName)
                     && ri.activityInfo.packageName.contains("youtube")) return any;
         }
-        Intent yt = new Intent(Intent.ACTION_SEARCH).setPackage("com.google.android.youtube.tv")
-                .putExtra(android.app.SearchManager.QUERY, p.query);
-        if (yt.resolveActivity(pm) != null) return yt;
+        for (String pkg : ytPkgs) {
+            Intent yt = new Intent(Intent.ACTION_SEARCH).setPackage(pkg)
+                    .putExtra(android.app.SearchManager.QUERY, p.query);
+            if (yt.resolveActivity(pm) != null) return yt;
+        }
         Intent global = new Intent("android.search.action.GLOBAL_SEARCH").putExtra(android.app.SearchManager.QUERY, p.query);
         if (global.resolveActivity(pm) != null) return global;
         // nothing that searches: YouTube's page for the trailer, in whatever opens links
