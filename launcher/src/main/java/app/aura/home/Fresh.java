@@ -3,7 +3,6 @@ package app.aura.home;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -97,13 +96,7 @@ final class Fresh {
 
     /** The art, small enough for a stack card: about 640 px wide, 16-bit colour. */
     static Bitmap art(Show s) {
-        BitmapFactory.Options o = new BitmapFactory.Options();
-        o.inJustDecodeBounds = true;
-        BitmapFactory.decodeFile(s.art, o);
-        o.inSampleSize = o.outWidth > 1280 ? 2 : 1;
-        o.inJustDecodeBounds = false;
-        o.inPreferredConfig = Bitmap.Config.RGB_565;
-        return BitmapFactory.decodeFile(s.art, o);
+        return Continue.picture(s.art, 640);
     }
 
     /** Today's and yesterday's releases (a midnight release can carry either date), newest first. */

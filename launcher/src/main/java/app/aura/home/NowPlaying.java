@@ -169,7 +169,7 @@ final class NowPlaying extends FrameLayout {
         prev.onClick = () -> transport(t -> t.skipToPrevious());
         next.onClick = () -> transport(t -> t.skipToNext());
         play.onClick = () -> {
-            PlaybackState st = controller != null ? controller.getPlaybackState() : null;
+            PlaybackState st = controller != null ? MediaWatch.state(controller) : null;
             boolean playing = st != null && st.getState() == PlaybackState.STATE_PLAYING;
             transport(t -> {
                 if (playing) t.pause();
@@ -248,7 +248,7 @@ final class NowPlaying extends FrameLayout {
     /** Artwork, words and the play/pause icon from the session as it is now. */
     private void show() {
         if (controller == null) return;
-        MediaMetadata md = controller.getMetadata();
+        MediaMetadata md = MediaWatch.meta(controller);
         if (md != null) {
             String t = md.getString(MediaMetadata.METADATA_KEY_TITLE);
             if (t == null) t = md.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE);
@@ -287,7 +287,7 @@ final class NowPlaying extends FrameLayout {
                     Bitmap loaded = Continue.load(act, want);
                     handler.post(() -> {
                         if (want.equals(fetching)) fetching = null;
-                        boolean current = isOpen() && want.equals(MediaWatch.extractArtUri(controller != null ? controller.getMetadata() : null));
+                        boolean current = isOpen() && want.equals(MediaWatch.extractArtUri(controller != null ? MediaWatch.meta(controller) : null));
                         if (loaded == null) {
                             // its cover couldn't be had: the last song's isn't left standing in for it
                             if (current && lastArt != null && !java.util.Objects.equals(shownTitle, artFor)) {
@@ -314,7 +314,7 @@ final class NowPlaying extends FrameLayout {
         } catch (Exception e) {
             app.setText(act.getString(R.string.now_playing_caps));
         }
-        PlaybackState st = controller.getPlaybackState();
+        PlaybackState st = MediaWatch.state(controller);
         boolean playing = st != null && st.getState() == PlaybackState.STATE_PLAYING;
         playIcon.setImageResource(playing ? R.drawable.ic_pause : R.drawable.ic_play);
         progress();
@@ -395,8 +395,8 @@ final class NowPlaying extends FrameLayout {
     /** Where it is now, estimated between the app's own updates from its last position and speed. */
     private void progress() {
         if (controller == null) return;
-        MediaMetadata md = controller.getMetadata();
-        PlaybackState st = controller.getPlaybackState();
+        MediaMetadata md = MediaWatch.meta(controller);
+        PlaybackState st = MediaWatch.state(controller);
         long dur = md != null ? md.getLong(MediaMetadata.METADATA_KEY_DURATION) : 0;
         if (st == null || dur <= 0) {
             bar.setVisibility(INVISIBLE);

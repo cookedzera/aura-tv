@@ -163,8 +163,6 @@
     <string name="the_sun_is_up">The sun is up</string>
     <string name="the_light_turns_gold">The light turns gold</string>
     <string name="the_sun_has_set">The sun has set</string>
-    <string name="sunrise_2">Sunrise</string>
-    <string name="sunset_2">Sunset</string>
     <string name="usage_access_is_off">Usage access is off</string>
     <string name="in_apps_so_far">in apps so far</string>
     <string name="for_you">FOR YOU</string>
@@ -219,6 +217,9 @@
     <string name="paused_value">"Paused  ·  %1$s"</string>
     <string name="aura_version_is_out_settings">"Aura %1$s is out  ·  Settings → Updates"</string>
     <string name="sunrise_at">Sunrise at %1$s</string>
+    <string name="sunset_at">Sunset at %1$s</string>
+    <string name="sunset_in">Sunset in %1$s</string>
+    <string name="sunrise_in">Sunrise in %1$s</string>
     <string name="sunset_at_day">Sunset at %1$s · the photographs turn to day</string>
     <string name="sunset_at_golden">Sunset at %1$s · the photographs follow it</string>
     <string name="sunrise_at_night">Sunrise at %1$s · night skies from here</string>

@@ -46,6 +46,11 @@ final class Card extends View {
      */
     float res = 1f;
     /**
+     * The picture already painted off the main thread at this card's size (Top Shelf): used as it
+     * is, instead of being painted on the main thread as the card is laid out.
+     */
+    Bitmap ready;
+    /**
      * Set before the card is attached: it becomes a pane of frosted glass over the photograph,
      * tinted with the app's colour, and its art (a lifted logo) is laid on top.
      */
@@ -113,10 +118,16 @@ final class Card extends View {
         reflection = null;
         if (w > 0 && h > 0) {
             int bw = Math.max(1, Math.round(w * res)), bh = Math.max(1, Math.round(h * res));
-            bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
-            Canvas cv = new Canvas(bitmap);
-            cv.scale(bw / (float) w, bh / (float) h);
-            painter.paint(cv, w, h);
+            if (ready != null && ready.getWidth() == bw && ready.getHeight() == bh) {
+                bitmap = ready;
+            } else {
+                // painted for another size: let go, the card paints its own
+                ready = null;
+                bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
+                Canvas cv = new Canvas(bitmap);
+                cv.scale(bw / (float) w, bh / (float) h);
+                painter.paint(cv, w, h);
+            }
             BitmapShader bs = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
             if (bw != w || bh != h) {
                 Matrix up = new Matrix();
@@ -196,6 +207,7 @@ final class Card extends View {
     /** A new picture, painted at once (a switcher card whose screen arrived after it was made). */
     void repaint(Tiles.Painter p) {
         painter = p;
+        ready = null;
         int w = getWidth(), h = getHeight();
         if (w > 0 && h > 0) onSizeChanged(w, h, w, h);
         invalidate();

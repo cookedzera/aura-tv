@@ -361,7 +361,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         super.onStart();
         roomMade = false;
         watchVpn(true);
-        backdrop.start();
         IntentFilter f = new IntentFilter(Intent.ACTION_TIME_TICK);
         f.addAction(Intent.ACTION_TIME_CHANGED);
         f.addAction(Intent.ACTION_TIMEZONE_CHANGED);
@@ -440,6 +439,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         Updater.confirmPending(this);
         // back from switching the Home button service on in Android's settings
         if (HomeRole.waiting) handler.postDelayed(homeCheck, 800);
+        // the photograph moves only while home is in front (it stops in onPause)
+        backdrop.start();
         wake();
         if (awayAt > 0) TopShelf.clearCache();
         // back from an app: "jump back in" now knows what you just watched
@@ -450,10 +451,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (ccOpen) cc.refresh();
         else if (getCurrentFocus() == null && !cells.isEmpty()) focusGrid(gridAt);
         else if (awayAt > 0 && zone == SHELF && !cells.isEmpty()) focusGrid(gridAt);
-        else if (awayAt > 0 && zone == GRID && rowOf(gridAt) == 0 && !cells.isEmpty()) {
-            shelf.clearShown();
-            shelfFor(gridAt);
-        }
+        else if (awayAt > 0 && zone == GRID && rowOf(gridAt) == 0 && !cells.isEmpty()) refreshShelf();
         // have Control Center's toggles and readings current before it's next opened, so opening
         // it does no system lookups on its first frame
         handler.removeCallbacks(warmCc);
@@ -516,6 +514,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
         handler.removeCallbacks(glintTick);
+        // an app is opening: the photograph's drift, the glass following it and Top Shelf's lookups
+        // wait until home is back, rather than drawing beneath the app (until onStop) as it starts
+        backdrop.stop();
+        handler.removeCallbacks(shelfLoad);
+        shelfWanted = null;
         if (editing) stopEdit();
         if (menu.isOpen()) closeMenu(null);
     }
@@ -525,7 +528,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         super.onStop();
         watchVpn(false);
         endLaunch();
-        backdrop.stop();
         unregisterReceiver(clockReceiver);
         if (tim != null) {
             try {
@@ -760,9 +762,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         dockGlass = new GlassFrame(this, backdrop, 26, 0.42f);
         dockGlass.frost = 0.09f;
         dockGlass.edgeLight = true;
-        dockGlass.frost = 0.09f;
-        // rounded dock pill
-        dockGlass.setVisibility(View.GONE);
         dockGlass.setVisibility(View.GONE);
         page.addView(dockGlass, frame(MATCH, Ui.dp(ROW_H), Gravity.TOP | Gravity.START, 0, 0, 0, 0));
         // the page dots sit at the foot of the screen, under the dock, centred on it
@@ -1563,8 +1562,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private void listenProgress() {
         android.media.session.MediaController m = listening != null ? listening.controller : null;
-        android.media.MediaMetadata md = m != null ? m.getMetadata() : null;
-        android.media.session.PlaybackState st = m != null ? m.getPlaybackState() : null;
+        // what the player last reported: asking it again each second fetched the cover picture too
+        android.media.MediaMetadata md = m != null ? MediaWatch.meta(m) : null;
+        android.media.session.PlaybackState st = m != null ? MediaWatch.state(m) : null;
         long dur = md != null ? md.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) : 0;
         boolean on = st != null && st.getState() == android.media.session.PlaybackState.STATE_PLAYING;
         if (st == null || dur <= 0) {
@@ -1613,7 +1613,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         List<Integer> shown = new ArrayList<>();
         Set<String> hidden = Prefs.hiddenWidgets(this);
         List<Integer> order = Prefs.widgetOrder(this);
-        if (!dock || Prefs.dockWidgets(this)) {
+        if (widgetsOnHome()) {
             for (int i : order) if (!hidden.contains(WIDGET_IDS[i])) shown.add(i);
         }
         float natural = 0;
@@ -1658,7 +1658,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         else if (stack != null && resumed && Prefs.on(this, Prefs.STACK_AUTO)) stack.start();
     }
 
-    /** Where the first row of apps sits: under the widgets, or low on the screen on the dock. */
+    /** Widgets above the apps: always in the Aura style, in the tvOS style only when asked for. */
+    private boolean widgetsOnHome() {
+        return !dock || Prefs.dockWidgets(this);
+    }
+
     /** Where the grid starts from the left: beside the sidebar, or centred on the screen in the tvOS style. */
     private int pageX() {
         return dock ? (960 - WIDGET_ROW) / 2 : PAGE_X;
@@ -1750,6 +1754,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tops.add(topCc);
         tvosHint = new View(this) {
             private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final String hint = getString(R.string.swipe_up_for_fullscreen);
             private final android.graphics.Path ch = new android.graphics.Path();
             @Override
             protected void onDraw(Canvas c) {
@@ -1769,7 +1774,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 p.setTypeface(Ui.medium);
                 p.setTextSize(Ui.dpf(11f));
                 p.setTextAlign(Paint.Align.CENTER);
-                c.drawText(getString(R.string.swipe_up_for_fullscreen), cx, Ui.dpf(23f), p);
+                c.drawText(hint, cx, Ui.dpf(23f), p);
             }
         };
         tvosHint.setVisibility(View.GONE);
@@ -2606,6 +2611,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void refreshWidgets(boolean habits) {
         final Context app = getApplicationContext();
         final List<AppRepo.App> list = apps;
+        // the Smart Stack isn't on the home screen (the tvOS style's dock alone, or hidden): its
+        // round of history, artwork and the TV's own readings would only compete with an app starting
+        final boolean stackOn = widgetsOnHome();
         worker.execute(() -> {
             long now = System.currentTimeMillis();
             Calendar c = Calendar.getInstance();
@@ -2624,7 +2632,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             Map<String, Float> score = null;
             Object[] recent = null;
             List<String> ranked = null;
-            boolean full = habits && !list.isEmpty();
+            boolean full = habits && stackOn && !list.isEmpty() && !Prefs.hiddenWidgets(app).contains(WIDGET_IDS[1]);
             // every app opened in the last four weeks: "apps you use", as against apps you merely have
             final Set<String> used = new HashSet<>();
             if (full) {
@@ -2714,11 +2722,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         skyKicker.setTextColor(color);
         skyKicker.setText("●  " + Sun.label(phase));
         java.text.DateFormat tf = DateFormat.getTimeFormat(this);
-        String event = up ? getString(R.string.sunset_2) : getString(R.string.sunrise_2), title = "";
+        String title = "";
         if (next > 0) {
             long min = (next - now) / 60_000;
-            title = min < 180 ? event + " in " + (min < 60 ? min + " min" : (min / 60) + " h " + (min % 60) + " min")
-                    : event + " at " + tf.format(new Date(next)).toUpperCase(Locale.getDefault());
+            // a whole sentence for each language, not English words strung together
+            title = min < 180 ? getString(up ? R.string.sunset_in : R.string.sunrise_in, Words.minutes(min))
+                    : getString(up ? R.string.sunset_at : R.string.sunrise_at, tf.format(new Date(next)).toUpperCase(Locale.getDefault()));
         }
         Ui.fit(skyTitle, title, Ui.dp(224), 21, 15);
         skyArc.set(rise, set, now);
@@ -3891,20 +3900,23 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             return;
         }
         final Context app = getApplicationContext();
+        final AppRepo.App a = find(pkg);
+        final int color = a != null ? a.color : DAY_GLOW, rowH = shelf.getLayoutParams().height;
         // on a thread of its own: behind home's worker (the widgets, artwork, the stack) the cards
-        // were sometimes quick and sometimes seconds late
+        // were sometimes quick and sometimes seconds late. Their pictures are painted there too
         shelfWorker.execute(() -> {
-            // focus moved on while this waited: the app it's on now has its own turn
+            // focus moved on while this waited (or an app is opening): the app it's on now has its own turn
             if (!pkg.equals(shelfWanted)) return;
             final List<Continue.Item> items = TopShelf.items(app, pkg);
+            if (!pkg.equals(shelfWanted)) return;
+            final TopShelf.Ready ready = shelf.paintAll(items, color, rowH);
             runOnUiThread(() -> {
                 if (isDestroyed() || !pkg.equals(shelfWanted) || zone != GRID || rowOf(gridAt) > 0) return;
                 if (items.isEmpty()) {
                     hideShelf();
                     return;
                 }
-                final AppRepo.App a = find(pkg);
-                shelf.show(pkg, items, a != null ? a.color : DAY_GLOW, it -> {
+                shelf.show(pkg, ready, it -> {
                     if (it.nowPlaying) {
                         MediaWatch.Playing p = MediaWatch.now(HomeActivity.this);
                         if (p != null && p.controller != null) {
@@ -3920,6 +3932,24 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             });
         });
     };
+
+    /**
+     * Back from an app: the cards on show stay, and are looked up again once home has settled (you
+     * may have just watched something); they're only made again if something changed. Taking them
+     * down and building them again on every return was what made coming home lag in the tvOS
+     * style, where focus is always on the dock and every app has cards.
+     */
+    private void refreshShelf() {
+        String on = shelf.upFor();
+        if (on == null || !on.equals(cells.get(gridAt).tag)) {
+            shelf.clearShown();
+            shelfFor(gridAt);
+            return;
+        }
+        shelfWanted = on;
+        handler.removeCallbacks(shelfLoad);
+        handler.postDelayed(shelfLoad, 1200);
+    }
 
     private void hideShelf() {
         handler.removeCallbacks(shelfLoad);
@@ -4764,9 +4794,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         dateLine.setText(Words.date("EEEE, d MMMM", now.getTimeInMillis()));
         cc.tick(now);
         story.tick(now);
-        refreshStatus();
-        // the sky and your day every minute; habits only when the hour turns
-        refreshWidgets(lastHour != -1 && hour != lastHour);
+        // the sky and your day every minute; habits only when the hour turns. Not while home is
+        // behind something: coming back, onResume reads them all (it used to be done twice in a row)
+        if (resumed) {
+            refreshStatus();
+            refreshWidgets(lastHour != -1 && hour != lastHour);
+        }
         watchSky();
         showWeather();
         if (resumed && Prefs.on(this, Prefs.WEATHER)) {

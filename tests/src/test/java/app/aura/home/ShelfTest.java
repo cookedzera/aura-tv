@@ -45,6 +45,16 @@ public class ShelfTest {
         }
     }
 
+    /**
+     * The clock standing still, Top Shelf's own thread is given the real time it needs to finish
+     * what it was handed (it paints the cards' pictures), then what it handed back runs.
+     */
+    private static void drain(HomeActivity a) throws Exception {
+        java.util.concurrent.ExecutorService shelfWorker = field(a, "shelfWorker");
+        shelfWorker.submit(() -> { }).get(10, TimeUnit.SECONDS);
+        ShadowLooper.idleMainLooper();
+    }
+
     @SuppressWarnings("unchecked")
     private static <T> T field(Object o, String name) throws Exception {
         Field f = o.getClass().getDeclaredField(name);
@@ -115,6 +125,7 @@ public class ShelfTest {
         // SonyLIV: its own Continue watching
         focus(a, "com.sonyliv");
         run(1500);
+        drain(a);
         Assert.assertEquals("SonyLIV's own cards", "com.sonyliv", shelf.shownFor());
         Assert.assertEquals(1, shelf.cards.size());
 
@@ -134,9 +145,29 @@ public class ShelfTest {
         run(100);
         focus(a, "com.sonyliv");
         run(400);
+        drain(a);
         Assert.assertEquals("cards found a moment ago come almost at once", "com.sonyliv", shelf.shownFor());
         run(500);
         Assert.assertEquals("fully in once its fade ends", 1f, shelf.getAlpha(), 0.05f);
+        Card card = shelf.cards.get(0);
+        Assert.assertNotNull("its picture painted off the main thread", card.ready);
+        Assert.assertSame("and used as it is", card.ready, card.art());
+
+        // into an app and back home: the cards on show stay (looked up again, but not made again)
+        ac.pause().stop();
+        run(500);
+        ac.restart().start().resume();
+        run(300);
+        Assert.assertEquals("still there coming home", "com.sonyliv", shelf.shownFor());
+        // what coming home runs with focus on the dock (the simulator is in touch mode: no focus)
+        Method refresh = HomeActivity.class.getDeclaredMethod("refreshShelf");
+        refresh.setAccessible(true);
+        refresh.invoke(a);
+        run(2500);
+        drain(a);
+        Assert.assertTrue("looked up again", TopShelf.cached("com.sonyliv"));
+        Assert.assertSame("the very same cards", card, shelf.cards.get(0));
+        Assert.assertEquals(1f, shelf.getAlpha(), 0.05f);
         ac.pause().stop().destroy();
         Assert.assertEquals(Trouble.report(c), 0, Trouble.count(c));
     }

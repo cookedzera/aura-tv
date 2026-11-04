@@ -131,7 +131,7 @@ final class MusicStrip extends LinearLayout {
 
     private void show() {
         if (controller == null) return;
-        MediaMetadata md = controller.getMetadata();
+        MediaMetadata md = MediaWatch.meta(controller);
         if (md == null) return;
         String t = md.getString(MediaMetadata.METADATA_KEY_TITLE);
         if (t == null) t = md.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE);
@@ -182,7 +182,7 @@ final class MusicStrip extends LinearLayout {
                 if (loaded == null) return;
                 MediaWatch.cacheArt(want, loaded);
                 handler.post(() -> {
-                    if (controller != null && want.equals(MediaWatch.extractArtUri(controller.getMetadata()))) {
+                    if (controller != null && want.equals(MediaWatch.extractArtUri(MediaWatch.meta(controller)))) {
                         shownArt = loaded;
                         cover.setImageBitmap(loaded);
                     }
@@ -194,8 +194,8 @@ final class MusicStrip extends LinearLayout {
 
     private void progress() {
         if (controller == null) return;
-        MediaMetadata md = controller.getMetadata();
-        PlaybackState st = controller.getPlaybackState();
+        MediaMetadata md = MediaWatch.meta(controller);
+        PlaybackState st = MediaWatch.state(controller);
         long dur = md != null ? md.getLong(MediaMetadata.METADATA_KEY_DURATION) : 0;
         boolean on = st != null && st.getState() == PlaybackState.STATE_PLAYING;
         if (st == null || dur <= 0) {

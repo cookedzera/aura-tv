@@ -159,11 +159,17 @@ final class Ui {
         final float maxSp = t.getTextSize() / scaled;
         t.setSingleLine(true);
         t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        // every layout pass calls this: the same words in the same room are worked out only once
+        final Paint p = new Paint();
+        final String[] last = {null};
         t.addOnLayoutChangeListener((v, l, top, r, b, ol, ot, or, ob) -> {
             int room = r - l - t.getCompoundPaddingLeft() - t.getCompoundPaddingRight();
             CharSequence s = t.getText();
             if (room <= 0 || s.length() == 0) return;
-            Paint p = new Paint(t.getPaint());
+            String now = room + "|" + t.getTextSize() + "|" + s;
+            if (now.equals(last[0])) return;
+            last[0] = now;
+            p.set(t.getPaint());
             float sp = maxSp;
             while (sp > minSp) {
                 p.setTextSize(sp * scaled);

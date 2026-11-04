@@ -77,12 +77,12 @@ final class Continue {
         // throws the minute's cache away, and the artwork with it
         long now = android.os.SystemClock.elapsedRealtime();
         List<Item> all;
-        synchronized (Continue.class) {
+        // one reading at a time: the stack and Top Shelf both ask the moment home comes back, and the
+        // second waits for the first one's list instead of asking the TV's listings all over again
+        synchronized (READING) {
             all = cached != null && max <= READ && now - cachedAt < 60_000 ? cached : null;
-        }
-        if (all == null) {
-            all = read(c, Math.max(READ, max));
-            synchronized (Continue.class) {
+            if (all == null) {
+                all = read(c, Math.max(READ, max));
                 cached = all;
                 cachedAt = now;
             }
@@ -95,6 +95,7 @@ final class Continue {
 
     /** As many as anything shows at once. */
     private static final int READ = 8;
+    private static final Object READING = new Object();
     private static List<Item> cached;
     private static long cachedAt;
 
@@ -473,6 +474,7 @@ final class Continue {
      * pictures: they used to be downloaded and decoded again every time. Kept within a share of
      * what Android lets Aura use, and let go when memory runs short. Only web addresses: an app's
      * own content address can show a different picture tomorrow (a music app's "now playing").
+     * Posters and show art saved on this TV share it, kept by their file and its date ({@link #picture}).
      */
     private static final java.util.LinkedHashMap<String, Bitmap> ART = new java.util.LinkedHashMap<>(32, 0.75f, true);
     private static long artBytes, artBudget;
@@ -483,11 +485,11 @@ final class Continue {
         }
     }
 
-    private static void keep(Context c, String uri, Bitmap b) {
+    private static void keep(String uri, Bitmap b) {
         synchronized (ART) {
             if (artBudget == 0) {
-                android.app.ActivityManager am = Compat.svc(c, android.app.ActivityManager.class);
-                int mb = am != null ? am.getMemoryClass() : 96;
+                // a tenth of the heap Android gives Aura
+                int mb = (int) (Runtime.getRuntime().maxMemory() >> 20);
                 artBudget = Math.max(6, Math.min(24, mb / 10)) * 1024L * 1024L;
             }
             Bitmap was = ART.put(uri, b);
@@ -501,6 +503,32 @@ final class Continue {
                 it.remove();
             }
         }
+    }
+
+    /**
+     * A picture saved on this TV (a poster, a show's art), halved while it stays at least
+     * {@code minWidth} wide, in 16-bit colour. Top Shelf, the stack and Control Center ask for the
+     * same few again and again: each is read once, and again only when its file is written again.
+     */
+    static Bitmap picture(String path, int minWidth) {
+        if (path == null || path.isEmpty()) return null;
+        String key = "file:" + path + "@" + new java.io.File(path).lastModified();
+        Bitmap b = kept(key);
+        if (b != null) return b;
+        android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        android.graphics.BitmapFactory.decodeFile(path, o);
+        o.inJustDecodeBounds = false;
+        o.inSampleSize = 1;
+        while (o.outWidth / (o.inSampleSize * 2) >= minWidth) o.inSampleSize *= 2;
+        o.inPreferredConfig = Bitmap.Config.RGB_565;
+        try {
+            b = android.graphics.BitmapFactory.decodeFile(path, o);
+        } catch (OutOfMemoryError e) {
+            return null;
+        }
+        if (b != null) keep(key, b);
+        return b;
     }
 
     /** Short on memory: the kept pictures go (cards on show keep their own). */
@@ -520,7 +548,7 @@ final class Continue {
         Bitmap had = web ? kept(uri) : null;
         if (had != null) return had;
         Bitmap b = fetch(c, uri);
-        if (b != null && web) keep(c, uri, b);
+        if (b != null && web) keep(uri, b);
         return b;
     }
 

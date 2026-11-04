@@ -53,10 +53,18 @@ public class MediaWatch extends NotificationListenerService {
     private static final long REMEMBER_MS = 6 * 3600_000L;
     private static final Handler main = new Handler(Looper.getMainLooper());
     private static final Map<String, Playing> byPkg = new HashMap<>();
-    private static final List<MediaController> watched = new ArrayList<>();
+    /** The players being watched, in Android's order (the most recently active first); read from any thread. */
+    private static final List<MediaController> watched = new java.util.concurrent.CopyOnWriteArrayList<>();
     private static final Map<MediaController, MediaController.Callback> callbacks = new HashMap<>();
+    /**
+     * What each watched player last reported, as its own report brought it. Asking a player again
+     * is a call across to its app, and its metadata carries the cover picture: done every second
+     * for the song's progress, and again for each of its many reports, it held up the main thread.
+     */
+    private static final Map<MediaController, MediaMetadata> metaOf = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<MediaController, PlaybackState> stateOf = new java.util.concurrent.ConcurrentHashMap<>();
     private static MediaSessionManager.OnActiveSessionsChangedListener sessionListener;
-    private static boolean listening;
+    private static volatile boolean listening;
     private static Playing lastAny;
     private static String cachedUri;
     private static Bitmap cachedBmp;
@@ -236,6 +244,8 @@ public class MediaWatch extends NotificationListenerService {
             }
             watched.clear();
             callbacks.clear();
+            metaOf.clear();
+            stateOf.clear();
             listening = false;
         });
     }
@@ -252,6 +262,8 @@ public class MediaWatch extends NotificationListenerService {
         }
         watched.clear();
         callbacks.clear();
+        metaOf.clear();
+        stateOf.clear();
         if (list == null) return;
         for (final MediaController m : list) {
             if (m == null) continue;
@@ -260,12 +272,12 @@ public class MediaWatch extends NotificationListenerService {
                 // malformed, mid-call; that report is let go rather than Aura with it
                 @Override
                 public void onPlaybackStateChanged(PlaybackState state) {
-                    safeRecord(c, m);
+                    safeRecord(c, m, meta(m), state);
                 }
 
                 @Override
                 public void onMetadataChanged(MediaMetadata metadata) {
-                    safeRecord(c, m);
+                    safeRecord(c, m, metadata, state(m));
                 }
             };
             try {
@@ -283,6 +295,24 @@ public class MediaWatch extends NotificationListenerService {
         if (m == null) return null;
         MediaMetadata md = m.getMetadata();
         PlaybackState st = m.getPlaybackState();
+        remember(m, md, st);
+        return record(c, m, md, st);
+    }
+
+    /**
+     * What a player reported, kept for {@link #meta} and {@link #state}. Only its own reports (and
+     * asking it directly) write here, never a reader on another thread: that could put back an
+     * older report over the one that just came.
+     */
+    private static void remember(MediaController m, MediaMetadata md, PlaybackState st) {
+        if (md != null) metaOf.put(m, md);
+        else metaOf.remove(m);
+        if (st != null) stateOf.put(m, st);
+        else stateOf.remove(m);
+    }
+
+    /** The same, from what the player reported: nothing is asked of it again. */
+    private static Playing record(final Context c, MediaController m, MediaMetadata md, PlaybackState st) {
         if (md == null) return null;
         String title = md.getString(MediaMetadata.METADATA_KEY_TITLE);
         if (title == null || title.isEmpty()) title = md.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE);
@@ -392,9 +422,10 @@ public class MediaWatch extends NotificationListenerService {
         });
     }
 
-    private static void safeRecord(Context c, MediaController m) {
+    private static void safeRecord(Context c, MediaController m, MediaMetadata md, PlaybackState st) {
         try {
-            record(c, m);
+            remember(m, md, st);
+            record(c, m, md, st);
         } catch (RuntimeException e) {
             Trouble.caught("a player's report", e);
         }
@@ -502,9 +533,43 @@ public class MediaWatch extends NotificationListenerService {
         return false;
     }
 
+    /**
+     * The player's last reported metadata (with its picture), from its own reports while it's
+     * watched; asked of the player only when none has come.
+     */
+    static MediaMetadata meta(MediaController m) {
+        MediaMetadata md = metaOf.get(m);
+        return md != null ? md : m.getMetadata();
+    }
+
+    /** The player's last reported state (where it was, and when), the same way. */
+    static PlaybackState state(MediaController m) {
+        PlaybackState st = stateOf.get(m);
+        return st != null ? st : m.getPlaybackState();
+    }
+
     /** The most relevant live media session (playing first, else paused), or null. Main thread is fine: no I/O. */
     static Playing now(Context c) {
         ensureWatching(c != null ? c.getApplicationContext() : null);
+        if (listening) {
+            // the players are watched: what they last reported is known, with nothing asked of them
+            MediaController best = null;
+            for (MediaController m : watched) {
+                if (c != null && !HomeKeys.allowed(c, m.getPackageName())) continue;
+                PlaybackState st = stateOf.get(m);
+                if (metaOf.get(m) == null || st == null) continue;
+                int s = st.getState();
+                if (s == PlaybackState.STATE_PLAYING || s == PlaybackState.STATE_BUFFERING) {
+                    best = m;
+                    break;
+                }
+                if (best == null && (s == PlaybackState.STATE_PAUSED || s == PlaybackState.STATE_STOPPED)) best = m;
+            }
+            if (best == null) return null;
+            MediaMetadata md = metaOf.get(best);
+            PlaybackState st = stateOf.get(best);
+            return md != null && st != null ? record(c, best, md, st) : null;
+        }
         MediaSessionManager msm = Compat.svc(c, MediaSessionManager.class);
         if (msm == null) return null;
         List<MediaController> list;
@@ -579,8 +644,8 @@ public class MediaWatch extends NotificationListenerService {
     static long remainingMs(Context c) {
         Playing p = now(c);
         if (p == null || !p.playing || p.controller == null) return -1;
-        PlaybackState st = p.controller.getPlaybackState();
-        MediaMetadata md = p.controller.getMetadata();
+        PlaybackState st = state(p.controller);
+        MediaMetadata md = meta(p.controller);
         if (st == null || md == null) return -1;
         long length = md.getLong(MediaMetadata.METADATA_KEY_DURATION);
         if (length <= 0) return -1;

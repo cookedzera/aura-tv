@@ -5,7 +5,6 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.net.Uri;
 
 import org.json.JSONArray;
@@ -260,19 +259,9 @@ final class Picks {
         return out;
     }
 
-    /** The poster, halved only while it stays at least 600 px wide. */
+    /** The poster, halved only while it stays at least 600 px wide, in 16-bit colour. */
     static Bitmap poster(Pick p) {
-        BitmapFactory.Options o = new BitmapFactory.Options();
-        o.inJustDecodeBounds = true;
-        BitmapFactory.decodeFile(p.poster, o);
-        o.inJustDecodeBounds = false;
-        o.inSampleSize = 1;
-        while (o.outWidth / (o.inSampleSize * 2) >= 600) o.inSampleSize *= 2;
-        try {
-            return BitmapFactory.decodeFile(p.poster, o);
-        } catch (OutOfMemoryError e) {
-            return null;
-        }
+        return Continue.picture(p.poster, 600);
     }
 
     /** Its trailer: straight to the video on YouTube when TMDB named one, else a search there, else the TV's own search. */

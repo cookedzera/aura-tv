@@ -49,6 +49,11 @@ final class TopShelf extends FrameLayout {
         return isShown() ? shown : null;
     }
 
+    /** The app whose cards are up, even while home itself is out of sight behind an app. */
+    String upFor() {
+        return up() ? shown : null;
+    }
+
     void clearShown() {
         shown = null;
     }
@@ -246,21 +251,111 @@ final class TopShelf extends FrameLayout {
         }
     }
 
+    /** Cards whose pictures were painted off the main thread, at the sizes they take in the row. */
+    static final class Ready {
+        final List<Continue.Item> items;
+        final Bitmap[] art;
+        final int[] widths;
+        final int color;
+        final String sig;
+
+        private Ready(List<Continue.Item> items, Bitmap[] art, int[] widths, int color, String sig) {
+            this.items = items;
+            this.art = art;
+            this.widths = widths;
+            this.color = color;
+            this.sig = sig;
+        }
+    }
+
+    /** What the cards on show were painted from: the same again keeps them. */
+    private volatile String sig;
+
+    /**
+     * Off the main thread: every card's picture, for this shelf's row {@code h} pixels high.
+     * Painting them as the cards were laid out held the main thread up just as you came back home,
+     * and again on each app passed over on the dock. The cards already on show, found again, aren't
+     * painted at all.
+     */
+    Ready paintAll(List<Continue.Item> items, int color, int h) {
+        int[] widths = widths(getLayoutParams().width, items.size());
+        Bitmap[] art = new Bitmap[items.size()];
+        StringBuilder b = new StringBuilder().append(color);
+        for (Continue.Item it : items) {
+            b.append('\n').append(it.title).append('|').append(it.sub).append('|').append(it.kicker)
+                    .append('|').append(Math.round(it.progress * 200)).append('|').append(look(it.art))
+                    .append('|').append(it.posterCard).append('|').append(it.nowPlaying);
+        }
+        String made = b.toString();
+        if (made.equals(sig)) return new Ready(items, art, widths, color, made);
+        for (int i = 0; i < art.length; i++) {
+            if (widths[i] <= 0 || h <= 0) continue;
+            try {
+                art[i] = Bitmap.createBitmap(widths[i], h, Bitmap.Config.ARGB_8888);
+                paint(items.get(i), color).paint(new Canvas(art[i]), widths[i], h);
+            } catch (OutOfMemoryError e) {
+                // the card paints itself as it's laid out, as before
+                art[i] = null;
+            }
+        }
+        return new Ready(items, art, widths, color, made);
+    }
+
+    /**
+     * A picture told apart by its size and a few of its pixels: read from disk again for the next
+     * lookup, it's still the same picture, and its card can stay.
+     */
+    private static String look(Bitmap b) {
+        if (b == null) return "-";
+        StringBuilder s = new StringBuilder().append(b.getWidth()).append('x').append(b.getHeight());
+        try {
+            for (int y = 1; y < 4; y++) {
+                for (int x = 1; x < 4; x++) s.append(',').append(Integer.toHexString(b.getPixel(b.getWidth() * x / 4, b.getHeight() * y / 4)));
+            }
+        } catch (RuntimeException e) {
+            // pixels that can't be read: the picture itself is what's compared
+            s.append('@').append(System.identityHashCode(b));
+        }
+        return s.toString();
+    }
+
+    /** Each card's width across a row {@code w} pixels wide, 18 dp apart. */
+    private static int[] widths(int w, int n) {
+        int[] out = new int[n];
+        int room = w - Ui.dp(18) * Math.max(0, n - 1);
+        for (int i = 0; i < n; i++) out[i] = room * (i + 1) / n - room * i / n;
+        return out;
+    }
+
     /** Lays out up to three cards across the row; {@code open} runs when one is chosen. */
-    void show(String pkg, List<Continue.Item> items, int color, Opener open) {
+    void show(String pkg, Ready r, Opener open) {
+        boolean same = up() && r.sig.equals(sig) && cards.size() == r.items.size();
         shown = pkg;
-        row.removeAllViews();
-        cards.clear();
-        int n = items.size();
-        for (int i = 0; i < n; i++) {
-            final Continue.Item it = items.get(i);
-            Card card = new Card(getContext(), paint(it, color), color, 22);
-            card.tvos = Prefs.tvos(getContext());
-            card.onClick = () -> open.open(it);
-            LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
-            if (i > 0) l.leftMargin = Ui.dp(18);
-            row.addView(card, l);
-            cards.add(card);
+        if (same) {
+            // the very cards on show (back from an app, or a song's card looked up again unchanged):
+            // kept, only told where they now lead
+            for (int i = 0; i < cards.size(); i++) {
+                final Continue.Item it = r.items.get(i);
+                cards.get(i).onClick = () -> open.open(it);
+            }
+            if (getAlpha() == 1f && getTranslationY() == 0f) return;
+        } else {
+            sig = r.sig;
+            row.removeAllViews();
+            cards.clear();
+            int n = r.items.size();
+            boolean tvos = Prefs.tvos(getContext());
+            for (int i = 0; i < n; i++) {
+                final Continue.Item it = r.items.get(i);
+                Card card = new Card(getContext(), paint(it, r.color), r.color, 22);
+                card.ready = r.art[i];
+                card.tvos = tvos;
+                card.onClick = () -> open.open(it);
+                LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(r.widths[i], ViewGroup.LayoutParams.MATCH_PARENT);
+                if (i > 0) l.leftMargin = Ui.dp(18);
+                row.addView(card, l);
+                cards.add(card);
+            }
         }
         if (getVisibility() != VISIBLE) {
             setVisibility(VISIBLE);
@@ -279,6 +374,7 @@ final class TopShelf extends FrameLayout {
                     setVisibility(GONE);
                     row.removeAllViews();
                     cards.clear();
+                    sig = null;
                 }).start();
     }
 

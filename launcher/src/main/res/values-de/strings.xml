@@ -163,8 +163,6 @@
     <string name="the_sun_is_up">Die Sonne ist aufgegangen</string>
     <string name="the_light_turns_gold">Das Licht wird golden</string>
     <string name="the_sun_has_set">Die Sonne ist untergegangen</string>
-    <string name="sunrise_2">Sonnenaufgang</string>
-    <string name="sunset_2">Sonnenuntergang</string>
     <string name="usage_access_is_off">Nutzungszugriff ist aus</string>
     <string name="in_apps_so_far">bisher in Apps</string>
     <string name="for_you">FÜR DICH</string>
@@ -219,6 +217,9 @@
     <string name="paused_value">"Pausiert  ·  %1$s"</string>
     <string name="aura_version_is_out_settings">"Aura %1$s ist da  ·  Einstellungen → Updates"</string>
     <string name="sunrise_at">Sonnenaufgang um %1$s</string>
+    <string name="sunset_at">Sonnenuntergang um %1$s</string>
+    <string name="sunset_in">Sonnenuntergang in %1$s</string>
+    <string name="sunrise_in">Sonnenaufgang in %1$s</string>
     <string name="sunset_at_day">Sonnenuntergang um %1$s · die Fotos werden zum Tag</string>
     <string name="sunset_at_golden">Sonnenuntergang um %1$s · die Fotos folgen ihm</string>
     <string name="sunrise_at_night">Sonnenaufgang um %1$s · ab jetzt Nachthimmel</string>
