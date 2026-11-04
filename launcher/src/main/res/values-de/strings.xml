@@ -960,4 +960,24 @@
     <string name="couldnt_join">%1$s ließ sich nicht verbinden</string>
     <string name="connecting_to_ellipsis">Verbinde mit %1$s…</string>
     <string name="joining">Verbinde mit %1$s</string>
+    <!-- Music scenes -->
+    <string name="music_scenes">Musik-Szenen</string>
+    <string name="music_scenes_on">Luftaufnahmen, während Musik läuft</string>
+    <string name="beat_glow">Beat-Leuchten</string>
+    <string name="beat_glow_needs">Braucht die Ton-Berechtigung: Einrichtung auf diesem TV ausführen</string>
+    <string name="up_next">Als Nächstes</string>
+    <string name="aerial_credit">%1$s · Luftaufnahme von Apple</string>
+    <string name="scenes_up">Szenen</string>
+    <string name="scene_mix">Gemischt</string>
+    <string name="scene_landscapes">Landschaften</string>
+    <string name="scene_cities">Städte</string>
+    <string name="scene_space">Weltraum</string>
+    <string name="scene_underwater">Unter Wasser</string>
+    <string name="saver_aerials">Luftaufnahmen</string>
+    <string name="saver_aerial_quotes">Luftaufnahmen und Zitate</string>
+    <string name="aerials_in_auto">Luftaufnahmen in Auto</string>
+    <string name="photos_aerials_quotes_by_turns">Fotos, Luftaufnahmen und Zitate im Wechsel</string>
+    <string name="aerial_by_apple">Luftaufnahme von Apple</string>
+    <string name="with_data">%1$s · etwa 2–3 GB Daten pro Stunde</string>
+    <string name="aerials_use_data">Luftaufnahmen kommen per Stream von Apple: etwa 2–3 GB Daten pro Stunde, solange sie laufen</string>
 </resources>

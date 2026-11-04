@@ -314,6 +314,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         registerReceiver(packageReceiver, pf);
         Previews.listener = shotTaken;
         Ambient.makeRoom = makeRoom;
+        Ambient.homeComing = homeComing;
     }
 
     /**
@@ -334,6 +335,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     /** The photographs were let go for the screensaver: they come back with home. */
     private boolean roomMade;
+
+    /** The screensaver is ending: the photograph starts loading now, so home isn't dark when it's back. */
+    private final Runnable homeComing = () -> runOnUiThread(() -> {
+        if (isDestroyed() || !roomMade) return;
+        roomMade = false;
+        backdrop.start();
+    });
 
     @Override
     public void onWindowFocusChanged(boolean focus) {
@@ -491,6 +499,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         // Continue Watching appears as soon as it's allowed
         if (code == 41 && results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) refreshWidgets(true);
+        // the beat glow, allowed just now from Settings: it comes on
+        if (code == SettingsPanel.BEAT_ASK && results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Prefs.set(this, Prefs.BEAT, true);
+            if (settings.isOpen()) settings.refresh();
+        }
     }
 
     @Override
@@ -546,6 +559,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         unregisterReceiver(packageReceiver);
         if (Previews.listener == shotTaken) Previews.listener = null;
         if (Ambient.makeRoom == makeRoom) Ambient.makeRoom = null;
+        if (Ambient.homeComing == homeComing) Ambient.homeComing = null;
         cc.release();
         backdrop.release();
         worker.shutdown();
@@ -3425,15 +3439,26 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     /** The song's small bar over the photograph in photo mode, while music plays; null otherwise. */
     private MusicStrip photoMusic;
 
+    /** Music scenes, when switched on: an aerial video behind a fuller player, in place of the small bar. */
+    private MusicScene scene;
+
     private void photoMusic(boolean on) {
         if (!on) {
             MusicStrip m = photoMusic;
             photoMusic = null;
             if (m != null) m.stop();
+            MusicScene sc = scene;
+            scene = null;
+            if (sc != null) sc.stop();
             return;
         }
         MediaWatch.Playing p = listening;
-        if (photoMusic != null || p == null || p.controller == null || !p.playing) return;
+        if (photoMusic != null || scene != null || p == null || p.controller == null || !p.playing) return;
+        // the video's safe connection to Apple's server needs Android 7's network rules
+        if (Prefs.on(this, Prefs.SCENES) && Build.VERSION.SDK_INT >= 24) {
+            startScene(p.controller);
+            return;
+        }
         final MusicStrip m = new MusicStrip(this);
         FrameLayout.LayoutParams ml = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.START);
         // above the photograph's clock, lined up with it
@@ -3450,6 +3475,29 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             // the player went as it was asked for
             root.removeView(m);
             photoMusic = null;
+        }
+    }
+
+    private void startScene(android.media.session.MediaController c) {
+        final MusicScene[] made = new MusicScene[1];
+        made[0] = new MusicScene(this, () -> {
+            root.removeView(made[0]);
+            if (scene != made[0]) return;
+            scene = null;
+            // the music's player went (its app closed): the photograph's own clock and story come back
+            if (photo) story.reveal(0);
+        });
+        scene = made[0];
+        // above the photograph and its story, which it covers
+        root.addView(scene, root.indexOfChild(story) + 1, match());
+        story.hide(400);
+        try {
+            scene.start(c);
+        } catch (RuntimeException e) {
+            Trouble.caught("music scene", e);
+            MusicScene sc = scene;
+            scene = null;
+            sc.stop();
         }
     }
 
@@ -3564,6 +3612,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
             return super.dispatchKeyEvent(e);
         }
+        // a music scene: the remote works its player; Back with the controls away goes home
+        if (photo && scene != null && !isVolumeKey(code) && scene.key(code)) return swallow(code);
         boolean wasResting = photo;
         wake();
         if (wasResting && !isVolumeKey(code)) return swallow(code);

@@ -416,6 +416,8 @@ final class Adb {
         s.add(new String[]{c.getString(R.string.smart_stack_today), "appops set " + p + " GET_USAGE_STATS allow"});
         if (Build.VERSION.SDK_INT >= 23) s.add(new String[]{c.getString(R.string.wi_fi_sheet), "pm grant " + p + " android.permission.ACCESS_FINE_LOCATION"});
         if (Build.VERSION.SDK_INT >= 23) s.add(new String[]{c.getString(R.string.continue_watching), "pm grant " + p + " android.permission.READ_TV_LISTINGS"});
+        // the beat glow reads the TV's sound (Music scenes): granted here so Android needn't ask
+        if (Build.VERSION.SDK_INT >= 23) s.add(new String[]{c.getString(R.string.beat_glow), "pm grant " + p + " android.permission.RECORD_AUDIO"});
         // "cmd notification allow_listener" arrived in Android 8.1: before it (Fire OS 6 is 7.1) this
         // step always failed and Now playing never came on. There, Aura joins the list itself
         if (Build.VERSION.SDK_INT >= 27) s.add(new String[]{c.getString(R.string.now_playing), "cmd notification allow_listener " + p + "/" + MediaWatch.class.getName()});

@@ -32,6 +32,10 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- DLNA: phones and computers find the TV by multicast, which Wi-Fi drops unless asked to keep it -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Beat glow (off unless switched on): the light follows the music's bass, read from Android's
+         own visualizer of what the TV plays. Nothing is recorded or kept -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -43,6 +47,7 @@
         android:banner="@drawable/banner"
         android:theme="@style/Aura"
         android:allowBackup="false"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:hardwareAccelerated="true">
 
         <activity

@@ -960,4 +960,24 @@
     <string name="couldnt_join">Couldn\'t join %1$s</string>
     <string name="connecting_to_ellipsis">Connecting to %1$s…</string>
     <string name="joining">Joining %1$s</string>
+    <!-- Music scenes -->
+    <string name="music_scenes">Music scenes</string>
+    <string name="music_scenes_on">Aerial videos while music plays</string>
+    <string name="beat_glow">Beat glow</string>
+    <string name="beat_glow_needs">Needs the sound permission: run setup on this TV</string>
+    <string name="up_next">Up next</string>
+    <string name="aerial_credit">%1$s · Aerial video by Apple</string>
+    <string name="scenes_up">Scenes</string>
+    <string name="scene_mix">Mix</string>
+    <string name="scene_landscapes">Landscapes</string>
+    <string name="scene_cities">Cities</string>
+    <string name="scene_space">Space</string>
+    <string name="scene_underwater">Underwater</string>
+    <string name="saver_aerials">Aerials</string>
+    <string name="saver_aerial_quotes">Aerials and quotes</string>
+    <string name="aerials_in_auto">Aerials in Auto</string>
+    <string name="photos_aerials_quotes_by_turns">photographs, aerials and quotes by turns</string>
+    <string name="aerial_by_apple">Aerial video by Apple</string>
+    <string name="with_data">%1$s · about 2–3 GB of data an hour</string>
+    <string name="aerials_use_data">Aerials stream from Apple: about 2–3 GB of data an hour while they show</string>
 </resources>

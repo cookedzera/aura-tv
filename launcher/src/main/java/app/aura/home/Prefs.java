@@ -18,6 +18,12 @@ final class Prefs {
             MOMENTS = "set_moments", PICKS = "set_picks", WEATHER = "set_weather", DAILY = "set_daily", HIDDEN = "set_hidden",
             MINE_ONLY = "set_mine_only", BLACK = "set_black", TOP_SHELF = "set_top_shelf", PARALLAX = "set_parallax",
             FLYOVERS = "set_flyovers", INPUT_PREVIEW = "set_input_preview";
+    /**
+     * Music scenes: while a song plays and home rests, one of Apple's aerial videos streams behind
+     * the player ({@link MusicScene}); beat glow, a light that breathes with the bass. Both wait to be
+     * asked for: the videos use the network, the glow reads the TV's sound.
+     */
+    static final String SCENES = "set_music_scenes", BEAT = "set_beat_glow", SCENE_KIND = "set_scene_kind";
 
     private Prefs() { }
 
@@ -44,7 +50,8 @@ final class Prefs {
         // flyovers download video, so they wait until asked for; and live pictures of inputs, which
         // some TVs draw over the whole screen (a soundbar on HDMI: black, with sound)
         return of(c).getBoolean(key, !NAMES_ALWAYS.equals(key) && !MINE_ONLY.equals(key) && !BLACK.equals(key)
-                && !FLYOVERS.equals(key) && !INPUT_PREVIEW.equals(key));
+                && !FLYOVERS.equals(key) && !INPUT_PREVIEW.equals(key) && !SCENES.equals(key) && !BEAT.equals(key)
+                && !AERIALS_AUTO.equals(key));
     }
 
     static void set(Context c, String key, boolean v) {
@@ -77,8 +84,17 @@ final class Prefs {
 
     /** The screensaver's scene: the photographs, famous quotes over them, or Auto, the two by turns (see Ambient). */
     static final String SAVER = "set_saver";
-    static final String[] SAVERS = {"auto", "photos", "sayings"};
-    static final int[] SAVER_NAMES = {R.string.saver_auto, R.string.photographs, R.string.saver_sayings};
+    static final String[] SAVERS = {"auto", "photos", "sayings", "aerials", "aerial_sayings"};
+    static final int[] SAVER_NAMES = {R.string.saver_auto, R.string.photographs, R.string.saver_sayings,
+            R.string.saver_aerials, R.string.saver_aerial_quotes};
+    /** Apple's aerial videos join Auto's turns (photographs, aerials, quotes over aerials); off, as they stream. */
+    static final String AERIALS_AUTO = "set_aerials_auto";
+
+    /** Whether a screensaver mode streams aerials (Android 7+, where their safe connection works). */
+    static boolean aerialSaver(Context c, String mode) {
+        if (android.os.Build.VERSION.SDK_INT < 24) return false;
+        return mode.startsWith("aerial") || mode.equals("auto") && on(c, AERIALS_AUTO);
+    }
 
     static String saver(Context c) {
         String s = of(c).getString(SAVER, "auto");

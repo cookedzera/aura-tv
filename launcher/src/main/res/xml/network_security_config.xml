@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Everything keeps Android's own trust and its rules. The one exception: Apple's aerial videos
+     (Music scenes) come from a server whose certificate is signed by Apple's own root, which Android
+     doesn't carry; that root (res/raw/apple_root_ca.cer, from apple.com/certificateauthority) is
+     trusted for that server alone, so the videos still arrive over a checked, encrypted connection. -->
+<network-security-config>
+    <domain-config>
+        <domain includeSubdomains="false">sylvan.apple.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/apple_root_ca" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

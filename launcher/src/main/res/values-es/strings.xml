@@ -960,4 +960,24 @@
     <string name="couldnt_join">No se pudo unir a %1$s</string>
     <string name="connecting_to_ellipsis">Conectando con %1$s…</string>
     <string name="joining">Uniéndose a %1$s</string>
+    <!-- Music scenes -->
+    <string name="music_scenes">Escenas musicales</string>
+    <string name="music_scenes_on">Vídeos aéreos mientras suena música</string>
+    <string name="beat_glow">Brillo al ritmo</string>
+    <string name="beat_glow_needs">Necesita el permiso de sonido: ejecuta la configuración en esta TV</string>
+    <string name="up_next">A continuación</string>
+    <string name="aerial_credit">%1$s · Vídeo aéreo de Apple</string>
+    <string name="scenes_up">Escenas</string>
+    <string name="scene_mix">Mezcla</string>
+    <string name="scene_landscapes">Paisajes</string>
+    <string name="scene_cities">Ciudades</string>
+    <string name="scene_space">Espacio</string>
+    <string name="scene_underwater">Bajo el agua</string>
+    <string name="saver_aerials">Vistas aéreas</string>
+    <string name="saver_aerial_quotes">Vistas aéreas y citas</string>
+    <string name="aerials_in_auto">Vistas aéreas en Auto</string>
+    <string name="photos_aerials_quotes_by_turns">fotos, vistas aéreas y citas por turnos</string>
+    <string name="aerial_by_apple">Vídeo aéreo de Apple</string>
+    <string name="with_data">%1$s · unos 2–3 GB de datos por hora</string>
+    <string name="aerials_use_data">Las vistas aéreas se transmiten desde Apple: unos 2–3 GB de datos por hora mientras se ven</string>
 </resources>

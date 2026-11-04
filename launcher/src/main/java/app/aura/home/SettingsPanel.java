@@ -50,6 +50,8 @@ final class SettingsPanel {
 
     final FrameLayout panel;
     private final Activity act;
+    /** The request code for the beat glow's sound permission, answered in HomeActivity. */
+    static final int BEAT_ASK = 42;
     private final Host host;
     private final LinearLayout head, rows;
     private final ScrollView scroll;
@@ -642,16 +644,60 @@ final class SettingsPanel {
                 }
                 toggle(act.getString(R.string.sky_moments), Prefs.MOMENTS, act.getString(R.string.on), act.getString(R.string.off), "moments");
             }
+            // while a song plays and home rests: Apple's aerial videos behind a fuller player (Android 7+)
+            if (android.os.Build.VERSION.SDK_INT >= 24) {
+                add(act.getString(R.string.music_scenes), act.getString(R.string.with_data, act.getString(Prefs.on(act, Prefs.SCENES) ? R.string.music_scenes_on : R.string.off)), Prefs.SCENES, () -> {
+                    Prefs.set(act, Prefs.SCENES, !Prefs.on(act, Prefs.SCENES));
+                    // they stream: said once more as they come on, not only in small print
+                    if (Prefs.on(act, Prefs.SCENES)) host.hud(R.drawable.ic_info, act.getString(R.string.aerials_use_data));
+                    build();
+                    focusTag(Prefs.SCENES);
+                });
+                if (Prefs.on(act, Prefs.SCENES)) {
+                    // which aerials: all of them, or only landscapes, cities, space or underwater
+                    final List<String> kinds = java.util.Arrays.asList(Aerials.KINDS);
+                    add(act.getString(R.string.scenes_up), act.getString(Aerials.KIND_NAMES[kinds.indexOf(Aerials.kind(act))]), Prefs.SCENE_KIND, () -> {
+                        String next = kinds.get((kinds.indexOf(Aerials.kind(act)) + 1) % kinds.size());
+                        Prefs.of(act).edit().putString(Prefs.SCENE_KIND, next).apply();
+                        build();
+                        focusTag(Prefs.SCENE_KIND);
+                    });
+                    boolean can = BeatGlow.allowed(act);
+                    add(act.getString(R.string.beat_glow), !can ? act.getString(R.string.beat_glow_needs)
+                            : Prefs.on(act, Prefs.BEAT) ? act.getString(R.string.on) : act.getString(R.string.off), Prefs.BEAT, () -> {
+                        // reading the TV's sound needs a permission: setup grants it, or Android asks here
+                        if (!BeatGlow.allowed(act)) act.requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, BEAT_ASK);
+                        else Prefs.set(act, Prefs.BEAT, !Prefs.on(act, Prefs.BEAT));
+                        build();
+                        focusTag(Prefs.BEAT);
+                    });
+                }
+            }
             // the screensaver's scene: the photographs, the quotes, or both by turns
             final List<String> modes = java.util.Arrays.asList(Prefs.SAVERS);
             String mode = Prefs.saver(act);
-            add(act.getString(R.string.screensaver), act.getString(Prefs.SAVER_NAMES[modes.indexOf(mode)])
-                    + (mode.equals("auto") ? " · " + act.getString(R.string.photographs_and_quotes_by_turns) : ""), Prefs.SAVER, () -> {
+            String saverText = act.getString(Prefs.SAVER_NAMES[modes.indexOf(mode)])
+                    + (mode.equals("auto") ? " · " + act.getString(Prefs.aerialSaver(act, mode) ? R.string.photos_aerials_quotes_by_turns
+                    : R.string.photographs_and_quotes_by_turns) : "");
+            add(act.getString(R.string.screensaver), Prefs.aerialSaver(act, mode) ? act.getString(R.string.with_data, saverText) : saverText, Prefs.SAVER, () -> {
                 String next = modes.get((modes.indexOf(Prefs.saver(act)) + 1) % modes.size());
+                // aerials need Android 7: older TVs step past them
+                while (android.os.Build.VERSION.SDK_INT < 24 && next.startsWith("aerial")) next = modes.get((modes.indexOf(next) + 1) % modes.size());
                 Prefs.of(act).edit().putString(Prefs.SAVER, next).apply();
+                if (next.startsWith("aerial")) host.hud(R.drawable.ic_info, act.getString(R.string.aerials_use_data));
                 build();
                 focusTag(Prefs.SAVER);
             });
+            // Auto can take the aerials into its turns: asked for, as they stream
+            if (mode.equals("auto") && android.os.Build.VERSION.SDK_INT >= 24) {
+                boolean in = Prefs.on(act, Prefs.AERIALS_AUTO);
+                add(act.getString(R.string.aerials_in_auto), act.getString(R.string.with_data, act.getString(in ? R.string.on : R.string.off)), Prefs.AERIALS_AUTO, () -> {
+                    Prefs.set(act, Prefs.AERIALS_AUTO, !Prefs.on(act, Prefs.AERIALS_AUTO));
+                    if (Prefs.on(act, Prefs.AERIALS_AUTO)) host.hud(R.drawable.ic_info, act.getString(R.string.aerials_use_data));
+                    build();
+                    focusTag(Prefs.AERIALS_AUTO);
+                });
+            }
             // the TV's own screensaver settings, here instead of three menus deep in Android's
             if (Ambient.canSet(act)) {
                 boolean mine = Ambient.chosen(act);

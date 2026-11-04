@@ -278,4 +278,25 @@ final class Ui {
     static float clamp(float v, float lo, float hi) {
         return v < lo ? lo : v > hi ? hi : v;
     }
+
+    /** A picture's average colour, nudged towards something with a little life in it (a cover, a show's art). */
+    static int tone(Bitmap b, int fallback) {
+        if (b == null) return fallback;
+        Bitmap one = Bitmap.createScaledBitmap(b, 6, 4, true);
+        long r = 0, g = 0, bl = 0;
+        for (int y = 0; y < 4; y++) {
+            for (int x = 0; x < 6; x++) {
+                int p = one.getPixel(x, y);
+                r += Color.red(p);
+                g += Color.green(p);
+                bl += Color.blue(p);
+            }
+        }
+        if (one != b) one.recycle();
+        float[] hsv = new float[3];
+        Color.RGBToHSV((int) (r / 24), (int) (g / 24), (int) (bl / 24), hsv);
+        hsv[1] = Math.min(1f, Math.max(0.35f, hsv[1] * 1.3f));
+        hsv[2] = Math.max(0.45f, hsv[2]);
+        return Color.HSVToColor(hsv);
+    }
 }

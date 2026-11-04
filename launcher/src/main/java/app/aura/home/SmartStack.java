@@ -371,31 +371,10 @@ final class SmartStack extends FrameLayout {
         /** The left shade takes the artwork's own colour, deepened, so each card has its mood. */
         private void shade(Slide s) {
             // an app card is already its own colour; a show's artwork gives up its average
-            if (s.tone == 0) s.tone = s.mark != null ? s.color : tone(s.art, s.color);
+            if (s.tone == 0) s.tone = s.mark != null ? s.color : Ui.tone(s.art, s.color);
             int deep = Ui.mix(s.tone, 0xFF000000, 0.62f);
             tint.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, new int[]{
                     Ui.withAlpha(deep, 0xF0), Ui.withAlpha(deep, 0xA6), Ui.withAlpha(deep, 0x1F)}));
-        }
-
-        /** The artwork's average colour, nudged towards something with a little life in it. */
-        private static int tone(Bitmap b, int fallback) {
-            if (b == null) return fallback;
-            Bitmap one = Bitmap.createScaledBitmap(b, 6, 4, true);
-            long r = 0, g = 0, bl = 0;
-            for (int y = 0; y < 4; y++) {
-                for (int x = 0; x < 6; x++) {
-                    int p = one.getPixel(x, y);
-                    r += Color.red(p);
-                    g += Color.green(p);
-                    bl += Color.blue(p);
-                }
-            }
-            if (one != b) one.recycle();
-            float[] hsv = new float[3];
-            Color.RGBToHSV((int) (r / 24), (int) (g / 24), (int) (bl / 24), hsv);
-            hsv[1] = Math.min(1f, Math.max(0.35f, hsv[1] * 1.3f));
-            hsv[2] = Math.max(0.45f, hsv[2]);
-            return Color.HSVToColor(hsv);
         }
 
         /** An app's card: its colour as a deep gradient, its white mark on the right. */

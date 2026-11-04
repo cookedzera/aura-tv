@@ -30,6 +30,8 @@ public class Ambient extends DreamService implements Backdrop.Listener {
     private FrameLayout progress;
     private View progressFill;
     private Scene scene;
+    /** Apple's aerial videos, in the aerial scenes; null in the others. */
+    private AerialView aerial;
     private boolean ticking, photos, dreaming, firstCaption = true;
     private int turn;
     private final BroadcastReceiver tick = new BroadcastReceiver() {
@@ -220,6 +222,9 @@ public class Ambient extends DreamService implements Backdrop.Listener {
      */
     static volatile Runnable makeRoom;
 
+    /** The home screen's way to take its photographs back the moment the screensaver ends (see makeRoom). */
+    static volatile Runnable homeComing;
+
     /**
      * A TV where the screensaver's photographs and the home screen's shouldn't be held at once:
      * Android 7 and older (photographs count against Aura's own memory limit there, which is how
@@ -265,6 +270,11 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         main.removeCallbacks(rotate);
         stopScene();
         if (backdrop != null) backdrop.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE);
+        // with the screensaver's photographs let go, home takes its own back now, while the
+        // screensaver is still fading away: they used to wait until home was in front, so it came
+        // back dark for a moment before its photograph appeared
+        Runnable back = homeComing;
+        if (back != null) back.run();
         if (ticking) {
             unregisterReceiver(tick);
             ticking = false;
@@ -306,29 +316,29 @@ public class Ambient extends DreamService implements Backdrop.Listener {
     private MusicStrip music;
 
     /**
-     * Music left playing when the TV goes to rest: the quotes over the photographs, the quote a
-     * little higher, and the song in a quiet player beneath it, lined up with the words.
+     * Music left playing when the TV goes to rest: the song has the words, so the quotes step aside
+     * (the photographs or the aerials carry on alone) and the song sits in a quiet player above the
+     * clock. When it stops, the scene chosen comes back, quotes and all.
      */
     private void listen() {
         MediaWatch.Playing p = MediaWatch.now(this);
         if (p == null || !p.playing || p.controller == null || root == null || backdrop == null) return;
         main.removeCallbacks(rotate);
-        if (!(scene instanceof Sayings)) build("sayings");
-        if (scene instanceof Sayings) ((Sayings) scene).setCentre(0.38f);
+        if (scene instanceof Sayings) build(aerial != null ? "aerials" : "photos");
         music = new MusicStrip(this);
         FrameLayout.LayoutParams ml = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 android.view.Gravity.BOTTOM | android.view.Gravity.START);
-        // the quote's own left edge (150 of 1080 lines), and clear of the hairline at the foot
-        ml.leftMargin = Math.round(getResources().getDisplayMetrics().heightPixels * 150f / 1080f);
-        ml.bottomMargin = Ui.dp(64);
+        // above the clock and the caption, lined up with them, as on the home screen's photo mode
+        ml.leftMargin = Ui.dp(64);
+        ml.bottomMargin = Ui.dp(196);
         root.addView(music, root.indexOfChild(veil), ml);
         final MusicStrip mine = music;
         music.start(p.controller, () -> {
-            // the music stopped: the quote settles back to the middle, the photographs carry on
+            // the music stopped: the scene chosen comes back, quotes and all
             if (music != mine) return;
             root.removeView(mine);
             music = null;
-            if (scene instanceof Sayings) ((Sayings) scene).setCentre(0.46f);
+            if (dreaming) show(choose(turn), true);
             if (Prefs.saver(this).equals("auto")) main.postDelayed(rotate, SCENE_MS);
         });
     }
@@ -339,6 +349,11 @@ public class Ambient extends DreamService implements Backdrop.Listener {
     private String choose(int n) {
         String mode = Prefs.saver(this);
         if (!mode.equals("auto")) return mode;
+        // with aerials asked for: the photographs, the aerials, then the quotes over them
+        if (Prefs.aerialSaver(this, mode)) {
+            int t = Compat.mod(n, 3);
+            return t == 0 ? "photos" : t == 1 ? "aerials" : "aerial_sayings";
+        }
         return Compat.mod(n, 2) == 0 ? "photos" : "sayings";
     }
 
@@ -358,10 +373,34 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         stopScene();
         stage.removeAllViews();
         scene = null;
-        // both are the drifting photographs; the quotes lie over them
+        aerial = null;
+        // the drifting photographs lie beneath every scene: the aerials load over them, out of sight,
+        // and they're what shows if the network can't bring a video
         photos = true;
         stage.addView(backdrop, full());
-        if (kind.equals("sayings")) {
+        boolean aerials = kind.startsWith("aerial") && android.os.Build.VERSION.SDK_INT >= 24;
+        if (aerials) {
+            aerial = new AerialView(this, false, new AerialView.Listener() {
+                @Override
+                public void shown(Aerials.Video v) {
+                    // the photographs rest beneath the video (nothing drawn for nothing)
+                    photos = false;
+                    backdrop.stop();
+                    progress.setVisibility(View.GONE);
+                    story.set(getString(R.string.aerial_by_apple), v.label, "", "", 0, true);
+                    if (scene instanceof Sayings) ((Sayings) scene).turnNow();
+                }
+
+                @Override
+                public void lost() {
+                    photos = true;
+                    if (dreaming) backdrop.start();
+                    progress.setVisibility(View.VISIBLE);
+                }
+            });
+            stage.addView(aerial, full());
+        }
+        if (kind.equals("sayings") || kind.equals("aerial_sayings")) {
             scene = new Sayings(this);
             stage.addView(scene, full());
         }
@@ -375,10 +414,12 @@ public class Ambient extends DreamService implements Backdrop.Listener {
     private void startScene() {
         if (scene != null) scene.start();
         backdrop.start();
+        if (aerial != null) aerial.next(Aerials.kind(this));
     }
 
     private void stopScene() {
         if (scene != null) scene.stop();
         backdrop.stop();
+        if (aerial != null) aerial.release();
     }
 }

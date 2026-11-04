@@ -42,6 +42,8 @@ if ($sdk -ge 27) {
 }
 # Continue Watching reads Android TV's Watch Next list
 & $adb -s $Tv shell pm grant app.aura.home android.permission.READ_TV_LISTINGS
+# Music scenes' beat glow reads the TV's sound (only while it shows, nothing is kept)
+& $adb -s $Tv shell pm grant app.aura.home android.permission.RECORD_AUDIO
 # the Wi-Fi sheet reads the connected network's name from the Wi-Fi service's status report, because
 # Android 11 hides it from apps whenever location services are off
 & $adb -s $Tv shell pm grant app.aura.home android.permission.DUMP
