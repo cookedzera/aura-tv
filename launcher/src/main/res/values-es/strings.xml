@@ -258,6 +258,9 @@
 
     <!-- Your photos from the phone -->
     <string name="not_a_photo_the_tv_can_read">No es una foto que la TV pueda leer</string>
+    <string name="heic_needs_android_9">Una foto HEIC de iPhone: esta TV las lee desde Android 9. En el iPhone, Ajustes, Cámara, Formatos, Más compatible guarda las fotos nuevas como JPEG.</string>
+    <string name="drop_shut">Este código se ha cerrado</string>
+    <string name="drop_shut_new_code">Demasiados intentos con un código incorrecto. Sal de esta página y vuelve a abrirla para obtener uno nuevo.</string>
     <string name="your_gif">Tu GIF</string>
     <string name="your_photo">Tu foto</string>
 

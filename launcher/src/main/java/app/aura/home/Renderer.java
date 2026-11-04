@@ -178,24 +178,53 @@ final class Renderer {
                 lock.setReferenceCounted(false);
                 lock.acquire();
             }
-            // IPv4 by name: an unnamed address opens an IPv6 socket on Android, whose join to this IPv4
-            // group failed without a word, so searches reached only the TV's own Cast service on 1900
-            MulticastSocket ms = new MulticastSocket(null);
-            ms.setReuseAddress(true);
-            ms.bind(new InetSocketAddress(InetAddress.getByName("0.0.0.0"), SSDP_PORT));
-            NetworkInterface ni = lan();
-            if (ni != null) {
-                ms.setNetworkInterface(ni);
-                ms.joinGroup(new InetSocketAddress(InetAddress.getByName(GROUP), SSDP_PORT), ni);
-            } else {
-                ms.joinGroup(InetAddress.getByName(GROUP));
-            }
+            MulticastSocket ms = joinSsdp();
+            if (ms == null) return;
             ssdp = ms;
             new SafeThread(this::listen, "dlna-ssdp").start();
             new SafeThread(this::announce, "dlna-notify").start();
         } catch (IOException e) {
             Trouble.caught("DLNA", e);
         }
+    }
+
+    /**
+     * The discovery group, joined on the TV's network; null if DLNA was switched off meanwhile.
+     * Just after the TV starts, its Wi-Fi may not be up yet and Android refuses the join ("no such
+     * device"): it's tried again every 15 s until the network is there. Before, DLNA stayed deaf
+     * (phones never found the TV) until Aura next started, and a problem was noted at every boot.
+     */
+    private MulticastSocket joinSsdp() throws IOException {
+        IOException last = null;
+        for (int attempt = 0; on && attempt < 40; attempt++) {
+            MulticastSocket ms = null;
+            try {
+                // IPv4 by name: an unnamed address opens an IPv6 socket on Android, whose join to this IPv4
+                // group failed without a word, so searches reached only the TV's own Cast service on 1900
+                ms = new MulticastSocket(null);
+                ms.setReuseAddress(true);
+                ms.bind(new InetSocketAddress(InetAddress.getByName("0.0.0.0"), SSDP_PORT));
+                NetworkInterface ni = lan(app);
+                if (ni != null) {
+                    ms.setNetworkInterface(ni);
+                    ms.joinGroup(new InetSocketAddress(InetAddress.getByName(GROUP), SSDP_PORT), ni);
+                } else {
+                    ms.joinGroup(InetAddress.getByName(GROUP));
+                }
+                return ms;
+            } catch (IOException e) {
+                close(ms);
+                last = e;
+                try {
+                    Thread.sleep(15_000);
+                } catch (InterruptedException ie) {
+                    return null;
+                }
+            }
+        }
+        // ten minutes without a network to join: noted once
+        if (last != null && on) throw last;
+        return null;
     }
 
     private void stop() {
@@ -294,12 +323,12 @@ final class Renderer {
 
     private String location() {
         ServerSocket s = http;
-        String ip = Drop.address();
+        String ip = Drop.address(app);
         return s == null || ip == null ? null : "http://" + ip + ":" + s.getLocalPort() + "/dlna/desc.xml";
     }
 
-    private static NetworkInterface lan() {
-        String ip = Drop.address();
+    private static NetworkInterface lan(Context c) {
+        String ip = Drop.address(c);
         if (ip == null) return null;
         try {
             return NetworkInterface.getByInetAddress(InetAddress.getByName(ip));

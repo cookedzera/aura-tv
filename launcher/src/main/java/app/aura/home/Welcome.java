@@ -860,7 +860,7 @@ final class Welcome extends FrameLayout {
         first.setSingleLine(false);
         first.setMaxWidth(Ui.dp(760));
         col.addView(first, wrap(10));
-        String ip = Drop.address();
+        String ip = Drop.address(act);
         TextView code = Ui.text(act, 15, android.graphics.Typeface.MONOSPACE, 0xFFFFFFFF);
         code.setSingleLine(false);
         code.setText("adb connect " + (ip != null ? ip : "<the TV's IP>") + ":5555\nadb shell pm grant " + act.getPackageName()

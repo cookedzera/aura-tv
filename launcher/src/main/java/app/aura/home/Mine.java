@@ -111,7 +111,8 @@ final class Mine {
             String id = Long.toString(System.currentTimeMillis(), 36) + Integer.toString(RND.nextInt(1296), 36);
             boolean gif = isGif(part);
             Bitmap still = decode(part);
-            if (still == null) throw new Unsupported(c.getString(R.string.not_a_photo_the_tv_can_read));
+            // an iPhone's HEIC photo: Android reads those from 9 on; before that, say what to change
+            if (still == null) throw new Unsupported(c.getString(isHeif(part) ? R.string.heic_needs_android_9 : R.string.not_a_photo_the_tv_can_read));
             File out = new File(dir(c), id + (gif ? ".gif" : ".jpg"));
             Bitmap shown = gif ? still : compose(rotate(still, orientation(part)));
             if (gif) {
@@ -210,6 +211,16 @@ final class Mine {
         try (InputStream in = new FileInputStream(f)) {
             return in.read(head) == 4 && head[0] == 'G' && head[1] == 'I' && head[2] == 'F' && head[3] == '8';
         }
+    }
+
+    /** HEIC or HEIF, as an iPhone takes them by default: its file says "ftyp" then the brand. */
+    private static boolean isHeif(File f) throws IOException {
+        byte[] head = new byte[12];
+        try (InputStream in = new FileInputStream(f)) {
+            if (in.read(head) != 12 || head[4] != 'f' || head[5] != 't' || head[6] != 'y' || head[7] != 'p') return false;
+        }
+        String brand = new String(head, 8, 4, java.nio.charset.StandardCharsets.US_ASCII);
+        return brand.startsWith("hei") || brand.startsWith("hev") || brand.equals("mif1") || brand.equals("msf1");
     }
 
     /** Decoded no larger than it needs to be to fill the TV (a GIF gives its first frame). */

@@ -89,4 +89,36 @@ public class PhonePageTest {
         out.append("after 40 wrong codes: closed and noted\n");
         try (java.io.FileWriter w = new java.io.FileWriter("target/phone.txt")) { w.write(out.toString()); }
     }
+
+    /**
+     * A phone's browser asks for its icons at every load (three on an iPhone): scanning a few times
+     * or reloading must not shut the page. Real guesses still do, and the TV is told.
+     */
+    @Test
+    public void browserIconsDontShutThePage() throws Exception {
+        Context c = RuntimeEnvironment.getApplication();
+        final boolean[] shut = {false};
+        Drop d = new Drop(c, new Drop.Quiet() {
+            @Override
+            public void onShut() {
+                shut[0] = true;
+            }
+        });
+        int[] code = new int[1];
+        String[] icons = {"/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png", "/apple-touch-icon-120x120.png"};
+        for (int i = 0; i < 60; i++) ask(d, icons[i % icons.length], code);
+        java.lang.reflect.Field mf = Drop.class.getDeclaredField("misses");
+        mf.setAccessible(true);
+        assertEquals("icons aren't guesses", 0, ((java.util.concurrent.atomic.AtomicInteger) mf.get(d)).get());
+        for (int i = 0; i < 40; i++) ask(d, "/guess" + i, code);
+        org.robolectric.shadows.ShadowLooper.idleMainLooper();
+        assertTrue("the TV is told the page closed", shut[0]);
+    }
+
+    /** The address in the code is an IPv4 address found through Android (or none, with no network). */
+    @Test
+    public void addressComesFromTheNetwork() {
+        String ip = Drop.address(RuntimeEnvironment.getApplication());
+        assertTrue("an IPv4 address or none: " + ip, ip == null || ip.matches("\\d+\\.\\d+\\.\\d+\\.\\d+"));
+    }
 }

@@ -73,6 +73,10 @@ final class Drop {
 
         default void onPairCode(String code) {
         }
+
+        /** Too many requests came with the wrong code: the page closed, and a new code is needed. */
+        default void onShut() {
+        }
     }
 
     /** A listener for the small pages (a key, a backup, a tile's picture): the photo calls do nothing. */
@@ -137,7 +141,7 @@ final class Drop {
 
     /** Opens the server; returns the link to show, or null when the TV has no local address. */
     String start() {
-        String ip = address();
+        String ip = address(app);
         if (ip == null) return null;
         ServerSocket ss = null;
         for (int port : new int[]{PORT, 0}) {
@@ -201,11 +205,14 @@ final class Drop {
             if (!target.equals(base) && !target.startsWith(base + "/")) {
                 send(s, 404, "text/html; charset=utf-8", expired());
                 // the code in the link is all that guards it: someone on the network trying codes
-                // finds the door shut after a few dozen tries (a phone from the QR code never misses
-                // more than its browser's request for an icon)
-                if (misses.incrementAndGet() == MAX_MISSES) {
+                // finds the door shut after a few dozen tries. What a phone's browser asks for by
+                // itself doesn't count: its icons (three on an iPhone, at every load) and newer
+                // Chrome's try at a secure connection first (not HTTP at all). Counted, a few scans
+                // or reloads shut the page with nothing said on the TV
+                if (guess(method, target) && misses.incrementAndGet() == MAX_MISSES) {
                     Trouble.note("PHONE LINK", "closed after " + MAX_MISSES + " requests with the wrong code");
                     stop();
+                    main.post(listener::onShut);
                 }
                 return;
             }
@@ -503,6 +510,12 @@ final class Drop {
                 .getBytes(StandardCharsets.UTF_8));
     }
 
+    /** A request that could be someone trying codes, rather than a browser fetching its icons. */
+    private static boolean guess(String method, String target) {
+        return (method.equals("GET") || method.equals("POST") || method.equals("HEAD")) && target.startsWith("/")
+                && !target.matches("/(favicon\\.ico|apple-touch-icon[-a-z0-9]*\\.png|robots\\.txt|\\.well-known/.*)");
+    }
+
     private byte[] expired() {
         return ("<!doctype html><meta name=viewport content='width=device-width'><body style='background:#05070c;"
                 + "color:#fff;font:16px -apple-system,system-ui,sans-serif;display:grid;place-items:center;height:90vh;"
@@ -513,8 +526,48 @@ final class Drop {
 
     // ---- plumbing ----------------------------------------------------------------------------
 
-    /** The TV's address on the local network, preferring Wi-Fi and Ethernet. */
-    static String address() {
+    /**
+     * The TV's address on the local network: that of the Wi-Fi or Ethernet network Android is
+     * using. Picking by the connection's name alone ("wlan", "eth") missed TVs that name theirs
+     * otherwise, and the address of a side connection (Wi-Fi Direct, a VPN, USB) went into the
+     * code instead: a phone scanning it couldn't reach the TV.
+     */
+    static String address(Context c) {
+        android.net.ConnectivityManager cm = c != null ? Compat.svc(c, android.net.ConnectivityManager.class) : null;
+        if (cm != null) {
+            try {
+                // a VPN's network is the active one while it's up: the Wi-Fi or Ethernet under it is wanted
+                android.net.Network active = android.os.Build.VERSION.SDK_INT >= 23 ? cm.getActiveNetwork() : null;
+                String first = null;
+                for (android.net.Network n : cm.getAllNetworks()) {
+                    android.net.NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+                    if (caps == null || caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
+                            || !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+                            && !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)) continue;
+                    String ip = ipv4(cm.getLinkProperties(n));
+                    if (ip == null) continue;
+                    if (n.equals(active)) return ip;
+                    if (first == null) first = ip;
+                }
+                if (first != null) return first;
+            } catch (RuntimeException ignored) {
+                // Android wouldn't say: the connections are looked at one by one, as before
+            }
+        }
+        return byName();
+    }
+
+    private static String ipv4(android.net.LinkProperties lp) {
+        if (lp == null) return null;
+        for (android.net.LinkAddress la : lp.getLinkAddresses()) {
+            InetAddress a = la.getAddress();
+            if (a instanceof Inet4Address && !a.isLoopbackAddress() && !a.isLinkLocalAddress()) return a.getHostAddress();
+        }
+        return null;
+    }
+
+    /** The first address on a connection named like Wi-Fi or Ethernet, else any on the local network. */
+    private static String byName() {
         String any = null;
         try {
             for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {

@@ -2008,6 +2008,15 @@ final class SettingsPanel {
                 dropSub.setText(act.getString(R.string.confirm_on_the_tv_to));
                 dropMeter.setVisibility(View.INVISIBLE);
             }
+
+            @Override
+            public void onShut() {
+                // the page closed itself: said here, or the phone just stops reaching the TV
+                keepDrop = false;
+                dropTitle.setText(act.getString(R.string.drop_shut));
+                dropSub.setText(act.getString(R.string.drop_shut_new_code));
+                dropMeter.setVisibility(View.INVISIBLE);
+            }
         });
         dropCard = dropCard(drop.start());
         build();
