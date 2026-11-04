@@ -4,7 +4,7 @@
 # Compat.java and version checks keep newer calls off older TVs; features with no 5.1 counterpart switch off.
 # -TestPackage builds a copy under another package name (app.aura.home.test), installed beside the
 # real Aura: a first install to test from scratch without wiping anyone's settings
-param([int]$VersionCode = 111, [string]$VersionName = "7.6.1", [switch]$TestPackage)
+param([int]$VersionCode = 112, [string]$VersionName = "7.7", [switch]$TestPackage)
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot

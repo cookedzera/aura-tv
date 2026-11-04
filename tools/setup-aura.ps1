@@ -47,6 +47,8 @@ if ($sdk -ge 27) {
 # the Wi-Fi sheet reads the connected network's name from the Wi-Fi service's status report, because
 # Android 11 hides it from apps whenever location services are off
 & $adb -s $Tv shell pm grant app.aura.home android.permission.DUMP
+# the remote's profile button and held volume keys while the Home button service filters keys
+& $adb -s $Tv shell pm grant app.aura.home android.permission.READ_LOGS
 # the process report (which apps hold memory, for Control Center's memory tile) also needs this granted
 & $adb -s $Tv shell pm grant app.aura.home android.permission.PACKAGE_USAGE_STATS
 # Settings > Block ads points the TV's Private DNS at AdGuard DNS; this lets Aura change that one setting
