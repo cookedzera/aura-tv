@@ -63,6 +63,8 @@ final class MusicScene extends FrameLayout {
     private final Button prev, play, next, sleep, quiet;
     private final TextView[] kinds = new TextView[Aerials.KINDS.length];
     Runnable onQuiet;
+    /** A video now covers the screen (or stopped covering it): home rests the photograph beneath, or starts it again. */
+    Runnable onShown, onLost;
 
     private MediaController controller;
     private MediaMetadata md;
@@ -84,12 +86,14 @@ final class MusicScene extends FrameLayout {
                 credit.setText(getContext().getString(R.string.aerial_credit, v.label));
                 // over a video the beat brightens the picture; a light would only lie on it as a haze
                 if (glow != null) glow.light = false;
+                if (onShown != null) onShown.run();
             }
 
             @Override
             public void lost() {
                 credit.setText("");
                 if (glow != null) glow.light = true;
+                if (onLost != null) onLost.run();
             }
         });
         addView(aerial, match());
@@ -276,6 +280,8 @@ final class MusicScene extends FrameLayout {
             if (v != aerial) v.animate().alpha(0f).setDuration(220).setStartDelay(0).setInterpolator(Ui.SOFT).start();
         }
         if (aerial.showing()) {
+            // the photograph beneath moves again as the video lifts away
+            if (onLost != null) onLost.run();
             aerial.exit(() -> {
                 aerial.release();
                 if (gone != null) gone.run();
@@ -381,7 +387,7 @@ final class MusicScene extends FrameLayout {
             final String want = uri;
             final Context app = getContext().getApplicationContext();
             new SafeThread(() -> {
-                Bitmap loaded = Continue.load(app, want);
+                Bitmap loaded = Continue.load(app, want, Continue.COVER_PX);
                 if (loaded == null) return;
                 MediaWatch.cacheArt(want, loaded);
                 handler.post(() -> {
@@ -441,8 +447,8 @@ final class MusicScene extends FrameLayout {
         }
         long pos = st.getPosition();
         long updated = st.getLastPositionUpdateTime();
-        float speed = st.getPlaybackSpeed();
-        if (on && updated > 0) pos += (long) (Math.max(0, SystemClock.elapsedRealtime() - updated) * (speed > 0f ? speed : 1f));
+        float speed = MediaWatch.speed(st);
+        if (on && updated > 0) pos += (long) (Math.max(0, SystemClock.elapsedRealtime() - updated) * speed);
         pos = Math.max(0, Math.min(dur, pos));
         bar.setVisibility(VISIBLE);
         bar.set(pos / (float) dur);

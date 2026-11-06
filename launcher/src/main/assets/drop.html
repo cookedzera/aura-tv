@@ -114,6 +114,7 @@
   <div class="queue" id="queue"></div>
 
   <h2><span>On your TV</span><span id="count"></span></h2>
+  <div class="hint" id="full" hidden>The TV keeps as many as it's set to. Remove some here, or raise the limit on the TV under Settings › From your phone.</div>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" hidden>Nothing yet. What you send appears here.</div>
   <div class="switch" id="only" role="switch" tabindex="0">
@@ -127,6 +128,8 @@
 const base = location.pathname.replace(/\/$/, '');
 const $ = id => document.getElementById(id);
 const MAX = 40 * 1024 * 1024, MAX_APK = 500 * 1024 * 1024;
+// how many the TV keeps (it says, with its list); the queue stops at that rather than sending into a full TV
+let keep = 60, full = false;
 
 async function refresh() {
   try {
@@ -148,7 +151,9 @@ async function refresh() {
       grid.appendChild(t);
     }
     $('empty').hidden = j.items.length > 0;
-    $('count').textContent = j.items.length ? j.items.length : '';
+    keep = j.keep || keep;
+    $('count').textContent = j.items.length ? j.items.length + ' of ' + keep : '';
+    $('full').hidden = j.items.length < keep;
     $('only').classList.toggle('on', j.only);
   } catch (e) { /* the TV closed the page */ }
 }
@@ -185,7 +190,11 @@ function send(file, el, i, n, title) {
       try { j = JSON.parse(x.responseText); } catch (e) {}
       if (x.status === 200 && j.ok && j.apk) { el.classList.add('done'); bar.style.width = '100%'; s.textContent = 'Sent · press Install on the TV'; }
       else if (x.status === 200 && j.ok) { el.classList.add('done'); bar.style.width = '100%'; s.textContent = 'On your TV · ' + j.title; }
-      else { el.classList.add('bad'); s.textContent = j.error || 'The TV couldn\'t take this one'; }
+      else {
+        el.classList.add('bad');
+        s.textContent = j.error || 'The TV couldn\'t take this one';
+        if (x.status === 409) full = true;
+      }
       done();
     };
     x.onerror = () => { el.classList.add('bad'); s.textContent = 'Lost the TV. Is its code still on screen?'; done(); };
@@ -199,7 +208,14 @@ $('files').addEventListener('change', async e => {
   if (!files.length) return;
   const title = files.length === 1 ? $('title').value.trim() : '';
   const rows = files.map(row);
+  full = false;
   for (let i = 0; i < files.length; i++) {
+    if (full && !/\.apk$/i.test(files[i].name || '')) {
+      // the TV said it's full: the rest wait, with a word, instead of failing one by one
+      rows[i].classList.add('bad');
+      rows[i].querySelector('.s').textContent = 'Not sent · the TV is full (' + keep + '). Remove some, or raise the limit on the TV under Settings › From your phone';
+      continue;
+    }
     await send(files[i], rows[i], i, files.length, title);
     refresh();
   }

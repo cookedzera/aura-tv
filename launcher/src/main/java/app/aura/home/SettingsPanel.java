@@ -114,7 +114,9 @@ final class SettingsPanel {
         head.addView(title, lp(0, 4));
         note = Ui.text(a, 12.5f, Ui.regular, 0xA6FFFFFF);
         note.setSingleLine(false);
-        note.setMaxLines(4);
+        // German runs long: a fifth line, and an ellipsis rather than a sentence cut mid-word
+        note.setMaxLines(5);
+        note.setEllipsize(android.text.TextUtils.TruncateAt.END);
         note.setMaxWidth(Ui.dp(280));
         note.setLineSpacing(Ui.dpf(3), 1f);
         head.addView(note, lp(0, 12));
@@ -222,6 +224,11 @@ final class SettingsPanel {
         open = true;
         page = "";
         entry = null;
+        disarm();
+        tvHomeCache = null;
+        // a fresh visit starts at the top, not where the last one was scrolled to
+        builtPage = "";
+        scroll.scrollTo(0, 0);
         panel.animate().cancel();
         build();
         panel.setVisibility(View.VISIBLE);
@@ -384,8 +391,18 @@ final class SettingsPanel {
         return false;
     }
 
+    /**
+     * Every "Press OK again" is forgotten. One armed on a page and left there must not fire on a
+     * single press next time the page is seen, least of all Remove Aura or a profile's removal.
+     */
+    private void disarm() {
+        confirmRetire = confirmRemove = confirmAdbOff = confirmSignOut = confirmClear = confirmClearTrouble = confirmCatDelete = false;
+        confirmProfile = confirmPhoto = confirmKey = dbConfirm = null;
+    }
+
     private void go(String p) {
-        confirmRetire = false;
+        disarm();
+        if (p.equals("tv")) tvHomeCache = null;
         boolean back = p.isEmpty() || page.equals("photos") && p.equals("drop")
                 || (page.equals("widgets") || page.equals("keys") || page.equals("cats")) && p.equals("home")
                 || page.equals("cat") && p.equals("cats")
@@ -472,8 +489,9 @@ final class SettingsPanel {
                 focusTag(Categories.ROWS);
             });
             if (Categories.on(act)) {
+                // the rows home really shows: a row with nothing in it isn't one of them
                 int shown = 0;
-                for (Categories.Cat k : Categories.all(act)) if (!k.hidden) shown++;
+                for (Categories.Cat k : Categories.all(act)) if (!k.hidden && !catEmpty(k)) shown++;
                 add(act.getString(R.string.categories), act.getResources().getQuantityString(R.plurals.n_rows, shown, shown), "cats", () -> go("cats"));
             }
             if (tvos) add(act.getString(R.string.sidebar), Prefs.dockSidebar(act) ? act.getString(R.string.slides_in_from_the_left) : act.getString(R.string.hidden_up_for_the_top), "dockside", () -> {
@@ -605,7 +623,10 @@ final class SettingsPanel {
                     focusTag("pr:kids:" + pr.id);
                 });
             }
-            if (Profiles.hasPin(act)) add(act.getString(R.string.parents_pin), act.getString(R.string.change), "pr:pin", () -> {
+            // a kids profile restored from a backup onto a TV with no PIN yet: the row is still the way to set one
+            boolean anyKids = false;
+            for (Profiles.Profile pr : Profiles.all(act)) anyKids |= pr.kids;
+            if (Profiles.hasPin(act) || anyKids) add(act.getString(R.string.parents_pin), act.getString(Profiles.hasPin(act) ? R.string.change : R.string.set_one), "pr:pin", () -> {
                 pinFor = null;
                 askPin();
             });
@@ -709,6 +730,8 @@ final class SettingsPanel {
                     add(act.getString(R.string.photo_sources), on.isEmpty() ? act.getString(R.string.none_northern_lights_only) : act.getString(R.string.n_on, on.size()), "sources", () -> go("sources"));
                 }
                 toggle(act.getString(R.string.sky_moments), Prefs.MOMENTS, act.getString(R.string.on), act.getString(R.string.off), "moments");
+                // how soft the photograph sits behind the grid while browsing
+                toggle(act.getString(R.string.photo_sharpness), Prefs.PHOTO_SHARP, act.getString(R.string.sharp), act.getString(R.string.soft), "sharp");
             }
             // while a song plays and home rests: Apple's aerial videos behind a fuller player (Android 7+)
             if (android.os.Build.VERSION.SDK_INT >= 24) {
@@ -763,6 +786,10 @@ final class SettingsPanel {
                     build();
                     focusTag(Prefs.AERIALS_AUTO);
                 });
+            }
+            // on a hotspot or a capped plan the aerials stand aside unless you say otherwise
+            if (android.os.Build.VERSION.SDK_INT >= 24 && (Prefs.aerialSaver(act, mode) || Prefs.on(act, Prefs.SCENES))) {
+                toggle(act.getString(R.string.aerials_on_metered), Prefs.AERIALS_METERED, act.getString(R.string.on), act.getString(R.string.skipped_photos_show_instead), "saver");
             }
             // the TV's own screensaver settings, here instead of three menus deep in Android's
             if (Ambient.canSet(act)) {
@@ -836,13 +863,30 @@ final class SettingsPanel {
             note.setText(act.getString(R.string.point_your_phones_camera_at));
             LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200));
             cl.bottomMargin = Ui.dp(8);
+            // the page may have been left open past the phone page's idle time: a card again, with
+            // the code the page still serves, rather than nothing to add
+            if (dropCard == null) dropCard = dropCard(drop != null ? drop.url() : null);
             rows.addView(dropCard, cl);
             toggle(act.getString(R.string.show), Prefs.MINE_ONLY, act.getString(R.string.only_your_photos), act.getString(R.string.everything), "photos");
-            int n = Mine.count(act);
-            if (n > 0) add(act.getString(R.string.your_photos), act.getString(R.string.n_on_the_tv, n), "photos", () -> {
+            int n = Mine.count(act), keeps = Mine.keep(act);
+            if (n > 0) add(act.getString(R.string.your_photos), act.getString(R.string.n_of_m_on_the_tv, n, keeps), "photos", () -> {
                 confirmPhoto = null;
                 confirmClear = false;
                 go("photos");
+            });
+            // how many the TV keeps before the phone page says it's full: as far as its storage allows
+            add(act.getString(R.string.keep_up_to), act.getResources().getQuantityString(R.plurals.n_photos, keeps, keeps), "keep", () -> {
+                // the next step up that the storage has room for, else round to the smallest
+                int ceiling = Mine.keepCeiling(act), cur = Mine.keep(act), next = Mine.KEEP_CHOICES[0];
+                for (int choice : Mine.KEEP_CHOICES) {
+                    if (choice > cur && choice <= ceiling) {
+                        next = choice;
+                        break;
+                    }
+                }
+                Mine.setKeep(act, next);
+                build();
+                focusTag("keep");
             });
         } else if (page.equals("photos")) {
             Ui.fit(title, act.getString(R.string.your_photos), Ui.dp(300), 52, 30);
@@ -964,7 +1008,7 @@ final class SettingsPanel {
             section(act.getString(R.string.rows_on_home));
             for (Categories.Cat k : Categories.all(act)) {
                 final String id = k.id;
-                add(Categories.name(act, k), k.hidden ? act.getString(R.string.hidden) : act.getString(Categories.sortName(k.sort)), "cat:" + id, () -> {
+                add(Categories.name(act, k), k.hidden ? act.getString(R.string.hidden) : catEmpty(k) ? act.getString(R.string.empty_not_shown) : act.getString(Categories.sortName(k.sort)), "cat:" + id, () -> {
                     catId = id;
                     confirmCatDelete = false;
                     go("cat");
@@ -1005,7 +1049,7 @@ final class SettingsPanel {
             add(act.getString(R.string.profile), Profiles.name(act), "profiles", host::whoIsWatching);
             add(act.getString(R.string.wallpaper), Prefs.on(act, Prefs.BLACK) ? act.getString(R.string.pure_black) : act.getString(R.string.photographs), "wallpaper", () -> go("wallpaper"));
             int mine = Mine.count(act);
-            add(act.getString(R.string.from_your_phone), mine > 0 ? act.getResources().getQuantityString(R.plurals.n_photos, mine, mine) : act.getString(R.string.photos_gifs_apps), "drop", this::openDrop);
+            add(act.getString(R.string.from_your_phone), mine > 0 ? act.getString(R.string.n_of_m_on_the_tv, mine, Mine.keep(act)) : act.getString(R.string.photos_gifs_apps), "drop", this::openDrop);
             toggle(act.getString(R.string.play_from_phones_pcs), Prefs.DLNA, act.getString(R.string.on_dlna), act.getString(R.string.off), "dlna");
             section(act.getString(R.string.home_screen_2));
             add(act.getString(R.string.home_screen), act.getString(R.string.name_tiles, act.getString(Prefs.TILE_NAMES[Math.max(0, java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act)))]
@@ -1509,14 +1553,15 @@ final class SettingsPanel {
         Power.setSleep(app, 0);
         if (Shield.allowed(app) && Shield.on(app)) Shield.set(app, false);
         if (Ambient.canSet(app) && Ambient.chosen(app)) Ambient.choose(app, false);
-        HomeKeys.set(app, false);
+        HomeKeys.setTakeover(app, false);
+        // without the secure-settings permission the service can only be switched off over debugging
+        final boolean keysOn = HomeKeys.on(app) && !HomeKeys.set(app, false);
         android.app.admin.DevicePolicyManager dpm = Compat.svc(app, android.app.admin.DevicePolicyManager.class);
         android.content.ComponentName admin = new android.content.ComponentName(app, SleepAdmin.class);
         if (dpm != null && dpm.isAdminActive(admin)) dpm.removeActiveAdmin(admin);
         host.hud(R.drawable.ic_info, act.getString(R.string.handing_the_tv_back));
-        final String home = Safety.original(app);
         new SafeThread(() -> {
-            if (Adb.on(app)) Safety.restoreHome(app);
+            if (Adb.on(app)) Safety.restoreHome(app, keysOn);
             // a moment for Android to let go of the admin before it's asked to uninstall
             android.os.SystemClock.sleep(800);
             act.runOnUiThread(() -> {
@@ -1571,6 +1616,15 @@ final class SettingsPanel {
         return pkg;
     }
 
+    /** Whether a category row would have no apps on home right now (All apps always has them). */
+    private boolean catEmpty(Categories.Cat k) {
+        if (k.id.equals(Categories.ALL)) return false;
+        java.util.Set<String> hidden = Prefs.hidden(act);
+        List<String> installed = new java.util.ArrayList<>();
+        for (AppRepo.App a : host.apps()) if (!hidden.contains(a.pkg)) installed.add(a.pkg);
+        return Categories.members(act, k, AppRepo.order(Prefs.of(act)), installed).isEmpty();
+    }
+
     /** Listens for the next button (Home button in apps does the listening), for thirty seconds. */
     private void teachKey() {
         if (teachingKey) return;
@@ -1602,15 +1656,17 @@ final class SettingsPanel {
         if (setupNote.isEmpty()) setupNote = Prefs.device(act).getString("setup_note", "");
         if (Adb.on(act)) add(act.getString(R.string.free_up_memory), act.getString(R.string.free_up_memory_sub), "debloat", () -> {
             dbMem = null;
+            dbFound = null;
             go("debloat");
         });
         if (Adb.on(act)) add(act.getString(R.string.switch_everything_on), setupNote.isEmpty() ? act.getResources().getQuantityString(R.plurals.n_extras, Adb.setup(act).length, Adb.setup(act).length) : setupNote, "adb:setup", this::adbSetup);
         // the TV's own home screen, switched off (or back on): Google TV's in its own words, any other by its name
-        String tvHome = Adb.on(act) ? Safety.tvHome(act) : null;
+        Object[] home = tvHomeInfo();
+        String tvHome = Adb.on(act) ? (String) home[0] : null;
         if (tvHome != null) {
             boolean gtv = tvHome.equals(Safety.GOOGLE_TV_HOME);
-            String name = Safety.tvHomeName(act);
-            if (Safety.tvHomeOn(act)) {
+            String name = (String) home[1];
+            if ((Boolean) home[2]) {
                 add(gtv ? act.getString(R.string.retire_google_tv_home) : act.getString(R.string.retire_tv_home_row, name),
                         confirmRetire ? act.getString(gtv ? R.string.press_ok_again_voice_search : R.string.press_ok_again)
                                 : act.getString(gtv ? R.string.voice_search_side_panel_accounts : R.string.retire_tv_home_sub),
@@ -1644,32 +1700,49 @@ final class SettingsPanel {
         }
     }
 
-    /** Free up memory: what each app uses now (read once a visit), the app asking for a second OK, a change under way. */
+    /**
+     * Free up memory: the apps the TV came with and what each uses now (both read once a visit, off
+     * the main thread: asking Android for every installed app took a good part of a second on a
+     * slow TV, and this page is drawn again on every OK), the app asking for a second OK, a change under way.
+     */
     private java.util.Map<String, Integer> dbMem;
+    private List<Debloat.Found> dbFound;
     private String dbConfirm;
     private boolean dbBusy, dbReading;
 
     private void buildDebloat() {
         Ui.fit(title, act.getString(R.string.free_up_memory), Ui.dp(300), 52, 30);
         note.setText(act.getString(R.string.debloat_note));
-        if (dbMem == null && !dbReading) {
+        if ((dbMem == null || dbFound == null) && !dbReading) {
             dbReading = true;
+            final android.content.Context app = act.getApplicationContext();
             new SafeThread(() -> {
-                java.util.Map<String, Integer> m = Debloat.memory();
+                List<Debloat.Found> f;
+                try {
+                    f = Debloat.present(app);
+                } catch (RuntimeException e) {
+                    // the list of apps too large for Android to hand over (older TVs): nothing to offer this time
+                    Trouble.caught("free up memory", e);
+                    f = new java.util.ArrayList<>();
+                }
+                final List<Debloat.Found> found = f;
+                final java.util.Map<String, Integer> m = Debloat.memory();
                 act.runOnUiThread(() -> {
+                    dbFound = found;
                     dbMem = m;
                     dbReading = false;
                     if (page.equals("debloat")) {
-                        // the sizes arrive: the list redrawn, focus kept on its row
-                        View f = act.getCurrentFocus();
-                        Object t = f != null ? f.getTag() : null;
+                        // the list arrives: redrawn, focus kept on its row
+                        View fv = act.getCurrentFocus();
+                        Object t = fv != null ? fv.getTag() : null;
                         build();
                         if (t instanceof String) focusTag((String) t);
                     }
                 });
-            }, "debloat-mem").start();
+            }, "debloat-read").start();
         }
-        List<Debloat.Found> found = Debloat.present(act);
+        if (dbFound == null) return;
+        List<Debloat.Found> found = dbFound;
         if (found.isEmpty()) {
             note.setText(act.getString(R.string.debloat_nothing));
             return;
@@ -1727,6 +1800,7 @@ final class SettingsPanel {
             act.runOnUiThread(() -> {
                 dbBusy = false;
                 dbMem = null;
+                dbFound = null;
                 host.hud(r && n > 0 ? R.drawable.ic_check : R.drawable.ic_info, !r ? act.getString(R.string.couldnt_reach_the_tvs_debugging)
                         : n == 0 ? act.getString(R.string.android_didnt_allow_that_change)
                         : act.getResources().getQuantityString(switchOff ? R.plurals.n_apps_off : R.plurals.n_apps_on, n, n));
@@ -1878,6 +1952,7 @@ final class SettingsPanel {
                 } else {
                     host.hud(R.drawable.ic_check, gtv ? act.getString(R.string.google_tv_home_is_back) : act.getString(R.string.tv_home_back, name));
                 }
+                tvHomeCache = null;
                 if (page.equals("tv")) {
                     build();
                     focusTag("adb:gtv");
@@ -1886,10 +1961,26 @@ final class SettingsPanel {
         }, "gtv-home").start();
     }
 
+    /**
+     * The TV's own home screen ({@code {package, name, switched on}}), asked of Android once a
+     * visit to the page: it is drawn a dozen times while debugging is set up, and each of the
+     * three questions was several calls into Android.
+     */
+    private Object[] tvHomeCache;
+
+    private Object[] tvHomeInfo() {
+        if (tvHomeCache == null) {
+            String pkg = Safety.tvHome(act);
+            tvHomeCache = new Object[]{pkg, pkg != null ? Safety.tvHomeName(act) : "", pkg != null && Safety.tvHomeOn(act)};
+        }
+        return tvHomeCache;
+    }
+
     private String adbNote() {
         if (confirmRetire) {
-            return Safety.GOOGLE_TV_HOME.equals(Safety.tvHome(act)) ? act.getString(R.string.voice_search_google_assistant_in)
-                    : act.getString(R.string.retire_tv_home_confirm, Safety.tvHomeName(act));
+            Object[] home = tvHomeInfo();
+            return Safety.GOOGLE_TV_HOME.equals(home[0]) ? act.getString(R.string.voice_search_google_assistant_in)
+                    : act.getString(R.string.retire_tv_home_confirm, (String) home[1]);
         }
         String s = adbState.isEmpty() && Adb.on(act) ? Adb.unguarded(act) ? Adb.OPEN_DOOR : Adb.OK : adbState;
         switch (s) {
@@ -1926,7 +2017,10 @@ final class SettingsPanel {
                     focusTag(Adb.on(act) ? "adb:setup" : "adb:connect");
                 }
             });
-        }, "adb-connect").start();
+        }, "adb-connect", () -> {
+            adbState = "";
+            if (page.equals("tv")) build();
+        }).start();
     }
 
     /** Runs the setup steps one by one, the row counting along; a step that fails is named. */
@@ -2227,7 +2321,12 @@ final class SettingsPanel {
                     if (page.equals("updates")) build();
                 });
             }
-        }, "update").start();
+        }, "update", () -> {
+            // an Error (out of memory on a big download) rather than an Exception: same answer
+            updateState = "error";
+            updateNote = act.getString(R.string.the_download_stopped_part_way);
+            if (page.equals("updates")) build();
+        }).start();
     }
 
     /** How to let Aura install updates on this TV, shown above the notes once Android said no. */
@@ -2247,7 +2346,18 @@ final class SettingsPanel {
     };
 
     private boolean keepDrop;
-    private final Runnable stopDropIdle = this::stopDropNow;
+    private final Runnable stopDropIdle = this::dropIdle;
+
+    /** The phone page has been idle a while: closed, unless it's still the page on screen. */
+    private void dropIdle() {
+        // still on the phone page (typing from the phone sets this timer even there): the page
+        // keeps its card and its code, and waits another while
+        if (isOpen() && (page.equals("drop") || page.equals("photos")) && drop != null) {
+            rows.postDelayed(stopDropIdle, 10 * 60_000L);
+            return;
+        }
+        stopDropNow();
+    }
 
     private void openDrop() {
         page = "drop";
@@ -2550,12 +2660,29 @@ final class SettingsPanel {
         rows.addView(p, l);
     }
 
-    /** The same, led by a small picture (a photo's thumbnail). */
+    /**
+     * A photo's thumbnail, led by a small picture: the one already read, or a blank that fills in a
+     * moment later, read behind the screen (sixty of them decoded as the page was drawn held it).
+     */
     private android.graphics.Bitmap photoThumb(String id) {
         android.graphics.Bitmap b = thumbs.get(id);
-        if (b == null && (b = android.graphics.BitmapFactory.decodeFile(Mine.thumb(act, id).getPath())) != null) thumbs.put(id, b);
-        return b;
+        if (b != null || !thumbsReading.add(id)) return b;
+        final String path = Mine.thumb(act, id).getPath();
+        new SafeThread(() -> {
+            final android.graphics.Bitmap read = android.graphics.BitmapFactory.decodeFile(path);
+            act.runOnUiThread(() -> {
+                thumbsReading.remove(id);
+                if (read == null || !isOpen()) return;
+                thumbs.put(id, read);
+                View row = rows.findViewWithTag("p:" + id);
+                View iv = row != null ? row.findViewWithTag("thumb") : null;
+                if (iv instanceof android.widget.ImageView) ((android.widget.ImageView) iv).setImageBitmap(read);
+            });
+        }, "photo-thumb").start();
+        return null;
     }
+
+    private final java.util.Set<String> thumbsReading = new java.util.HashSet<>();
 
     private void add(String label, String value, String tag, android.graphics.Bitmap thumb, Runnable run) {
         Pad p = new Pad(act, null, 16, 0f);
@@ -2565,10 +2692,13 @@ final class SettingsPanel {
         p.setTag(tag);
         LinearLayout r = new LinearLayout(act);
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(Ui.dp(thumb != null ? 6 : 16), 0, Ui.dp(16), 0);
-        if (thumb != null) {
+        boolean picture = thumb != null || tag.startsWith("p:");
+        r.setPadding(Ui.dp(picture ? 6 : 16), 0, Ui.dp(16), 0);
+        if (picture) {
             android.widget.ImageView iv = new android.widget.ImageView(act);
-            iv.setImageBitmap(thumb);
+            iv.setTag("thumb");
+            if (thumb != null) iv.setImageBitmap(thumb);
+            else iv.setBackgroundColor(0x14FFFFFF);
             iv.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
             iv.setClipToOutline(true);
             iv.setOutlineProvider(new android.view.ViewOutlineProvider() {

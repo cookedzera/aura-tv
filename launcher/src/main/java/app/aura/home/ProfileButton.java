@@ -32,6 +32,7 @@ final class ProfileButton {
     private static Process proc;
     private static long lastAt;
     private static boolean grantTried;
+    private static volatile long retryMs = 1000;
 
     private ProfileButton() { }
 
@@ -67,6 +68,7 @@ final class ProfileButton {
             return;
         }
         proc = p;
+        final long startedAt = SystemClock.elapsedRealtime();
         Thread t = new SafeThread(() -> {
             try (BufferedReader in = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
                 for (String line; (line = in.readLine()) != null; ) {
@@ -75,8 +77,20 @@ final class ProfileButton {
             } catch (Exception ignored) {
                 // stopped, or the log went away: the button just does what the firmware does
             }
+            boolean ours;
             synchronized (ProfileButton.class) {
-                if (proc == p) proc = null;
+                ours = proc == p;
+                if (ours) proc = null;
+            }
+            // the log reader ended on its own (logd restarted, or killed it): it comes back while the
+            // Home button service is still running, a little later each time it dies quickly
+            if (ours && HomeKeys.live) {
+                if (SystemClock.elapsedRealtime() - startedAt > 60_000) retryMs = 1000;
+                final long wait = retryMs;
+                retryMs = Math.min(retryMs * 2, 30_000);
+                main.postDelayed(() -> {
+                    if (HomeKeys.live && granted(c)) start(c);
+                }, wait);
             }
         }, "profile-button");
         t.setDaemon(true);

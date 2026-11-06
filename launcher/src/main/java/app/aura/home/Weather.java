@@ -94,9 +94,10 @@ final class Weather {
             JSONObject o = new JSONObject(json);
             JSONObject cur = o.optJSONObject("current");
             if (cur != null) {
-                if (cur.has("apparent_temperature")) f.feels = (int) Math.round(cur.getDouble("apparent_temperature"));
+                // a station can answer null for one reading; that's one reading missing, not the whole forecast
+                if (!cur.isNull("apparent_temperature")) f.feels = (int) Math.round(cur.getDouble("apparent_temperature"));
                 f.humidity = cur.optInt("relative_humidity_2m", -1);
-                if (cur.has("wind_speed_10m")) f.wind = (int) Math.round(cur.getDouble("wind_speed_10m"));
+                if (!cur.isNull("wind_speed_10m")) f.wind = (int) Math.round(cur.getDouble("wind_speed_10m"));
             }
             java.text.SimpleDateFormat day = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.ROOT),
                     hour = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.ROOT);
@@ -105,9 +106,11 @@ final class Weather {
             if (d != null) {
                 org.json.JSONArray t = d.getJSONArray("time");
                 for (int i = 0; i < t.length(); i++) {
+                    double hi = d.getJSONArray("temperature_2m_max").optDouble(i), lo = d.getJSONArray("temperature_2m_min").optDouble(i);
+                    // a day with no temperatures would show as 0°: left out instead
+                    if (Double.isNaN(hi) || Double.isNaN(lo)) continue;
                     f.days.add(new Day(day.parse(t.getString(i)).getTime(), d.getJSONArray("weather_code").optInt(i),
-                            (int) Math.round(d.getJSONArray("temperature_2m_max").optDouble(i)),
-                            (int) Math.round(d.getJSONArray("temperature_2m_min").optDouble(i)),
+                            (int) Math.round(hi), (int) Math.round(lo),
                             d.getJSONArray("precipitation_probability_max").optInt(i, 0)));
                 }
             }
@@ -119,8 +122,9 @@ final class Weather {
                 org.json.JSONArray t = h.getJSONArray("time");
                 for (int i = 0; i < t.length() && f.hours.size() < 8; i++) {
                     long at = hour.parse(t.getString(i)).getTime();
-                    if (at < now) continue;
-                    f.hours.add(new Hour(at, h.getJSONArray("weather_code").optInt(i), (int) Math.round(h.getJSONArray("temperature_2m").optDouble(i)),
+                    double temp = h.getJSONArray("temperature_2m").optDouble(i);
+                    if (at < now || Double.isNaN(temp)) continue;
+                    f.hours.add(new Hour(at, h.getJSONArray("weather_code").optInt(i), (int) Math.round(temp),
                             h.getJSONArray("precipitation_probability").optInt(i, 0), h.getJSONArray("is_day").optInt(i, 1) == 1));
                 }
             }

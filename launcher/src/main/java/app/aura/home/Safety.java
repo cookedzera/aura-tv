@@ -36,13 +36,40 @@ final class Safety {
             Trouble.crash(t, e);
             try {
                 SharedPreferences p = Prefs.device(c);
-                List<String> times = recent(p.getString("crashes", ""), System.currentTimeMillis() - AFTER_MS);
-                times.add(String.valueOf(System.currentTimeMillis()));
-                p.edit().putString("crashes", TextUtils.join(",", times)).commit();
+                long now = System.currentTimeMillis();
+                if (from(e, SAVER)) {
+                    // the screensaver shares Aura's process, but its troubles are its own: three of
+                    // them within half an hour and it falls back to plain photographs, and the Home
+                    // button, which the user never saw fail, stays as it is
+                    List<String> times = recent(p.getString("saver_crashes", ""), now - AFTER_MS);
+                    times.add(String.valueOf(now));
+                    p.edit().putString("saver_crashes", TextUtils.join(",", times)).commit();
+                    if (times.size() >= CRASHES) Prefs.of(c).edit().putString(Prefs.SAVER, "photos").commit();
+                } else if (!from(e, JOBS)) {
+                    List<String> times = recent(p.getString("crashes", ""), now - AFTER_MS);
+                    times.add(String.valueOf(now));
+                    p.edit().putString("crashes", TextUtils.join(",", times)).commit();
+                }
             } catch (Throwable ignored) {
             }
             if (before != null) before.uncaughtException(t, e);
         });
+    }
+
+    /** The screensaver's own classes, and the background jobs that fetch pictures and listings. */
+    private static final String[] SAVER = {"Ambient", "AerialView", "Sayings", "Story"},
+            JOBS = {"DailyJob", "Gallery", "Picks", "Fresh", "Weather"};
+
+    /** Whether {@code e} (or what caused it) went through one of these classes, or the screensaver is on screen. */
+    private static boolean from(Throwable e, String[] classes) {
+        if (classes == SAVER && Ambient.showing) return true;
+        for (Throwable x = e; x != null; x = x.getCause()) {
+            for (StackTraceElement f : x.getStackTrace()) {
+                String cls = f.getClassName();
+                for (String k : classes) if (cls.startsWith("app.aura.home." + k)) return true;
+            }
+        }
+        return false;
     }
 
     private static List<String> recent(String list, long since) {
@@ -69,28 +96,56 @@ final class Safety {
         p.edit().putString("crashes", "").apply();
         if (!again) {
             p.edit().putLong("safe_at", now).apply();
-            Prefs.set(c, Prefs.PARALLAX, false);
-            Prefs.set(c, Prefs.TOP_SHELF, false);
-            Prefs.of(c).edit().putString(Prefs.SAVER, "photos").apply();
+            // every profile's, not just the one in use: a crash on switching profiles is a crash too
+            for (Profiles.Profile pr : Profiles.all(c)) {
+                String file = Profiles.MAIN.equals(pr.id) ? "aura" : "aura_" + pr.id;
+                c.getSharedPreferences(file, Context.MODE_PRIVATE).edit()
+                        .putBoolean(Prefs.PARALLAX, false).putBoolean(Prefs.TOP_SHELF, false).putString(Prefs.SAVER, "photos").apply();
+            }
             Previews.set(c, false);
             HomeKeys.set(c, false);
             return "safe";
         }
-        final String home = original(c);
-        if (home == null || !Adb.on(c)) return null;
+        // a home taken off for this user can't be seen by original(): the retired name, or apps
+        // Free up memory switched off, are reason enough to hand things back
+        boolean retired = Prefs.device(c).getString(RETIRED, null) != null
+                || !Prefs.device(c).getStringSet(Debloat.MINE, new java.util.HashSet<>()).isEmpty();
+        if ((original(c) == null && !retired) || !Adb.on(c)) return null;
         final Context app = c.getApplicationContext();
-        new SafeThread(() -> restoreHome(app), "give-home").start();
+        // Aura's own Home button must not drag the crashing home screen back over the TV's own
+        HomeKeys.setTakeover(app, false);
+        final boolean keysOn = HomeKeys.on(app) && !HomeKeys.set(app, false);
+        handedBack = null;
+        new SafeThread(() -> handedBack = restoreHome(app, keysOn), "give-home").start();
         return "home";
     }
+
+    /** Whether {@link #check}'s hand-back ran (null while it's still going): the home screen's message waits for it. */
+    static volatile Boolean handedBack;
 
     /**
      * Re-enables any retired system launcher (and Google TV's setup recovery home) and hands the
      * Home button back to the TV's own launcher over one ADB connection. Off the main thread.
+     * True when the commands ran (debugging was reachable).
      */
-    static void restoreHome(Context c) {
+    static boolean restoreHome(Context c) {
+        return restoreHome(c, false);
+    }
+
+    /** As {@link #restoreHome(Context)}; with {@code keysOff} the Home button service is switched off over ADB too. */
+    static boolean restoreHome(Context c, boolean keysOff) {
         String home = original(c);
         List<String> cmds = new ArrayList<>();
         PackageManager pm = c.getPackageManager();
+        // the setup app's recovery home screens, switched off one by one on Android 8 and earlier
+        if (android.os.Build.VERSION.SDK_INT < 28) {
+            for (String comp : setupHomes(c)) {
+                android.content.ComponentName cn = android.content.ComponentName.unflattenFromString(comp);
+                if (cn != null && pm.getComponentEnabledSetting(cn) == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+                    cmds.add("pm enable --user 0 " + comp);
+                }
+            }
+        }
         String origPkg = home != null ? home.substring(0, home.indexOf('/')) : null;
         for (String pkg : new String[]{origPkg, "com.google.android.apps.tv.launcherx",
                 "com.google.android.tungsten.setupwraith", "com.amazon.tv.launcher"}) {
@@ -113,8 +168,23 @@ final class Safety {
             cmds.add(0, "pm install-existing " + retired);
             cmds.add(1, "pm enable " + retired);
         }
-        if (home != null) cmds.add("cmd package set-home-activity " + home);
-        if (!cmds.isEmpty()) Adb.run(c, cmds.toArray(new String[0]));
+        if (home != null && android.os.Build.VERSION.SDK_INT >= 24) cmds.add("cmd package set-home-activity " + home);
+        if (keysOff) cmds.add(HomeKeys.disableCommand(c));
+        if (cmds.isEmpty()) return true;
+        List<String> out = Adb.run(c, cmds.toArray(new String[0]));
+        return out != null && !out.isEmpty();
+    }
+
+    /** Google TV's setup app's own Home screens, as "package/class", where it has any. */
+    private static List<String> setupHomes(Context c) {
+        List<String> out = new ArrayList<>();
+        for (ResolveInfo r : c.getPackageManager().queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
+                PackageManager.GET_DISABLED_COMPONENTS)) {
+            if (r.activityInfo == null || !GOOGLE_TV_SETUP.equals(r.activityInfo.packageName)) continue;
+            String comp = GOOGLE_TV_SETUP + "/" + r.activityInfo.name;
+            if (comp.matches("[A-Za-z0-9_.$/]+")) out.add(comp);
+        }
+        return out;
     }
 
     /**
@@ -166,18 +236,19 @@ final class Safety {
     static Boolean retireGoogleHome(Context c, boolean retire) {
         String me = c.getPackageName() + "/" + HomeActivity.class.getName();
         // the setup app also pairs remotes, adds accounts and resets the TV: only its recovery home
-        // screens go, where Android allows it; on a TV that refuses that, the whole app as before
+        // screens go, and only on Android 8 and earlier, where the shell may switch off a single
+        // screen. From Android 9 the shell may only switch whole apps, so every such command fails
+        // there (it used to, quietly, and the change was reported as taken anyway): the setup app
+        // is left as it is, and Home stays Aura's through set-home-activity and the Home button service
         List<String> setupOff = new ArrayList<>(), setupOn = new ArrayList<>();
-        for (ResolveInfo r : c.getPackageManager().queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
-                PackageManager.GET_DISABLED_COMPONENTS)) {
-            if (r.activityInfo == null || !GOOGLE_TV_SETUP.equals(r.activityInfo.packageName)) continue;
-            String comp = GOOGLE_TV_SETUP + "/" + r.activityInfo.name;
-            if (!comp.matches("[A-Za-z0-9_.$/]+")) continue;
-            setupOff.add("pm disable --user 0 " + comp);
-            setupOn.add("pm enable --user 0 " + comp);
+        if (android.os.Build.VERSION.SDK_INT < 28) {
+            for (String comp : setupHomes(c)) {
+                setupOff.add("pm disable --user 0 " + comp);
+                setupOn.add("pm enable --user 0 " + comp);
+            }
+            if (setupOff.isEmpty()) setupOff.add("pm disable-user --user 0 " + GOOGLE_TV_SETUP);
+            setupOn.add("pm enable " + GOOGLE_TV_SETUP);
         }
-        if (setupOff.isEmpty()) setupOff.add("pm disable-user --user 0 " + GOOGLE_TV_SETUP);
-        setupOn.add("pm enable " + GOOGLE_TV_SETUP);
         List<String> cmds = new ArrayList<>();
         if (retire) {
             cmds.add("am force-stop " + GOOGLE_TV_HOME);
@@ -275,25 +346,29 @@ final class Safety {
 
     /** Whether the TV's own home screen was switched off over ADB and needs re-enabling before Aura leaves. */
     static boolean originalDisabled(Context c) {
+        // taken off for this user: Android can't show it, so the remembered name has to say
+        if (Prefs.device(c).getString(RETIRED, null) != null) return true;
         String home = original(c);
         if (home == null) return false;
         try {
-            return !c.getPackageManager().getApplicationInfo(home.substring(0, home.indexOf('/')), 0).enabled;
+            ApplicationInfo ai = c.getPackageManager().getApplicationInfo(home.substring(0, home.indexOf('/')), PackageManager.GET_UNINSTALLED_PACKAGES);
+            return !ai.enabled || (ai.flags & ApplicationInfo.FLAG_INSTALLED) == 0;
         } catch (PackageManager.NameNotFoundException e) {
-            return false;
+            // it answered Home a moment ago, so it's there, only not for this user: switched off
+            return true;
         }
     }
 
     /**
      * The TV's own home screen: a system app answering Home, other than Aura and any fallback, found
-     * even while it's switched off (so it can be switched back on).
+     * even while it's switched off or taken off for this user (so it can be switched back on).
      */
     static String original(Context c) {
         PackageManager pm = c.getPackageManager();
         ResolveInfo settings = pm.resolveActivity(new Intent(Settings.ACTION_SETTINGS), PackageManager.MATCH_DEFAULT_ONLY);
         String skip = settings != null && settings.activityInfo != null ? settings.activityInfo.packageName : "";
         for (ResolveInfo r : pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
-                PackageManager.GET_DISABLED_COMPONENTS)) {
+                PackageManager.GET_DISABLED_COMPONENTS | PackageManager.GET_UNINSTALLED_PACKAGES)) {
             String pkg = r.activityInfo.packageName;
             if (pkg.equals(c.getPackageName()) || pkg.equals(skip) || pkg.equals("com.google.android.tungsten.setupwraith")) continue;
             if ((r.activityInfo.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) == 0) continue;

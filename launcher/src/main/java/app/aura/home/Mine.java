@@ -39,9 +39,14 @@ import java.util.Random;
  */
 final class Mine {
     private static final String DIR = "mine", INDEX = "index.json";
-    static final int KEEP = 60;
+    /** How many photos the TV keeps: the choices offered, and the one taken until you choose. */
+    static final int[] KEEP_CHOICES = {60, 120, 250};
+    static final int KEEP = KEEP_CHOICES[0];
+    private static final String KEEP_KEY = "photos_keep";
+    /** Roughly what one stored photo and its thumbnail take, for the room a larger limit needs. */
+    private static final long PER_PHOTO = 1_500_000L;
     static final long MAX_BYTES = 40L << 20;
-    private static final int W = 1536, H = 864, TW = 320, TH = 180;
+    private static final int TW = 320, TH = 180;
     private static final Object LOCK = new Object();
     private static final Random RND = new Random();
 
@@ -51,6 +56,55 @@ final class Mine {
         Unsupported(String why) {
             super(why);
         }
+    }
+
+    /** The TV holds as many as it's set to keep: nothing is thrown out to make room. */
+    static final class Full extends IOException {
+        Full(String why) {
+            super(why);
+        }
+    }
+
+    /** How many photos this TV keeps, as set (shared by everyone on it). */
+    static int keep(Context c) {
+        return Prefs.device(c).getInt(KEEP_KEY, KEEP);
+    }
+
+    static void setKeep(Context c, int n) {
+        Prefs.device(c).edit().putInt(KEEP_KEY, n).apply();
+    }
+
+    /** The largest limit the TV's free storage has room for (never less than the smallest choice). */
+    static int keepCeiling(Context c) {
+        long free;
+        try {
+            free = new android.os.StatFs(c.getFilesDir().getPath()).getAvailableBytes() + used(c);
+        } catch (RuntimeException e) {
+            return KEEP_CHOICES[KEEP_CHOICES.length - 1];
+        }
+        int ceiling = KEEP;
+        // keep a few hundred megabytes for everything else the TV does
+        for (int n : KEEP_CHOICES) if (free - 300L * (1 << 20) >= n * PER_PHOTO) ceiling = n;
+        return ceiling;
+    }
+
+    /** What the stored photos take up now. */
+    private static long used(Context c) {
+        long total = 0;
+        File[] files = dir(c).listFiles();
+        for (int i = 0; files != null && i < files.length; i++) total += files[i].length();
+        return total;
+    }
+
+    /**
+     * How large a stored photo is: the TV's own screen on a TV with the memory to decode it (a
+     * 4K set's interface runs at 1080p or 1440p), and a smaller copy where memory is short.
+     */
+    private static int[] size(Context c) {
+        android.util.DisplayMetrics dm = c.getResources().getDisplayMetrics();
+        int w = Math.max(dm.widthPixels, dm.heightPixels);
+        if (Perf.lowEnd(c) || w < 1920) return new int[]{1536, 864};
+        return w >= 2560 ? new int[]{2560, 1440} : new int[]{1920, 1080};
     }
 
     // ---- reading -----------------------------------------------------------------------------
@@ -109,15 +163,19 @@ final class Mine {
      */
     static JSONObject add(Context c, File part, String name, String title) throws IOException {
         try {
+            // the limit is checked first, before a minute's work on a photo that can't stay
+            int keep = keep(c);
+            if (count(c) >= keep) throw new Full(c.getString(R.string.the_tv_keeps_n_remove_some, keep));
             String id = Long.toString(System.currentTimeMillis(), 36) + Integer.toString(RND.nextInt(1296), 36);
             boolean gif = isGif(part);
-            Bitmap still = decode(part);
+            int[] wh = size(c);
+            Bitmap still = decode(part, wh[0], wh[1]);
             // an iPhone's HEIC photo: Android reads those from 9 on; before that, say what to change
             if (still == null) throw new Unsupported(c.getString(isHeif(part) ? R.string.heic_needs_android_9 : R.string.not_a_photo_the_tv_can_read));
             File out = new File(dir(c), id + (gif ? ".gif" : ".jpg"));
             Bitmap rotated = gif ? still : rotate(still, orientation(part));
             if (rotated != still) still.recycle();
-            Bitmap shown = gif ? rotated : compose(rotated);
+            Bitmap shown = gif ? rotated : compose(rotated, wh[0], wh[1]);
             if (shown != rotated) rotated.recycle();
             if (gif) {
                 if (!part.renameTo(out)) {
@@ -149,11 +207,14 @@ final class Mine {
             e.put("accent", String.format(Locale.ROOT, "#%06X", accentColor));
             synchronized (LOCK) {
                 JSONArray index = readIndex(c), next = new JSONArray().put(e);
+                // two uploads arriving together: the second finds no room after all
+                if (index.length() >= keep) {
+                    forget(c, e);
+                    throw new Full(c.getString(R.string.the_tv_keeps_n_remove_some, keep));
+                }
                 for (int i = 0; i < index.length(); i++) {
                     JSONObject item = index.optJSONObject(i);
-                    if (item == null) continue;
-                    if (next.length() < KEEP) next.put(item);
-                    else forget(c, item);
+                    if (item != null) next.put(item);
                 }
                 write(c, next);
             }
@@ -240,7 +301,7 @@ final class Mine {
     }
 
     /** Decoded no larger than it needs to be to fill the TV (a GIF gives its first frame). */
-    private static Bitmap decode(File f) {
+    private static Bitmap decode(File f, int W, int H) {
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(f.getPath(), o);
@@ -278,7 +339,7 @@ final class Mine {
      * Wide shots fill the screen. Anything taller sits whole, with rounded corners and a soft
      * shadow, on a blurred and dimmed copy of itself, the way photos are framed on Apple TV.
      */
-    private static Bitmap compose(Bitmap b) {
+    private static Bitmap compose(Bitmap b, int W, int H) {
         float aspect = b.getWidth() / (float) b.getHeight();
         if (aspect >= 1.45f) return cover(b, W, H);
         Bitmap out = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);

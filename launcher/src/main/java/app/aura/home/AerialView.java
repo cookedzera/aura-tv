@@ -5,6 +5,7 @@ import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
@@ -42,6 +43,7 @@ final class AerialView extends FrameLayout {
     /** This TV wouldn't play two videos at once: the last one goes before the next one loads. */
     private boolean oneAtATime;
     private int failures;
+    private long lastFailAt;
     private boolean veilBusy;
     private float rest;
 
@@ -59,7 +61,13 @@ final class AerialView extends FrameLayout {
     /** Another video of {@code kind} ("mix" for any) that suits the light outside, never the last one. */
     void next(String kind) {
         this.kind = kind;
-        if (failures >= 3) return;
+        // 2–3 GB an hour: not over a phone's hotspot or a capped plan unless asked for
+        if (metered() && !Prefs.on(getContext(), Prefs.AERIALS_METERED)) return;
+        if (failures >= 3) {
+            // three in a row gives the network a minute's rest, not the whole evening off
+            if (SystemClock.elapsedRealtime() - lastFailAt < 60_000) return;
+            failures = 0;
+        }
         Aerials.Video v = Aerials.pick(Aerials.all(getContext()), kind, Sun.phase(System.currentTimeMillis()), lastUrl, rnd);
         if (v == null) return;
         lastUrl = v.url;
@@ -72,6 +80,7 @@ final class AerialView extends FrameLayout {
             final Slot old = shown;
             final Aerials.Video nextVideo = v;
             shown = null;
+            handler.removeCallbacks(watchdog);
             veil(1f, 500, () -> {
                 old.release();
                 listener.lost();
@@ -81,6 +90,15 @@ final class AerialView extends FrameLayout {
             return;
         }
         startComing(v, false);
+    }
+
+    private boolean metered() {
+        try {
+            android.net.ConnectivityManager cm = Compat.svc(getContext(), android.net.ConnectivityManager.class);
+            return cm != null && cm.isActiveNetworkMetered();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private void startComing(Aerials.Video v, boolean forceH264) {
@@ -177,8 +195,13 @@ final class AerialView extends FrameLayout {
                 m.setLooping(loop);
                 m.setVolume(0f, 0f);
                 m.setOnPreparedListener(x -> {
-                    x.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
-                    x.start();
+                    // some makers' players can't set the scaling, and say so by throwing
+                    try {
+                        x.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
+                        x.start();
+                    } catch (RuntimeException e) {
+                        failed(this, e.toString(), false);
+                    }
                 });
                 m.setOnInfoListener((x, what, extra) -> {
                     if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) ready(this);
@@ -189,12 +212,15 @@ final class AerialView extends FrameLayout {
                     if (this == shown) next(kind);
                 });
                 m.setOnErrorListener((x, what, extra) -> {
-                    failed(this, "error " + what + "/" + extra);
+                    // the decoder saying no is one thing; a slow network is quite another
+                    boolean decoder = what == MediaPlayer.MEDIA_ERROR_SERVER_DIED
+                            || extra == MediaPlayer.MEDIA_ERROR_UNSUPPORTED || extra == MediaPlayer.MEDIA_ERROR_MALFORMED;
+                    failed(this, "error " + what + "/" + extra, decoder);
                     return true;
                 });
                 m.prepareAsync();
             } catch (Exception e) {
-                failed(this, e.toString());
+                failed(this, e.toString(), false);
             }
         }
 
@@ -213,7 +239,9 @@ final class AerialView extends FrameLayout {
 
         /**
          * Letting go of a stream waits on its network connection and the video chip: on the main
-         * thread it held up the very key press that left the scene, so it's done to one side.
+         * thread it held up the very key press that left the scene, so it's done to one side. The
+         * surface, though, is taken from the player here and now: once surfaceDestroyed returns it
+         * is gone, and a video chip still drawing into it has crashed more than one maker's TV.
          */
         private void releasePlayer() {
             final MediaPlayer m = mp;
@@ -223,11 +251,11 @@ final class AerialView extends FrameLayout {
             m.setOnInfoListener(null);
             m.setOnCompletionListener(null);
             m.setOnErrorListener(null);
+            try {
+                m.setSurface(null);
+            } catch (RuntimeException ignored) {
+            }
             RELEASE.execute(() -> {
-                try {
-                    m.setSurface(null);
-                } catch (RuntimeException ignored) {
-                }
                 try {
                     m.release();
                 } catch (RuntimeException ignored) {
@@ -249,7 +277,10 @@ final class AerialView extends FrameLayout {
         // a brief dim, the new video fills the screen, and it fades up
         veil(1f, shown == null ? 650 : 500, () -> {
             if (s != coming) {
+                // overtaken during the dip (the song changed): the veil lifts off whatever is there
+                // instead of staying black until the next video is ready
                 s.release();
+                veil(shown != null ? rest : 0f, 300, null);
                 return;
             }
             if (shown != null) shown.release();
@@ -258,22 +289,50 @@ final class AerialView extends FrameLayout {
             s.grow();
             listener.shown(s.v);
             veil(rest, 1400, null);
+            watchedPos = -1;
+            handler.removeCallbacks(watchdog);
+            handler.postDelayed(watchdog, WATCH_MS);
         });
     }
 
-    private void failed(Slot s, String why) {
+    /** How often the picture is checked for having frozen: a stalled stream raises no error of its own. */
+    private static final long WATCH_MS = 10_000;
+    private int watchedPos = -1;
+    private final Runnable watchdog = this::watch;
+
+    private void watch() {
+        Slot s = shown;
+        if (s == null || s.mp == null) return;
+        int pos;
+        try {
+            pos = s.mp.getCurrentPosition();
+        } catch (RuntimeException e) {
+            return;
+        }
+        if (pos == watchedPos) {
+            failed(s, "the picture froze", false);
+            return;
+        }
+        watchedPos = pos;
+        handler.postDelayed(watchdog, WATCH_MS);
+    }
+
+    /** {@code decoder}: the player refused the stream itself, rather than the network letting it down. */
+    private void failed(Slot s, String why, boolean decoder) {
         Trouble.note("AERIAL", s.v.label + ": " + why);
         if (s == coming) {
             coming = null;
             s.release();
             handler.removeCallbacks(giveUp);
             if (s.usedHevc && s.v.url != null && !s.v.url.equals(s.streamUrl)) {
-                // this TV's HEVC decoder refused the HEVC copy after all: the H.264 one, right away
-                Aerials.disableHevc();
+                // the H.264 copy right away; HEVC is given up for good only when the decoder itself
+                // said no, not for a timeout that would have hit either copy
+                if (decoder) Aerials.disableHevc();
                 startComing(s.v, true);
                 return;
             }
             failures++;
+            lastFailAt = SystemClock.elapsedRealtime();
             if (shown != null && !oneAtATime) {
                 // likely two videos at once was too much for this TV: one at a time from now on
                 oneAtATime = true;
@@ -284,6 +343,9 @@ final class AerialView extends FrameLayout {
         } else if (s == shown) {
             // the video on screen stopped (the network went): what's beneath comes back
             shown = null;
+            handler.removeCallbacks(watchdog);
+            // it gave out while the next was loading beside it: two decoders at once is likely what this TV can't do
+            if (coming != null) oneAtATime = true;
             veil(1f, 400, () -> {
                 s.release();
                 listener.lost();
@@ -293,7 +355,7 @@ final class AerialView extends FrameLayout {
     }
 
     private final Runnable giveUp = () -> {
-        if (coming != null) failed(coming, "no picture within " + GIVE_UP_MS / 1000 + " s");
+        if (coming != null) failed(coming, "no picture within " + GIVE_UP_MS / 1000 + " s", false);
     };
 
     private void veil(float to, long ms, Runnable then) {

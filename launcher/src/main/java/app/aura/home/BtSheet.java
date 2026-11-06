@@ -46,7 +46,8 @@ final class BtSheet extends GlassFrame {
     private final TextView status, toggleText;
     private final Pad toggle;
     private final LinearLayout list;
-    private BluetoothProfile a2dp;
+    private volatile BluetoothProfile a2dp;
+    private volatile boolean released;
     private boolean listening;
 
     private final BroadcastReceiver changes = new BroadcastReceiver() {
@@ -66,6 +67,14 @@ final class BtSheet extends GlassFrame {
                 bt.getProfileProxy(a.getApplicationContext(), new BluetoothProfile.ServiceListener() {
                     @Override
                     public void onServiceConnected(int profile, BluetoothProfile proxy) {
+                        // the binding can arrive after the screen is gone: hand it straight back
+                        if (released) {
+                            try {
+                                bt.closeProfileProxy(BluetoothProfile.A2DP, proxy);
+                            } catch (RuntimeException ignored) {
+                            }
+                            return;
+                        }
                         a2dp = proxy;
                         if (isOpen()) act.runOnUiThread(BtSheet.this::rebuild);
                     }
@@ -164,6 +173,7 @@ final class BtSheet extends GlassFrame {
 
     void release() {
         close();
+        released = true;
         if (bt != null && a2dp != null) {
             try {
                 bt.closeProfileProxy(BluetoothProfile.A2DP, a2dp);

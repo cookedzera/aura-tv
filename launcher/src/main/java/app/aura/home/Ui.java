@@ -37,9 +37,26 @@ final class Ui {
     static final int RING_TOP = 0xFFFBF2E7, RING_BOTTOM = 0xFFEADCCA;
     /** How far a raised pane's shadow ({@link #shadow}) reaches past the pane, in dp. */
     static final float SHADOW_REACH = 24f;
-    private static final java.util.HashMap<String, Bitmap> SHADOWS = new java.util.HashMap<>();
+    /** The last sixteen sizes: panes come in few sizes, and one is never asked for again once its size has gone. */
+    private static final java.util.LinkedHashMap<String, Bitmap> SHADOWS = new java.util.LinkedHashMap<String, Bitmap>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(java.util.Map.Entry<String, Bitmap> eldest) {
+            return size() > 16;
+        }
+    };
 
     private Ui() { }
+
+    /**
+     * Moves a paint's shader by {@code m}. On Android 6.0 alone the paint keeps the shader it was
+     * first given and never sees a later matrix, so the shader is handed to it again there.
+     */
+    static void place(Paint p, android.graphics.Matrix m) {
+        android.graphics.Shader s = p.getShader();
+        if (s == null) return;
+        s.setLocalMatrix(m);
+        if (android.os.Build.VERSION.SDK_INT < 24) p.setShader(s);
+    }
 
     static void init(Context c) {
         density = c.getResources().getDisplayMetrics().density;

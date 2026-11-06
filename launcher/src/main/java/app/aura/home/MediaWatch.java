@@ -61,8 +61,8 @@ public class MediaWatch extends NotificationListenerService {
      * is a call across to its app, and its metadata carries the cover picture: done every second
      * for the song's progress, and again for each of its many reports, it held up the main thread.
      */
-    private static final Map<MediaController, MediaMetadata> metaOf = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final Map<MediaController, PlaybackState> stateOf = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<android.media.session.MediaSession.Token, MediaMetadata> metaOf = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<android.media.session.MediaSession.Token, PlaybackState> stateOf = new java.util.concurrent.ConcurrentHashMap<>();
     private static MediaSessionManager.OnActiveSessionsChangedListener sessionListener;
     private static volatile boolean listening;
     private static Playing lastAny;
@@ -305,10 +305,10 @@ public class MediaWatch extends NotificationListenerService {
      * older report over the one that just came.
      */
     private static void remember(MediaController m, MediaMetadata md, PlaybackState st) {
-        if (md != null) metaOf.put(m, md);
-        else metaOf.remove(m);
-        if (st != null) stateOf.put(m, st);
-        else stateOf.remove(m);
+        if (md != null) metaOf.put(m.getSessionToken(), md);
+        else metaOf.remove(m.getSessionToken());
+        if (st != null) stateOf.put(m.getSessionToken(), st);
+        else stateOf.remove(m.getSessionToken());
     }
 
     /** The same, from what the player reported: nothing is asked of it again. */
@@ -336,7 +336,7 @@ public class MediaWatch extends NotificationListenerService {
         long length = md.getLong(MediaMetadata.METADATA_KEY_DURATION);
         long at = st != null ? st.getPosition() : 0;
         if (st != null && state == PlaybackState.STATE_PLAYING && st.getLastPositionUpdateTime() > 0) {
-            float speed = st.getPlaybackSpeed() > 0 ? st.getPlaybackSpeed() : 1f;
+            float speed = MediaWatch.speed(st);
             at += (long) ((SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * speed);
         }
         p.progress = length > 0 && at > 0 ? Math.min(1f, Math.max(0f, at / (float) length)) : 0f;
@@ -359,6 +359,13 @@ public class MediaWatch extends NotificationListenerService {
                 byPkg.put("com.google.android.youtube.tvmusic", ytm);
             }
             lastAny = snap;
+            // a player not heard from in six hours is forgotten, with its picture: nothing shows it any more
+            long now = System.currentTimeMillis();
+            java.util.Iterator<Map.Entry<String, Playing>> it = byPkg.entrySet().iterator();
+            while (it.hasNext()) {
+                Playing old = it.next().getValue();
+                if (old != snap && now - old.updatedAt > REMEMBER_MS) it.remove();
+            }
         }
         // a song started, changed, paused or resumed: whoever shows it hears once, not at every report
         String key = p.pkg + "|" + p.title + "|" + p.playing;
@@ -440,7 +447,7 @@ public class MediaWatch extends NotificationListenerService {
             fetching = uri;
         }
         new SafeThread(() -> {
-            Bitmap b = Continue.load(c, uri);
+            Bitmap b = Continue.load(c, uri, Continue.COVER_PX);
             synchronized (byPkg) {
                 if (uri.equals(fetching)) fetching = null;
             }
@@ -471,7 +478,7 @@ public class MediaWatch extends NotificationListenerService {
             p.art = cachedBmp;
             return cachedBmp;
         }
-        Bitmap b = Continue.load(c, p.artUri);
+        Bitmap b = Continue.load(c, p.artUri, Continue.COVER_PX);
         if (b != null) {
             cachedUri = p.artUri;
             cachedBmp = b;
@@ -539,15 +546,26 @@ public class MediaWatch extends NotificationListenerService {
      */
     static MediaMetadata meta(MediaController m) {
         if (m == null) return null;
-        MediaMetadata md = metaOf.get(m);
-        return md != null || watched.contains(m) ? md : m.getMetadata();
+        MediaMetadata md = metaOf.get(m.getSessionToken());
+        return md != null || watching(m) ? md : m.getMetadata();
     }
 
     /** The player's last reported state (where it was, and when), the same way. */
     static PlaybackState state(MediaController m) {
         if (m == null) return null;
-        PlaybackState st = stateOf.get(m);
-        return st != null || watched.contains(m) ? st : m.getPlaybackState();
+        PlaybackState st = stateOf.get(m.getSessionToken());
+        return st != null || watching(m) ? st : m.getPlaybackState();
+    }
+
+    /**
+     * Whether this player's session is among those watched. By its session, not the controller
+     * object: Android hands out a new controller for the same session each time the list changes,
+     * and a card holding an older one would otherwise ask the app across the binder on every tick.
+     */
+    private static boolean watching(MediaController m) {
+        android.media.session.MediaSession.Token t = m.getSessionToken();
+        for (MediaController w : watched) if (t.equals(w.getSessionToken())) return true;
+        return false;
     }
 
     /** The most relevant live media session (playing first, else paused), or null. Main thread is fine: no I/O. */
@@ -558,8 +576,8 @@ public class MediaWatch extends NotificationListenerService {
             MediaController best = null;
             for (MediaController m : watched) {
                 if (c != null && !HomeKeys.allowed(c, m.getPackageName())) continue;
-                PlaybackState st = stateOf.get(m);
-                if (metaOf.get(m) == null || st == null) continue;
+                PlaybackState st = stateOf.get(m.getSessionToken());
+                if (metaOf.get(m.getSessionToken()) == null || st == null) continue;
                 int s = st.getState();
                 if (s == PlaybackState.STATE_PLAYING || s == PlaybackState.STATE_BUFFERING) {
                     best = m;
@@ -568,8 +586,8 @@ public class MediaWatch extends NotificationListenerService {
                 if (best == null && (s == PlaybackState.STATE_PAUSED || s == PlaybackState.STATE_STOPPED)) best = m;
             }
             if (best == null) return null;
-            MediaMetadata md = metaOf.get(best);
-            PlaybackState st = stateOf.get(best);
+            MediaMetadata md = metaOf.get(best.getSessionToken());
+            PlaybackState st = stateOf.get(best.getSessionToken());
             if (md == null || st == null) return null;
             Playing snap;
             synchronized (byPkg) {
@@ -583,7 +601,7 @@ public class MediaWatch extends NotificationListenerService {
             long length = md.getLong(MediaMetadata.METADATA_KEY_DURATION);
             long at = st.getPosition();
             if (s == PlaybackState.STATE_PLAYING && st.getLastPositionUpdateTime() > 0) {
-                float speed = st.getPlaybackSpeed() > 0 ? st.getPlaybackSpeed() : 1f;
+                float speed = MediaWatch.speed(st);
                 at += (long) (Math.max(0, SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * speed);
             }
             if (length > 0 && at > 0) snap.progress = Math.min(1f, Math.max(0f, at / (float) length));
@@ -668,10 +686,22 @@ public class MediaWatch extends NotificationListenerService {
         if (st == null || md == null) return -1;
         long length = md.getLong(MediaMetadata.METADATA_KEY_DURATION);
         if (length <= 0) return -1;
-        float speed = st.getPlaybackSpeed() > 0 ? st.getPlaybackSpeed() : 1f;
+        float speed = MediaWatch.speed(st);
         long since = SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime();
         long at = st.getPosition() + (st.getLastPositionUpdateTime() > 0 ? (long) (since * speed) : 0);
+        // rewinding, there's no telling when it ends
+        if (speed <= 0f) return -1;
         long left = (long) ((length - at) / speed);
         return left > 0 ? left : -1;
+    }
+
+    /**
+     * The player's rate of play as it affects the position: 1 when it doesn't say, negative while
+     * rewinding (it used to count as playing forward), and never a wild number from a broken report.
+     */
+    static float speed(PlaybackState st) {
+        float s = st.getPlaybackSpeed();
+        if (s == 0f || Float.isNaN(s) || Float.isInfinite(s)) return 1f;
+        return Math.max(-32f, Math.min(32f, s));
     }
 }

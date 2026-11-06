@@ -76,8 +76,18 @@ final class Backup {
             for (Iterator<String> ks = o.keys(); ks.hasNext(); ) {
                 JSONArray tv = o.getJSONArray(ks.next());
                 if (tv.length() != 2) throw new JSONException("not a setting");
-                tv.getString(0);
-                if (tv.getString(0).equals("S")) tv.getJSONArray(1);
+                // the very reads the second pass makes, so a wrong-typed value fails here, before any change
+                switch (tv.getString(0)) {
+                    case "b": tv.getBoolean(1); break;
+                    case "i": tv.getInt(1); break;
+                    case "l": tv.getLong(1); break;
+                    case "f": tv.getDouble(1); break;
+                    case "S":
+                        JSONArray a = tv.getJSONArray(1);
+                        for (int i = 0; i < a.length(); i++) a.getString(i);
+                        break;
+                    default: tv.getString(1);
+                }
             }
         }
         int n = 0;

@@ -78,29 +78,33 @@ final class Cec {
 
     private static void refresh(Context c) {
         if (reading || SystemClock.elapsedRealtime() - readAt < 30_000) return;
+        // marked read now, whatever comes of it: the CEC service refuses most apps outright, and
+        // a refusal every call (one per input, on every opening) was never given its half minute
+        readAt = SystemClock.elapsedRealtime();
         Map<Integer, String> direct = tryHdmiManager(c);
         if (direct != null && !direct.isEmpty()) {
             names = direct;
-            readAt = SystemClock.elapsedRealtime();
             return;
         }
         if (!Reports.allowed(c)) return;
         reading = true;
         new SafeThread(() -> {
             Map<Integer, String> found = new HashMap<>();
-            Reports.read("hdmi_control", new String[0], s -> {
-                Matcher m = DEVICE.matcher(s);
-                // logical address 0 is the TV itself
-                if (m.find() && Integer.parseInt(m.group(1), 16) != 0) {
-                    int port = Integer.parseInt(m.group(3), 16);
-                    String name = m.group(2).trim();
-                    if (port > 0 && !name.isEmpty()) found.put(port, name);
-                }
-                return true;
-            });
-            names = found;
-            readAt = SystemClock.elapsedRealtime();
-            reading = false;
+            try {
+                Reports.read("hdmi_control", new String[0], s -> {
+                    Matcher m = DEVICE.matcher(s);
+                    // logical address 0 is the TV itself
+                    if (m.find() && Integer.parseInt(m.group(1), 16) != 0) {
+                        int port = Integer.parseInt(m.group(3), 16);
+                        String name = m.group(2).trim();
+                        if (port > 0 && !name.isEmpty()) found.put(port, name);
+                    }
+                    return true;
+                });
+                names = found;
+            } finally {
+                reading = false;
+            }
         }, "cec").start();
     }
 }

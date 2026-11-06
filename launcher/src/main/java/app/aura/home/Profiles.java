@@ -175,6 +175,8 @@ final class Profiles {
         for (int i = list.size() - 1; i >= 0; i--) if (list.get(i).id.equals(id)) list.remove(i);
         save(c, list);
         c.getSharedPreferences("aura_" + id, Context.MODE_PRIVATE).edit().clear().apply();
+        // its Most used counts go with it (see Categories.usage)
+        c.getSharedPreferences("aura_" + id + "_launches", Context.MODE_PRIVATE).edit().clear().apply();
         if (id.equals(current(c))) use(c, MAIN);
     }
 }

@@ -12,9 +12,18 @@ final class Sun {
     enum Phase { NIGHT, DAWN, DAY, GOLDEN }
 
     private static volatile double LAT, LON;
+    /** Whether the place is Weather's answer rather than the time zone's guess. */
+    private static volatile boolean placed;
     private static final double HORIZON = -0.833; // sunrise/sunset, with refraction
 
     static {
+        guess();
+    }
+
+    private Sun() { }
+
+    /** The time zone's rough idea of where the TV is. */
+    private static void guess() {
         TimeZone tz = TimeZone.getDefault();
         double lat = 25, lon = tz.getRawOffset() / 3_600_000.0 * 15;
         String id = tz.getID();
@@ -27,13 +36,17 @@ final class Sun {
         LON = lon;
     }
 
-    private Sun() { }
+    /** The TV's time zone changed (a move, or a first-run setting): the guess follows it until Weather knows better. */
+    static void timeZoneChanged() {
+        if (!placed) guess();
+    }
 
     /** Exact coordinates once Weather knows where the TV is; until then the time zone's estimate. */
     static void place(double lat, double lon) {
         if (lat == 0 && lon == 0) return;
         LAT = lat;
         LON = lon;
+        placed = true;
     }
 
     /** Where the TV is (degrees), for the screensaver's sky. */

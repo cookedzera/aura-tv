@@ -176,6 +176,17 @@ final class Updater {
             }
         }
         PackageInstaller pi = c.getPackageManager().getPackageInstaller();
+        // a session left behind by an earlier try that died part-way holds its space in the TV's
+        // storage until it's abandoned; a new install takes the place of anything older anyway
+        try {
+            for (PackageInstaller.SessionInfo old : pi.getMySessions()) {
+                try {
+                    pi.abandonSession(old.getSessionId());
+                } catch (RuntimeException ignored) {
+                }
+            }
+        } catch (RuntimeException ignored) {
+        }
         PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
         if (pkg != null) params.setAppPackageName(pkg);
         int id = pi.createSession(params);
@@ -194,6 +205,8 @@ final class Updater {
                     done += n;
                     p.onProgress(done, total);
                 }
+                // more coming than the release said: the size was wrong, and a cut-down APK mustn't be installed
+                if (total > 0 && in.read() != -1) throw new IOException("longer than the release says");
                 s.fsync(out);
             }
             if (md != null && !hex(md.digest()).equals(sha256)) throw new IOException("the download doesn't match the release (damaged on the way)");

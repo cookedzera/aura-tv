@@ -127,11 +127,16 @@ final class WeatherSheet extends FrameLayout {
         addView(body, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
     }
 
+    /** Fading out: still visible for a moment, but no longer open (the home screen mustn't hide behind it). */
+    private boolean closing;
+
     boolean isOpen() {
-        return getVisibility() == VISIBLE;
+        return getVisibility() == VISIBLE && !closing;
     }
 
     void open(boolean weatherOn) {
+        animate().cancel();
+        closing = false;
         show(weatherOn);
         setVisibility(VISIBLE);
         setAlpha(0f);
@@ -145,8 +150,12 @@ final class WeatherSheet extends FrameLayout {
 
     void close() {
         if (!isOpen()) return;
+        closing = true;
         body.animate().scaleX(0.97f).scaleY(0.97f).setDuration(200).setInterpolator(Ui.SOFT).start();
-        animate().alpha(0f).setDuration(200).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(() -> setVisibility(GONE)).start();
+        animate().alpha(0f).setDuration(200).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(() -> {
+            closing = false;
+            setVisibility(GONE);
+        }).start();
     }
 
     /** Fills it from the last reading; called again when a fresher one arrives while it's open. */

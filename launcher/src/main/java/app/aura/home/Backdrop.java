@@ -143,7 +143,9 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     private final ExecutorService io = Compat.background("photos", android.os.Process.THREAD_PRIORITY_DEFAULT + 4);
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Random rnd = new Random();
-    private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+    /** On a TV with little memory the photograph is kept in 16-bit colour: half the room, dithered so a sky stays smooth. */
+    private Boolean thrifty;
     private final Matrix tmp = new Matrix();
     private final List<View> mirrors = new ArrayList<>();
     private final SharedPreferences prefs;
@@ -579,7 +581,17 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     private float steadyDefocus = -1f;
 
     void setSteadyDefocus(float d) {
+        if (d == steadyDefocus) return;
         steadyDefocus = d;
+        // the photographs on screen were pre-mixed at the old softness: mixed again, so the
+        // resting picture doesn't jump when the setting changes (new ones come mixed right)
+        for (Slide s : new Slide[]{current, incoming}) {
+            if (s == null || s.sharp == null || s.soft == null || s.anim != null) continue;
+            Bitmap old = s.steady;
+            s.steady = d > 0f ? mix(s.sharp, s.soft, d) : null;
+            if (old != null && old != s.sharp && old != s.soft) old.recycle();
+        }
+        invalidate();
     }
 
     private void drawSlide(Canvas c, Slide s, float ia) {
@@ -908,6 +920,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             o.inDensity = o.outWidth;
             o.inTargetDensity = Math.max(1, Math.round(o.outWidth * k));
         }
+        if (thrifty()) o.inPreferredConfig = Bitmap.Config.RGB_565;
         Bitmap b;
         try (InputStream in = open(w)) {
             b = BitmapFactory.decodeStream(in, null, o);
@@ -915,6 +928,11 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         // drawn through matrices only: no density of its own to scale by anywhere
         if (b != null) b.setDensity(Bitmap.DENSITY_NONE);
         return b;
+    }
+
+    private boolean thrifty() {
+        if (thrifty == null) thrifty = Perf.lowEnd(getContext());
+        return thrifty;
     }
 
     /**
@@ -945,9 +963,9 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         float sc = Math.min(1f, Math.max(sw / (float) sharp.getWidth(), sh / (float) sharp.getHeight()));
         int w = Math.max(1, Math.round(sharp.getWidth() * sc)), h = Math.max(1, Math.round(sharp.getHeight() * sc));
         try {
-            Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Bitmap out = Bitmap.createBitmap(w, h, thrifty() ? Bitmap.Config.RGB_565 : Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(out);
-            Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
+            Paint p = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
             android.graphics.Rect all = new android.graphics.Rect(0, 0, w, h);
             c.drawBitmap(sharp, null, all, p);
             p.setAlpha(Math.round(255 * k));

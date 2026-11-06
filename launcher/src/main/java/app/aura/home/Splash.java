@@ -173,6 +173,17 @@ final class Splash extends View {
                 }).start();
     }
 
+    /**
+     * Fading out, each layer here is faded on its own rather than through a full-screen buffer:
+     * the layers overlap a little, so the fade isn't quite one piece, which no eye catches over
+     * half a second, and the buffer (a whole frame redrawn each frame) went just as home's rows
+     * were being laid out.
+     */
+    @Override
+    public boolean hasOverlappingRendering() {
+        return false;
+    }
+
     @Override
     protected void onDraw(Canvas c) {
         int w = getWidth(), h = getHeight();
@@ -186,7 +197,7 @@ final class Splash extends View {
         float gr = Ui.dpf(210) * (1f + flare * 1.6f);
         m.setScale(gr, gr);
         m.postTranslate(sx, sy);
-        warm.setLocalMatrix(m);
+        Ui.place(glow, m);
         glow.setAlpha(Math.round(255 * Math.min(1f, 0.35f + 0.5f * p + flare)));
         c.drawRect(sx - gr, sy - gr, sx + gr, sy + gr, glow);
         c.drawRect(0, sky, w, h, ground);

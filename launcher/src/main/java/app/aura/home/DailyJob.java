@@ -18,13 +18,25 @@ public class DailyJob extends JobService {
 
     @Override
     public boolean onStartJob(JobParameters params) {
-        if (params.getJobId() == OLD_FLYOVER_JOB || !busy.compareAndSet(false, true)) return false;
+        if (params.getJobId() == OLD_FLYOVER_JOB) return false;
         final android.content.Context c = getApplicationContext();
+        // on a small TV (light mode) the downloads and photo resizing wait while something is
+        // playing: the two cores and the little memory are the video's; Android tries again later
+        if (Perf.light(c)) {
+            MediaWatch.Playing p = MediaWatch.now(c);
+            if (p != null && p.playing) {
+                jobFinished(params, true);
+                return true;
+            }
+        }
+        if (!busy.compareAndSet(false, true)) return false;
         worker = new SafeThread(() -> {
+            // Android hears the job is done whatever happens below (the steps catch their own trouble)
+            boolean complete = false;
             try {
                 // downloads and photo resizing, well behind whatever is on screen
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
-                boolean complete = true;
+                complete = true;
                 // each step on its own: one that fails (offline, a source that changed its answers)
                 // no longer skips the ones after it, and Android always hears the job is done
                 step("retire", () -> {
@@ -47,15 +59,24 @@ public class DailyJob extends JobService {
                     Fresh.refresh(c);
                     return true;
                 });
-                // stopped by Android (onStopJob): it already knows
-                if (Thread.currentThread().isInterrupted()) return;
-                // a one-off catch-up that hit a network failure asks to be retried later
-                jobFinished(params, !complete && params.getJobId() == Daily.JOB_NOW);
             } finally {
                 busy.set(false);
+                // stopped by Android (onStopJob): it already knows
+                if (!Thread.currentThread().isInterrupted()) {
+                    // a one-off catch-up that hit a network failure asks to be retried later
+                    try {
+                        jobFinished(params, !complete && params.getJobId() == Daily.JOB_NOW);
+                    } catch (RuntimeException ignored) {
+                    }
+                }
             }
         }, "daily-photos");
-        worker.start();
+        try {
+            worker.start();
+        } catch (RuntimeException | OutOfMemoryError e) {
+            busy.set(false);
+            return false;
+        }
         return true;
     }
 

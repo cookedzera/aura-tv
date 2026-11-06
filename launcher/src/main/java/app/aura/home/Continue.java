@@ -67,7 +67,12 @@ final class Continue {
             TvContract.WatchNextPrograms.COLUMN_INTENT_URI,
             TvContract.WatchNextPrograms.COLUMN_PACKAGE_NAME,
             TvContract.WatchNextPrograms.COLUMN_SHORT_DESCRIPTION,
+            TvContract.WatchNextPrograms.COLUMN_WATCH_NEXT_TYPE,
+            TvContract.WatchNextPrograms.COLUMN_LAST_ENGAGEMENT_TIME_UTC_MILLIS,
     };
+
+    /** Rows an app hasn't touched in this long are something you've moved on from, not something to continue. */
+    private static final long STALE_MS = 60L * 86_400_000L;
 
     private Continue() { }
 
@@ -112,12 +117,20 @@ final class Continue {
         try (Cursor cur = c.getContentResolver().query(TvContract.WatchNextPrograms.CONTENT_URI, COLUMNS, null, null,
                 TvContract.WatchNextPrograms.COLUMN_LAST_ENGAGEMENT_TIME_UTC_MILLIS + " DESC")) {
             if (cur == null) return out;
+            long now = System.currentTimeMillis();
             while (cur.moveToNext() && out.size() < max) {
                 String intentUri = cur.getString(8);
                 if (intentUri == null) continue;
+                // a watchlist entry (saved for later, never started) isn't something to continue; nor
+                // is a title the app last touched two months ago
+                if (cur.getInt(11) == TvContract.WatchNextPrograms.WATCH_NEXT_TYPE_WATCHLIST) continue;
+                long touched = cur.isNull(12) ? 0 : cur.getLong(12);
+                if (touched > 0 && now - touched > STALE_MS) continue;
                 Item it = new Item();
                 it.title = cur.getString(0);
                 it.pkg = cur.getString(9);
+                // a kids' profile doesn't see what it hides, not even its half-watched shows
+                if (!HomeKeys.allowed(c, it.pkg)) continue;
                 // an app listing the same show twice (to continue, and its next episode): the newer one
                 if (!titles.add(it.pkg + "/" + key(it.title))) continue;
                 try {
@@ -190,7 +203,9 @@ final class Continue {
      * YouTube Music and TizenTube share YouTube's preview rows when they publish none of their own.
      */
     private static final Object PREVIEWS_LOCK = new Object();
-    private static final Map<String, List<Item>> previewsCached = new HashMap<>();
+    /** The last few apps rested on, with their pictures: more would hold tens of megabytes of posters. */
+    private static final int PREVIEWS_KEPT = 3;
+    private static final java.util.LinkedHashMap<String, List<Item>> previewsCached = new java.util.LinkedHashMap<>(8, 0.75f, true);
     private static final Map<String, Long> previewsAt = new HashMap<>();
 
     static List<Item> previews(Context c, String pkg, int max) {
@@ -296,6 +311,11 @@ final class Continue {
         synchronized (PREVIEWS_LOCK) {
             previewsCached.put(pkg, kept);
             previewsAt.put(pkg, now);
+            java.util.Iterator<String> old = previewsCached.keySet().iterator();
+            while (previewsCached.size() > PREVIEWS_KEPT && old.hasNext()) {
+                previewsAt.remove(old.next());
+                old.remove();
+            }
         }
         for (int i = 0; i < kept.size() && i < max; i++) out.add(kept.get(i).copy());
         return out;
@@ -582,6 +602,12 @@ final class Continue {
             ART.clear();
             artBytes = 0;
         }
+        // the apps' rows hold their posters too, and so does Top Shelf's list of what it found
+        synchronized (PREVIEWS_LOCK) {
+            previewsCached.clear();
+            previewsAt.clear();
+        }
+        TopShelf.clearCache();
     }
 
     /**
@@ -589,15 +615,24 @@ final class Continue {
      * only while it stays at least that wide, so a small thumbnail is never shrunk further.
      */
     static Bitmap load(Context c, String uri) {
+        return load(c, uri, 0);
+    }
+
+    /** A song's cover: shown no larger than a couple of hundred dp, it needn't be kept at half the screen. */
+    static final int COVER_PX = 512;
+
+    /** The same, no wider than {@code maxPx} (0 for the widest card's size). */
+    static Bitmap load(Context c, String uri, int maxPx) {
         boolean web = uri.startsWith("http");
-        Bitmap had = web ? kept(uri) : null;
+        String key = maxPx > 0 ? uri + "@" + maxPx : uri;
+        Bitmap had = web ? kept(key) : null;
         if (had != null) return had;
-        Bitmap b = fetch(c, uri);
-        if (b != null && web) keep(uri, b);
+        Bitmap b = fetch(c, uri, maxPx);
+        if (b != null && web) keep(key, b);
         return b;
     }
 
-    private static Bitmap fetch(Context c, String uri) {
+    private static Bitmap fetch(Context c, String uri, int maxPx) {
         try {
             byte[] data;
             if (uri.startsWith("http")) {
@@ -622,9 +657,12 @@ final class Continue {
             o.inJustDecodeBounds = false;
             o.inSampleSize = 1;
             // half the screen's width is the most a card ever shows of a picture
-            int want = Math.max(480, Math.max(c.getResources().getDisplayMetrics().widthPixels,
+            int want = maxPx > 0 ? maxPx : Math.max(480, Math.max(c.getResources().getDisplayMetrics().widthPixels,
                     c.getResources().getDisplayMetrics().heightPixels) / 2);
             while (o.outWidth / (o.inSampleSize * 2) >= want) o.inSampleSize *= 2;
+            // 16-bit colour is half the memory, and on a card it looks the same; a picture with
+            // transparent parts keeps its full depth, as Android ignores the preference for those
+            o.inPreferredConfig = Bitmap.Config.RGB_565;
             return BitmapFactory.decodeByteArray(data, 0, data.length, o);
         } catch (Exception | OutOfMemoryError e) {
             return null;

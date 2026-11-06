@@ -667,7 +667,8 @@ final class Picks {
             } finally {
                 con.disconnect();
             }
-        } catch (IOException e) {
+        } catch (IOException | IllegalArgumentException e) {
+            // a pasted key with a stray line break is refused as a header, not a connection error
             return false;
         }
     }

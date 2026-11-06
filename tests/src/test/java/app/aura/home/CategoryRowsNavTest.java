@@ -142,9 +142,10 @@ public class CategoryRowsNavTest {
         set(a, "gridAt", 3);
         call(a, "focusWidget", new Class<?>[]{int.class}, 0);
         run(300);
-        List<?> widgets = field(a, "widgets");
-        // the simulated TV may not let a widget take focus; then there's nothing to test here
-        org.junit.Assume.assumeTrue("a widget took focus", !widgets.isEmpty() && ((android.view.View) widgets.get(0)).hasFocus());
+        // the simulated TV runs in touch mode, where no widget takes focus: the zone must be set
+        // by focusWidget itself, as it is for a TV whose remote is in touch mode too
+        int zone = field(a, "zone");
+        Assert.assertEquals("focusWidget should put the zone on the widgets", 1, zone);
         a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_DOWN));
         int gridAt = field(a, "gridAt");
         int row = (Integer) call(a, "rowOf", new Class<?>[]{int.class}, gridAt);
@@ -211,15 +212,9 @@ public class CategoryRowsNavTest {
         List<?> widgets = field(a, "widgets");
         Assert.assertTrue(cells.isEmpty());
         Assert.assertTrue(widgets.isEmpty());
-        // the simulated TV runs in touch mode, where the rail's buttons can't take focus: then
-        // there's nothing to test here (a TV with a remote isn't in touch mode)
-        List<?> sideViews = field(a, "side");
-        android.view.View probe = (android.view.View) sideViews.get(0);
-        boolean canFocus = probe.requestFocus();
-        probe.clearFocus();
-        org.junit.Assume.assumeTrue("the rail can take focus here", canFocus);
+        // the simulated TV runs in touch mode, where the rail's buttons can't take focus: the
+        // zone has to be set by focusSide itself, not only by the focus listener
         a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT));
-        // the zone follows focus through a focus listener: let it run
         run(300);
         int zone = field(a, "zone");
         Assert.assertEquals("User must be able to reach SIDE (0) to open Settings when grid and widgets are empty", 0, zone);

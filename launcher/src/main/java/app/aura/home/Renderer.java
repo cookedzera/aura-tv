@@ -91,6 +91,12 @@ final class Renderer {
     private final String uuid, name;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService pool = Compat.pool("dlna", 3);
+    /**
+     * Events to controllers go out on their own thread: a phone that left the network answers
+     * nothing for seconds per event, and on the shared pool three such phones left nobody to
+     * answer a search or a command.
+     */
+    private final ExecutorService events = Compat.pool("dlna-events", 1);
     private final Map<String, Sub> subs = new ConcurrentHashMap<>();
     private final Random rnd = new Random();
     private volatile ServerSocket http;
@@ -104,6 +110,8 @@ final class Renderer {
         final List<URL> callbacks;
         volatile long until;
         int seq;
+        /** Events in a row that no address of the controller's took: two and it's gone. */
+        int misses;
 
         Sub(String service, List<URL> callbacks, long until) {
             this.service = service;
@@ -248,6 +256,7 @@ final class Renderer {
         if (lock != null && lock.isHeld()) lock.release();
         subs.clear();
         pool.shutdown();
+        events.shutdownNow();
     }
 
     // ---- being found (SSDP) ------------------------------------------------------------------
@@ -547,7 +556,7 @@ final class Renderer {
                         int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
                         am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(v * max / 100f), AudioManager.FLAG_SHOW_UI);
                     }
-                    pool.execute(() -> event(RC));
+                    events.execute(() -> event(RC));
                     break;
                 }
                 case "GetMute":
@@ -566,7 +575,7 @@ final class Renderer {
                         else //noinspection deprecation
                             am.setStreamMute(AudioManager.STREAM_MUSIC, mute);
                     }
-                    pool.execute(() -> event(RC));
+                    events.execute(() -> event(RC));
                     break;
                 }
                 case "ListPresets":
@@ -713,7 +722,7 @@ final class Renderer {
                 + "\r\nTIMEOUT: Second-" + MAX_AGE + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         // the first event carries everything, so the controller starts in step
         final String first = sid;
-        pool.execute(() -> {
+        events.execute(() -> {
             Sub sub = subs.get(first);
             if (sub != null) deliver(first, sub);
         });
@@ -722,7 +731,7 @@ final class Renderer {
     /** Something changed (playing, paused, stopped, a new address, the volume): every listener hears it. */
     static void changed() {
         Renderer r = running;
-        if (r != null) r.pool.execute(() -> r.event(AVT));
+        if (r != null) r.events.execute(() -> r.event(AVT));
     }
 
     static void setState(String s) {
@@ -774,8 +783,9 @@ final class Renderer {
         for (URL u : sub.callbacks) {
             int port = u.getPort() > 0 ? u.getPort() : 80;
             try (Socket c = new Socket()) {
-                c.connect(new InetSocketAddress(u.getHost(), port), 3000);
-                c.setSoTimeout(5000);
+                // a controller on the same network answers well within this; one that left never will
+                c.connect(new InetSocketAddress(u.getHost(), port), 1000);
+                c.setSoTimeout(2000);
                 String path = u.getFile().isEmpty() ? "/" : u.getFile();
                 String h = "NOTIFY " + path + " HTTP/1.1\r\nHOST: " + u.getHost() + ":" + port
                         + "\r\nCONTENT-TYPE: text/xml; charset=\"utf-8\"\r\nNT: upnp:event\r\nNTS: upnp:propchange\r\nSID: " + sid
@@ -785,10 +795,18 @@ final class Renderer {
                 o.write(b);
                 o.flush();
                 c.getInputStream().read();
+                synchronized (sub) {
+                    sub.misses = 0;
+                }
                 return;
             } catch (IOException ignored) {
                 // that address didn't answer: the next one the controller gave
             }
+        }
+        // nothing of the controller's answered twice over: it has gone, and so does its subscription
+        // (a controller still there subscribes afresh when its own timer runs out)
+        synchronized (sub) {
+            if (++sub.misses >= 2) subs.remove(sid, sub);
         }
     }
 

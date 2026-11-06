@@ -101,12 +101,9 @@ final class ControlCenter {
         if (on) {
             nowTitle.setText(p.title);
             nowBy.setText(p.by != null ? p.by : "");
-            String app = "";
-            try {
-                PackageManager pm = act.getPackageManager();
-                app = "  ·  " + String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(p.pkg, 0))).toUpperCase(Locale.getDefault());
-            } catch (Exception ignored) {
-            }
+            // the app's name from the same store as the notification rows: looked up once, not on every song
+            Object[] f = p.pkg != null ? face(p.pkg) : null;
+            String app = f != null && f[1] != null ? "  ·  " + ((String) f[0]).toUpperCase(Locale.getDefault()) : "";
             nowState.setText((p.playing ? act.getString(R.string.now_playing_caps) : act.getString(R.string.paused)) + app);
             nowBar.set(p.progress);
             nowBar.setVisibility(p.progress > 0f ? View.VISIBLE : View.INVISIBLE);
@@ -127,7 +124,7 @@ final class ControlCenter {
             nowShown = null;
         }
         if (on == (nowCard.getVisibility() == View.VISIBLE)) return;
-        if (!on && nowCard.hasFocus()) wifi.requestFocus();
+        if (!on && nowCard.hasFocus()) focusBoard();
         nowCard.setVisibility(on ? View.VISIBLE : View.GONE);
         // Tonight's pick steps aside for the song, and comes back when it ends
         if (on) {
@@ -483,6 +480,8 @@ final class ControlCenter {
         ic2.addView(inName, lp(0, 10));
         inState = inputs.tint(Ui.text(a, 10, Ui.medium, 0xFFFFFFFF), 0.7f);
         inState.setSingleLine(true);
+        // "Nichts angeschlossen" is wider than the tile: trailing dots rather than a hard cut
+        inState.setEllipsize(android.text.TextUtils.TruncateAt.END);
         ic2.addView(inState, lp(0, 2));
         inCount = inputs.tint(Ui.text(a, 9.5f, Ui.medium, 0xFFFFFFFF), 0.55f);
         inCount.setSingleLine(true);
@@ -707,7 +706,7 @@ final class ControlCenter {
 
     private void showVpn(boolean noApps, boolean on, String name) {
         if (!on && noApps) {
-            if (vpnPill.hasFocus()) wifi.requestFocus();
+            if (vpnPill.hasFocus()) focusBoard();
             vpnPill.setVisibility(View.GONE);
             return;
         }
@@ -745,8 +744,16 @@ final class ControlCenter {
     /** Kept as a field so it can be let go: a static hook left pointing here would hold the whole home screen. */
     private final Runnable notesChanged = this::notesArrived;
 
+    private final Runnable delayedNotes = this::refreshNotes;
+
+    /**
+     * Only the notification rows are read again, a moment after the last change: a download's
+     * progress ticking every second used to read the inputs, Wi-Fi, Bluetooth and memory with it.
+     */
     private void notesArrived() {
-        if (panel.getVisibility() == View.VISIBLE) refresh();
+        if (panel.getVisibility() != View.VISIBLE) return;
+        panel.removeCallbacks(delayedNotes);
+        panel.postDelayed(delayedNotes, 300);
     }
 
     /** The home screen is going: nothing static keeps pointing back at it. */
@@ -754,6 +761,8 @@ final class ControlCenter {
         isOpen = false;
         panel.removeCallbacks(delayedRefresh);
         panel.removeCallbacks(delayedBt);
+        panel.removeCallbacks(delayedNotes);
+        inputs.removeCallbacks(inputsRetry);
         if (MediaWatch.onNotes == notesChanged) MediaWatch.onNotes = null;
         // a sheet still open as home goes: its Wi-Fi or Bluetooth listener goes with it
         if (wifiSheet.isOpen()) wifiSheet.close();
@@ -761,7 +770,7 @@ final class ControlCenter {
     }
 
     /** Apps' names and icons for the rows, looked up once: decoding an icon each refresh cost frames as the board opened. */
-    private final java.util.Map<String, Object[]> appFaces = new java.util.HashMap<>();
+    private final java.util.Map<String, Object[]> appFaces = new java.util.concurrent.ConcurrentHashMap<>();
 
     private Object[] face(String pkg) {
         Object[] f = appFaces.get(pkg);
@@ -777,8 +786,40 @@ final class ControlCenter {
         return f;
     }
 
+    private int notesGen;
+
     private void refreshNotes() {
-        showNotes(MediaWatch.notes(act, noteRows.length));
+        if (panel.getVisibility() != View.VISIBLE) return;
+        final int gen = ++notesGen;
+        final int noteMax = noteRows.length;
+        new SafeThread(() -> {
+            final List<MediaWatch.Note> notes = MediaWatch.notes(act, noteMax);
+            final java.util.Map<String, Object[]> faces = faces(notes);
+            act.runOnUiThread(() -> {
+                if (gen != notesGen || act.isDestroyed() || panel.getVisibility() != View.VISIBLE) return;
+                keepFaces(faces);
+                showNotes(notes);
+            });
+        }, "cc-notes").start();
+    }
+
+    /** Off the main thread: the name and icon of each app behind {@code notes} not already known. */
+    private java.util.Map<String, Object[]> faces(List<MediaWatch.Note> notes) {
+        java.util.Map<String, Object[]> out = new java.util.HashMap<>();
+        PackageManager pm = act.getPackageManager();
+        for (MediaWatch.Note n : notes) {
+            if (out.containsKey(n.pkg) || appFaces.containsKey(n.pkg)) continue;
+            try {
+                out.put(n.pkg, new Object[]{String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(n.pkg, 0))), pm.getApplicationIcon(n.pkg)});
+            } catch (Exception e) {
+                out.put(n.pkg, new Object[]{n.pkg, null});
+            }
+        }
+        return out;
+    }
+
+    private void keepFaces(java.util.Map<String, Object[]> faces) {
+        for (java.util.Map.Entry<String, Object[]> e : faces.entrySet()) if (!appFaces.containsKey(e.getKey())) appFaces.put(e.getKey(), e.getValue());
     }
 
     private void showNotes(List<MediaWatch.Note> list) {
@@ -788,7 +829,7 @@ final class ControlCenter {
         for (int k = 0; k < noteRows.length; k++) {
             Pad row = noteRows[k];
             if (k >= list.size()) {
-                if (row.hasFocus()) wifi.requestFocus();
+                if (row.hasFocus()) focusBoard();
                 row.setVisibility(View.GONE);
                 continue;
             }
@@ -884,7 +925,7 @@ final class ControlCenter {
         LinearLayout.LayoutParams xl = (LinearLayout.LayoutParams) notesBox.getLayoutParams();
         xl.topMargin = on ? Ui.dp(12) : Ui.dp(18);
         notesBox.setLayoutParams(xl);
-        for (View v : new View[]{board, wifiSheet, btSheet}) {
+        for (View v : new View[]{board, wifiSheet, btSheet, inputSheet}) {
             FrameLayout.LayoutParams l = (FrameLayout.LayoutParams) v.getLayoutParams();
             l.gravity = Gravity.END | (on ? Gravity.TOP : Gravity.CENTER_VERTICAL);
             l.topMargin = on ? Ui.dp(84) : 0;
@@ -896,7 +937,7 @@ final class ControlCenter {
     // ---- open / close / keys -----------------------------------------------------------------
 
     private boolean isOpen;
-    private final Runnable delayedRefresh = this::refresh, delayedBt = this::showBt;
+    private final Runnable delayedRefresh = this::refresh, delayedBt = this::showBt, inputsRetry = this::buildSegments;
 
     void open(boolean inputs) {
         isOpen = true;
@@ -942,8 +983,11 @@ final class ControlCenter {
         isOpen = false;
         panel.removeCallbacks(delayedRefresh);
         panel.removeCallbacks(delayedBt);
+        inputs.removeCallbacks(inputsRetry);
         if (wifiSheet.isOpen()) hideWifi(false);
         if (btSheet.isOpen()) hideBt(false);
+        // left open, it came back over the board next time, stale, with the focus underneath it
+        if (inputSheet.isOpen()) hideInputs(false);
         panel.animate().alpha(0f).setStartDelay(0).setDuration(animate ? 240 : 0).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     if (isOpen) return;
@@ -986,6 +1030,11 @@ final class ControlCenter {
 
     private void showBt() {
         if (!isOpen) return;
+        if (BluetoothAdapter.getDefaultAdapter() == null) {
+            // a box with no Bluetooth at all: Android's settings, not a sheet that can't switch anything on
+            host.guarded(() -> launch(new android.content.Intent(android.provider.Settings.ACTION_SETTINGS), bt));
+            return;
+        }
         board.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     if (btSheet.isOpen()) board.setVisibility(View.INVISIBLE);
@@ -1004,7 +1053,7 @@ final class ControlCenter {
 
     boolean back() {
         if (inputSheet.isOpen()) {
-            hideInputs();
+            hideInputs(true);
             return true;
         }
         if (btSheet.isOpen()) {
@@ -1018,8 +1067,9 @@ final class ControlCenter {
 
     /** Arrow keys move between modules by geometry; the volume slider keeps up/down for itself. */
     boolean handleKey(int code, View focused) {
-        // inside the Wi-Fi sheet the list scrolls and focuses itself
-        if (wifiSheet.isOpen() || btSheet.isOpen()) return false;
+        // inside a sheet the list scrolls and focuses itself; taking the key here sent focus to the
+        // Wi-Fi button on the hidden board (requestFocus doesn't mind an invisible parent)
+        if (wifiSheet.isOpen() || btSheet.isOpen() || inputSheet.isOpen()) return false;
         int dir;
         switch (code) {
             case KeyEvent.KEYCODE_DPAD_LEFT:
@@ -1040,7 +1090,7 @@ final class ControlCenter {
         if (focused == volume && (dir == View.FOCUS_UP || dir == View.FOCUS_DOWN)) return false;
         List<View> all = new ArrayList<>(focusables);
         if (focused == null || !all.contains(focused)) {
-            wifi.requestFocus();
+            focusBoard();
             return true;
         }
         View next = Nav.next(all, focused, dir);
@@ -1052,6 +1102,11 @@ final class ControlCenter {
 
     /** Each refresh's readings, so an older one arriving late doesn't paint over a newer one. */
     private int readGen;
+
+    /** Location (for Wi-Fi scanning) was just allowed while the Wi-Fi sheet waited on it. */
+    void wifiGranted() {
+        if (wifiSheet.isOpen()) wifiSheet.granted();
+    }
 
     void refresh() {
         buildSegments();
@@ -1069,17 +1124,10 @@ final class ControlCenter {
             String mine = Vpn.chosen(act, apps);
             final String vpnName = mine != null ? Vpn.label(act, mine) : null;
             final List<MediaWatch.Note> notes = MediaWatch.notes(act, noteMax);
-            final java.util.Map<String, Object[]> faces = new java.util.HashMap<>();
-            PackageManager pm = act.getPackageManager();
-            for (MediaWatch.Note n : notes) {
-                if (faces.containsKey(n.pkg)) continue;
-                try {
-                    faces.put(n.pkg, new Object[]{String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(n.pkg, 0))), pm.getApplicationIcon(n.pkg)});
-                } catch (Exception e) {
-                    faces.put(n.pkg, new Object[]{n.pkg, null});
-                }
-            }
+            final java.util.Map<String, Object[]> faces = faces(notes);
             final boolean online = Compat.onWifi(Compat.svc(act, ConnectivityManager.class), true);
+            // a wired box is online but not on Wi-Fi: the button lights, its caption says which
+            final boolean onWifi = online && Compat.onWifi(Compat.svc(act, ConnectivityManager.class), false);
             BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
             final boolean btOn = ba != null && ba.isEnabled();
             final String btName = btOn ? btSheet.connectedName() : act.getString(R.string.bluetooth_off);
@@ -1091,10 +1139,10 @@ final class ControlCenter {
                 caption(picture, pic);
                 caption(sound, snd);
                 showVpn(noVpnApps, vpnOn, vpnName);
-                for (java.util.Map.Entry<String, Object[]> e : faces.entrySet()) if (!appFaces.containsKey(e.getKey())) appFaces.put(e.getKey(), e.getValue());
+                keepFaces(faces);
                 showNotes(notes);
                 wifi.setOn(online);
-                wifiCap.setText(online ? act.getString(R.string.wi_fi) : act.getString(R.string.offline));
+                wifiCap.setText(act.getString(onWifi ? R.string.wi_fi : online ? R.string.ethernet : R.string.offline));
                 bt.setOn(btOn);
                 btCap.setText(btName);
                 showMemory(mi);
@@ -1208,48 +1256,59 @@ final class ControlCenter {
         return min < 60 ? min + "m" : (min / 60) + "h " + (min % 60) + "m";
     }
 
+    /**
+     * The TV's inputs, read off the main thread: asking the input service for each input's state
+     * and name (and the CEC service for the box behind it) held the remote for a second or more on
+     * a slow TV, every time Control Center opened or a notification came in. What was found is
+     * applied on the main thread, and only when an input, its state or its name actually changed.
+     */
     private void buildSegments() {
-        try {
-            buildSegmentsNow();
-        } catch (RuntimeException e) {
-            // the TV's input service not answering: Control Center opens without the input buttons
-            // (a stick without one, like a Fire TV Stick, simply has none: nothing to report)
-            if (!Compat.noTvInputs(act)) Trouble.caught("Control Center inputs", e);
-        }
+        final int gen = ++inputsGen;
+        new SafeThread(() -> {
+            final Object[] found;
+            try {
+                found = readInputs();
+            } catch (RuntimeException e) {
+                // the TV's input service not answering: Control Center opens without the input buttons
+                // (a stick without one, like a Fire TV Stick, simply has none: nothing to report)
+                if (!Compat.noTvInputs(act)) Trouble.caught("Control Center inputs", e);
+                return;
+            }
+            act.runOnUiThread(() -> {
+                if (gen != inputsGen || act.isDestroyed()) return;
+                applyInputs(found);
+            });
+        }, "cc-inputs").start();
     }
 
-    private void buildSegmentsNow() {
+    /** Off the main thread: {@code {signature, sources, lead}}, or null for a TV with no input service. */
+    private Object[] readInputs() {
         TvInputManager tim = (TvInputManager) act.getSystemService(Context.TV_INPUT_SERVICE);
-        if (tim == null) {
-            inputs.setVisibility(View.GONE);
-            return;
-        }
+        if (tim == null) return null;
         List<TvInputInfo> list = new ArrayList<>();
         for (TvInputInfo info : tim.getTvInputList()) {
             // hiding an input in the TV's settings arrived in Android 7
             if (android.os.Build.VERSION.SDK_INT >= 24 && info.isHidden(act)) continue;
             if (info.isPassthroughInput() || builtInTuner(info)) list.add(info);
         }
-        // Sony and TCL sets can answer with no inputs at all for a while after switching on: asked
-        // again a few times before Control Center settles for none
-        if (list.isEmpty() && Compat.justBooted() && inputRetries < 5) {
-            inputRetries++;
-            inputs.postDelayed(this::buildSegments, 2000);
+        // each input's name once: it was looked up again for the sort, the signature and the row
+        final java.util.Map<String, String> labels = new java.util.HashMap<>();
+        final java.util.Map<String, Integer> states = new java.util.HashMap<>();
+        for (TvInputInfo info : list) {
+            labels.put(info.getId(), label(info));
+            states.put(info.getId(), tim.getInputState(info.getId()));
         }
         // HDMI first, then the TV's own tuners (antenna, cable, satellite), then the rest
         java.util.Collections.sort(list, (x, y) -> {
             int tx = order(x), ty = order(y);
-            return tx != ty ? tx - ty : label(x).compareTo(label(y));
+            return tx != ty ? tx - ty : labels.get(x.getId()).compareTo(labels.get(y.getId()));
         });
-        // read again only when an input, its state, or its CEC name actually changed
         StringBuilder sig = new StringBuilder();
-        for (TvInputInfo info : list) sig.append(info.getId()).append('=').append(tim.getInputState(info.getId())).append(':').append(label(info)).append('|');
-        if (sig.toString().equals(inputsSig)) return;
-        inputsSig = sig.toString();
-        sources.clear();
+        for (TvInputInfo info : list) sig.append(info.getId()).append('=').append(states.get(info.getId())).append(':').append(labels.get(info.getId())).append('|');
+        List<InputSheet.Source> out = new ArrayList<>();
         InputSheet.Source lead = null;
         for (TvInputInfo info : list) {
-            int state = tim.getInputState(info.getId());
+            int state = states.get(info.getId());
             boolean tuner = !info.isPassthroughInput();
             boolean live = !tuner && state == TvInputManager.INPUT_STATE_CONNECTED;
             String what = tuner ? act.getString(R.string.input_channels)
@@ -1257,12 +1316,34 @@ final class ControlCenter {
                     : state == TvInputManager.INPUT_STATE_CONNECTED_STANDBY ? act.getString(R.string.input_standby)
                     : act.getString(R.string.input_nothing);
             Intent open = tuner ? tunerIntent(info) : new Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(info.getId()));
-            InputSheet.Source src = new InputSheet.Source(label(info), what, glyph(info), live, open);
-            sources.add(src);
+            InputSheet.Source src = new InputSheet.Source(labels.get(info.getId()), what, glyph(info), live, open);
+            out.add(src);
             if (lead == null && live) lead = src;
         }
-        if (lead == null && !sources.isEmpty()) lead = sources.get(0);
+        if (lead == null && !out.isEmpty()) lead = out.get(0);
+        return new Object[]{sig.toString(), out, lead};
+    }
+
+    @SuppressWarnings("unchecked")
+    private void applyInputs(Object[] found) {
+        if (found == null) {
+            inputs.setVisibility(View.GONE);
+            return;
+        }
+        List<InputSheet.Source> list = (List<InputSheet.Source>) found[1];
+        // Sony and TCL sets can answer with no inputs at all for a while after switching on: asked
+        // again a few times before Control Center settles for none
+        if (list.isEmpty() && Compat.justBooted() && inputRetries < 5) {
+            inputRetries++;
+            inputs.removeCallbacks(inputsRetry);
+            inputs.postDelayed(inputsRetry, 2000);
+        }
+        if (found[0].equals(inputsSig)) return;
+        inputsSig = (String) found[0];
+        sources.clear();
+        sources.addAll(list);
         inputs.setVisibility(sources.isEmpty() ? View.GONE : View.VISIBLE);
+        InputSheet.Source lead = (InputSheet.Source) found[2];
         if (lead == null) return;
         inIcon.setImageResource(lead.glyph);
         inName.setText(lead.name);
@@ -1270,7 +1351,7 @@ final class ControlCenter {
         inCount.setText(act.getResources().getQuantityString(R.plurals.n_sources, sources.size(), sources.size()));
     }
 
-    private int inputRetries;
+    private int inputRetries, inputsGen;
     private String inputsSig;
 
     private static int order(TvInputInfo info) {
@@ -1329,12 +1410,24 @@ final class ControlCenter {
         inputSheet.open(sources);
     }
 
-    private void hideInputs() {
+    private void hideInputs(boolean focusToggle) {
         inputSheet.close();
         board.animate().cancel();
         board.setVisibility(View.VISIBLE);
         board.setAlpha(1f);
-        inputs.requestFocus();
+        if (focusToggle) inputs.requestFocus();
+    }
+
+    /**
+     * Focus to whatever is showing: the board's first button, or the open sheet. Sending it to the
+     * board while a sheet covered it left the focus somewhere no one could see.
+     */
+    private void focusBoard() {
+        if (board.getVisibility() == View.VISIBLE) wifi.requestFocus();
+        else if (inputSheet.isOpen()) inputSheet.requestFocus();
+        else if (btSheet.isOpen()) btSheet.requestFocus();
+        else if (wifiSheet.isOpen()) wifiSheet.requestFocus();
+        else wifi.requestFocus();
     }
 
     // ---- actions -----------------------------------------------------------------------------

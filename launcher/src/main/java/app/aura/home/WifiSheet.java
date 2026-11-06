@@ -73,10 +73,13 @@ final class WifiSheet extends GlassFrame {
      * hotspots they hang off) don't take kindly to, so it's never repeated on a timer.
      */
     private final Runnable scan;
+    /** The list is drawn again a moment after the last word from Android: connecting brings five or ten in a row. */
+    private final Runnable settle = this::rebuild;
     private final BroadcastReceiver changes = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent i) {
-            rebuild();
+            handler.removeCallbacks(settle);
+            handler.postDelayed(settle, 150);
         }
     };
 
@@ -126,6 +129,8 @@ final class WifiSheet extends GlassFrame {
         LinearLayout jcol = new LinearLayout(a);
         jcol.setOrientation(LinearLayout.VERTICAL);
         joinLabel = Ui.caps(a, 6.5f, 0x99FFFFFF, 0.2f);
+        joinLabel.setSingleLine(true);
+        joinLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
         jcol.addView(joinLabel);
         password = new EditText(a);
         password.setSingleLine(true);
@@ -224,9 +229,23 @@ final class WifiSheet extends GlassFrame {
         first.requestFocus();
     }
 
-    void close() {
-        if (speed != null) speed.cancel();
+    /** Location was just allowed: the scan that came back empty without it is run again now. */
+    void granted() {
+        if (getVisibility() != View.VISIBLE) return;
         handler.removeCallbacks(scan);
+        handler.post(scan);
+        rebuild();
+    }
+
+    void close() {
+        // a cancelled run never reports back, so it is forgotten here, or no test could start again
+        if (speed != null) {
+            speed.cancel();
+            speed = null;
+            speedText = "";
+        }
+        handler.removeCallbacks(scan);
+        handler.removeCallbacks(settle);
         if (listening) {
             act.unregisterReceiver(changes);
             listening = false;
@@ -341,13 +360,14 @@ final class WifiSheet extends GlassFrame {
             // Wi-Fi when location is switched on) the essentials still work from here.
             if (connected) {
                 list.addView(action(named ? current : act.getString(R.string.disconnect), act.getString(R.string.connected_caps), true, () -> {
-                    wifi.disconnect();
-                    host.hud(R.drawable.ic_wifi, act.getString(R.string.disconnected));
+                    // Android 10 and later refuse this from an app: then the system's own screen
+                    if (wifi.disconnect()) host.hud(R.drawable.ic_wifi, act.getString(R.string.disconnected));
+                    else host.openSettings(new Intent(Settings.ACTION_WIFI_SETTINGS));
                 }), rowParams());
             } else {
                 list.addView(action(act.getString(R.string.reconnect), "", false, () -> {
-                    wifi.reconnect();
-                    status.setText(act.getString(R.string.connecting));
+                    if (wifi.reconnect()) status.setText(act.getString(R.string.connecting));
+                    else host.openSettings(new Intent(Settings.ACTION_WIFI_SETTINGS));
                 }), rowParams());
             }
         }
@@ -574,8 +594,8 @@ final class WifiSheet extends GlassFrame {
 
     private void choose(Net n) {
         if (n.connected) {
-            wifi.disconnect();
-            host.hud(R.drawable.ic_wifi, act.getString(R.string.disconnected_from, n.ssid));
+            if (wifi.disconnect()) host.hud(R.drawable.ic_wifi, act.getString(R.string.disconnected_from, n.ssid));
+            else host.openSettings(new Intent(Settings.ACTION_WIFI_SETTINGS));
         } else if (n.configId >= 0) {
             connect(n.configId, n.ssid);
         } else if (n.caps != null && n.caps.contains("EAP")) {
@@ -618,7 +638,10 @@ final class WifiSheet extends GlassFrame {
             host.hud(R.drawable.ic_info, act.getString(R.string.couldnt_join, ssid));
             return;
         }
-        wifi.reconnect();
+        if (!wifi.reconnect()) {
+            host.openSettings(new Intent(Settings.ACTION_WIFI_SETTINGS));
+            return;
+        }
         status.setText(act.getString(R.string.connecting_to_ellipsis, ssid));
         host.hud(R.drawable.ic_wifi, act.getString(R.string.joining, ssid));
     }

@@ -313,9 +313,16 @@ final class AdbTls {
      */
     static void pair(InetSocketAddress at, String code, KeyPair key, String name) throws IOException {
         Socket plain = new Socket();
-        plain.connect(at, 5000);
-        plain.setSoTimeout(15_000);
-        try (SSLSocket s = wrap(plain, at, key)) {
+        SSLSocket tls;
+        try {
+            plain.connect(at, 5000);
+            plain.setSoTimeout(15_000);
+            tls = wrap(plain, at, key);
+        } catch (IOException | RuntimeException e) {
+            try { plain.close(); } catch (IOException ignored) { }
+            throw e;
+        }
+        try (SSLSocket s = tls) {
             // the password is the code, bound to this very TLS session
             byte[] ekm = keyingMaterial(s, "adb-label\0", 64);
             byte[] codeBytes = code.getBytes(StandardCharsets.US_ASCII), pw = Arrays.copyOf(codeBytes, codeBytes.length + ekm.length);

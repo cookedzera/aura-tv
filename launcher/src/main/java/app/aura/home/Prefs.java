@@ -51,8 +51,13 @@ final class Prefs {
         // some TVs draw over the whole screen (a soundbar on HDMI: black, with sound)
         return of(c).getBoolean(key, !NAMES_ALWAYS.equals(key) && !MINE_ONLY.equals(key) && !BLACK.equals(key)
                 && !FLYOVERS.equals(key) && !INPUT_PREVIEW.equals(key) && !SCENES.equals(key) && !BEAT.equals(key)
-                && !AERIALS_AUTO.equals(key));
+                && !AERIALS_AUTO.equals(key) && !AERIALS_METERED.equals(key) && !PHOTO_SHARP.equals(key));
     }
+
+    /** Whether the aerials may stream over a connection Android calls metered (a phone's hotspot, a capped plan). */
+    static final String AERIALS_METERED = "set_aerials_metered";
+    /** The photograph behind the grid stays nearly sharp while browsing, instead of half-soft. */
+    static final String PHOTO_SHARP = "set_photo_sharp";
 
     static void set(Context c, String key, boolean v) {
         of(c).edit().putBoolean(key, v).apply();

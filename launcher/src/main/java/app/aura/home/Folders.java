@@ -53,7 +53,7 @@ final class Folders {
             for (Iterator<String> it = o.keys(); it.hasNext(); ) {
                 String id = it.next();
                 JSONObject f = o.getJSONObject(id);
-                Folder folder = new Folder(id, f.optString("name", "Folder"));
+                Folder folder = new Folder(id, f.optString("name", c.getString(R.string.folder)));
                 JSONArray apps = f.optJSONArray("apps");
                 for (int i = 0; apps != null && i < apps.length(); i++) folder.apps.add(apps.getString(i));
                 out.put(id, folder);

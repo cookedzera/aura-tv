@@ -171,6 +171,8 @@ final class Sayings extends Scene {
                     show(q);
                     main.postDelayed(turn, EVERY_MS);
                 });
+                // the network's slow answer (up to half a minute) comes after the quote, not before it
+                if (low && running) refill(app);
             });
         } catch (java.util.concurrent.RejectedExecutionException ignored) {
         }
@@ -184,10 +186,8 @@ final class Sayings extends Scene {
         Set<String> seen = new HashSet<>(p.getStringSet("seen", new HashSet<>()));
         File f = new File(new File(c.getFilesDir(), "sayings"), "pool.json");
         List<String[]> pool = readPool(f);
-        // running low: fifty more, keeping only those never shown
-        if (pool.size() < 8) {
-            for (String[] q : fetch()) if (!seen.contains(key(q[0])) && !contains(pool, q[0])) pool.add(q);
-        }
+        // running low: more are fetched afterwards (see refill), never before the first quote is up
+        low = pool.size() < 8;
         String[] chosen = null;
         while (!pool.isEmpty() && chosen == null) {
             String[] q = pool.remove(0);
@@ -210,6 +210,22 @@ final class Sayings extends Scene {
         p.edit().putStringSet("seen", seen).apply();
         writePool(f, pool);
         return chosen;
+    }
+
+    /** Whether the last {@link #pick} found the pool nearly empty. */
+    private static volatile boolean low;
+
+    /** Fifty more quotes into the pool, keeping only those never shown here. Off the main thread, after a quote is already on screen. */
+    private static synchronized void refill(Context c) {
+        List<String[]> got = fetch();
+        if (got.isEmpty()) return;
+        SharedPreferences p = c.getSharedPreferences("sayings", Context.MODE_PRIVATE);
+        Set<String> seen = p.getStringSet("seen", new HashSet<>());
+        File f = new File(new File(c.getFilesDir(), "sayings"), "pool.json");
+        List<String[]> pool = readPool(f);
+        for (String[] q : got) if (!seen.contains(key(q[0])) && !contains(pool, q[0])) pool.add(q);
+        writePool(f, pool);
+        low = false;
     }
 
     private static String key(String quote) {

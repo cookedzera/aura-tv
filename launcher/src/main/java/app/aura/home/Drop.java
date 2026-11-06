@@ -139,20 +139,36 @@ final class Drop {
         token = t.toString();
     }
 
+    /** The link the page is served at while the server is open, else null. */
+    String url() {
+        return server != null ? url : null;
+    }
+
     /** Opens the server; returns the link to show, or null when the TV has no local address. */
     String start() {
         String ip = address(app);
         if (ip == null) return null;
         ServerSocket ss = null;
-        for (int port : new int[]{PORT, 0}) {
-            try {
-                ss = new ServerSocket();
-                ss.setReuseAddress(true);
-                ss.bind(new InetSocketAddress(port));
-                break;
-            } catch (IOException e) {
-                close(ss);
-                ss = null;
+        // on the Wi-Fi or Ethernet address the QR code names, so a VPN's or a hotspot's side of the
+        // TV never answers; every interface only if that address won't take it
+        InetAddress[] on;
+        try {
+            on = new InetAddress[]{InetAddress.getByName(ip), null};
+        } catch (IOException e) {
+            on = new InetAddress[]{null};
+        }
+        bind:
+        for (InetAddress at : on) {
+            for (int port : new int[]{PORT, 0}) {
+                try {
+                    ss = new ServerSocket();
+                    ss.setReuseAddress(true);
+                    ss.bind(at != null ? new InetSocketAddress(at, port) : new InetSocketAddress(port));
+                    break bind;
+                } catch (IOException e) {
+                    close(ss);
+                    ss = null;
+                }
             }
         }
         if (ss == null) return null;
@@ -185,9 +201,19 @@ final class Drop {
 
     // ---- requests ----------------------------------------------------------------------------
 
+    /** Connections being served right now: a few more than the pool's threads wait, any beyond that are turned away. */
+    private final java.util.concurrent.atomic.AtomicInteger busy = new java.util.concurrent.atomic.AtomicInteger();
+
     private void serve(Socket s) {
+        if (busy.incrementAndGet() > 4) {
+            busy.decrementAndGet();
+            close(s);
+            return;
+        }
         try {
-            s.setSoTimeout(30_000);
+            // the request line and headers must arrive promptly (a connection that trickles them in
+            // would hold one of the few threads); the upload itself may take its time
+            s.setSoTimeout(10_000);
             InputStream in = new BufferedInputStream(s.getInputStream());
             String[] req = line(in).split(" ");
             Map<String, String> head = new HashMap<>();
@@ -197,6 +223,7 @@ final class Drop {
                 int colon = h.indexOf(':');
                 if (colon > 0) head.put(h.substring(0, colon).trim().toLowerCase(Locale.ROOT), h.substring(colon + 1).trim());
             }
+            s.setSoTimeout(30_000);
             if (req.length < 2) return;
             String method = req[0], target = req[1], query = "";
             int q = target.indexOf('?');
@@ -237,7 +264,7 @@ final class Drop {
             } else if (rest.equals("/")) {
                 send(s, 200, "text/html; charset=utf-8", asset("drop.html"));
             } else if (rest.equals("/list")) {
-                JSONObject o = new JSONObject().put("items", Mine.list(app)).put("only", Prefs.on(app, Prefs.MINE_ONLY));
+                JSONObject o = new JSONObject().put("items", Mine.list(app)).put("only", Prefs.on(app, Prefs.MINE_ONLY)).put("keep", Mine.keep(app));
                 send(s, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
             } else if (rest.startsWith("/t/")) {
                 File f = Mine.thumb(app, rest.substring(3));
@@ -327,6 +354,7 @@ final class Drop {
             }
         } catch (IOException | JSONException | RuntimeException ignored) {
         } finally {
+            busy.decrementAndGet();
             close(s);
         }
     }
@@ -477,6 +505,9 @@ final class Drop {
             main.post(() -> listener.onAdded(e, index, count));
             send(s, 200, "application/json", new JSONObject().put("ok", true).put("id", e.optString("id"))
                     .put("title", e.optString("place")).toString().getBytes(StandardCharsets.UTF_8));
+        } catch (Mine.Full e) {
+            // the page stops its queue on this, rather than sending on and on into a full TV
+            fail(s, name, 409, e.getMessage());
         } catch (Mine.Unsupported e) {
             fail(s, name, 415, e.getMessage());
         } catch (OutOfMemoryError e) {
@@ -655,7 +686,7 @@ final class Drop {
 
     private static void send(Socket s, int code, String type, byte[] body, String extra) throws IOException {
         String reason = code == 200 ? "OK" : code == 302 ? "Found" : code == 404 ? "Not Found"
-                : code == 403 ? "Forbidden" : code == 413 ? "Payload Too Large" : code == 415 ? "Unsupported Media Type" : "Error";
+                : code == 403 ? "Forbidden" : code == 409 ? "Conflict" : code == 413 ? "Payload Too Large" : code == 415 ? "Unsupported Media Type" : "Error";
         String h = "HTTP/1.1 " + code + " " + reason + "\r\nContent-Type: " + type + "\r\nContent-Length: " + body.length
                 + "\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n" + extra + "\r\n";
         OutputStream o = s.getOutputStream();

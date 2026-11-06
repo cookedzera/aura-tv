@@ -73,6 +73,8 @@ final class Welcome extends FrameLayout {
     private final List<String[]> features = new ArrayList<>();
     private View pageView;
     private int page = -1;
+    /** True when "Keep the defaults" jumped straight to the last page, past the look pages. */
+    private boolean skipped;
 
     // the page's focusable things, moved through by hand
     private final List<View> targets = new ArrayList<>();
@@ -172,7 +174,9 @@ final class Welcome extends FrameLayout {
         if (code == KeyEvent.KEYCODE_BACK) {
             // the two ways of setting Home up lead back to the choice between them
             if (setupBusy || retireBusy) return true;
-            if (page > 0) show(page == 7 || page == 9 ? 5 : page == 5 || page == 6 ? 4 : page == 8 ? 0 : page == 10 ? 8 : page == 1 ? 10 : page - 1, -1);
+            // "Keep the defaults" skipped the look pages: Back from the last page goes to the first, not to one never shown
+            if (page > 0) show(page == 7 || page == 9 ? 5 : page == 5 || page == 6 ? 4 : page == 8 ? 0 : page == 10 ? 8 : page == 1 ? 10
+                    : page == 3 && skipped ? 0 : page - 1, -1);
             return true;
         }
         if (Pad.isConfirm(code)) {
@@ -232,8 +236,8 @@ final class Welcome extends FrameLayout {
         for (int i = 0; i < dots.getChildCount(); i++) {
             View d = dots.getChildAt(i);
             LinearLayout.LayoutParams dl = (LinearLayout.LayoutParams) d.getLayoutParams();
-            // the Home setup pages belong to the last step
-            boolean here = i == (p == 8 ? 1 : p == 0 ? 0 : Math.min(p, 3) + 1);
+            // style and arrange are one step; the Home setup pages belong to the last step
+            boolean here = i == (p == 8 || p == 10 ? 1 : p == 0 ? 0 : Math.min(p, 3) + 1);
             dl.width = Ui.dp(here ? 20 : 6);
             d.setLayoutParams(dl);
             d.setAlpha(here ? 0.95f : 0.35f);
@@ -260,11 +264,15 @@ final class Welcome extends FrameLayout {
         body.setText(act.getString(R.string.a_calm_quick_home_for));
         col.addView(body, wrap(14));
         LinearLayout buttons = new LinearLayout(act);
-        buttons.addView(button(act.getString(R.string.get_started), true, () -> show(8, 1)), wrap(0));
+        buttons.addView(button(act.getString(R.string.get_started), true, () -> {
+            skipped = false;
+            show(8, 1);
+        }), wrap(0));
         LinearLayout.LayoutParams sl = wrap(0);
         sl.leftMargin = Ui.dp(14);
         // keeping the defaults still passes by the Home button, where Android won't hand Home over itself
         buttons.addView(button(act.getString(R.string.keep_the_defaults), false, () -> {
+            skipped = true;
             if (HomeRole.needsSetup(act)) show(3, 1);
             else finish();
         }), sl);
@@ -597,7 +605,8 @@ final class Welcome extends FrameLayout {
         words.addView(h);
         TextView s = Ui.text(act, 12.5f, Ui.regular, 0xA6FFFFFF);
         s.setSingleLine(false);
-        s.setMaxLines(2);
+        s.setMaxLines(3);
+        s.setEllipsize(android.text.TextUtils.TruncateAt.END);
         s.setText(how);
         words.addView(s, wrap(2));
         LinearLayout.LayoutParams wl = new LinearLayout.LayoutParams(Ui.dp(500), ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -811,7 +820,10 @@ final class Welcome extends FrameLayout {
                 retireStatus.setText(took == null ? act.getString(R.string.aura_lost_the_connection_to)
                         : act.getString(R.string.android_didnt_allow_it_on));
             });
-        }, "welcome-retire").start();
+        }, "welcome-retire", () -> {
+            retireBusy = false;
+            if (page == 9) retireStatus.setText(act.getString(R.string.aura_lost_the_connection_to));
+        }).start();
     }
 
     private Drop pairDrop;
@@ -901,7 +913,7 @@ final class Welcome extends FrameLayout {
         String ip = Drop.address(act);
         TextView code = Ui.text(act, 15, android.graphics.Typeface.MONOSPACE, 0xFFFFFFFF);
         code.setSingleLine(false);
-        code.setText("adb connect " + (ip != null ? ip : "<the TV's IP>") + ":5555\nadb shell pm grant " + act.getPackageName()
+        code.setText("adb connect " + (ip != null ? ip : "<" + act.getString(R.string.the_tvs_ip) + ">") + ":5555\nadb shell pm grant " + act.getPackageName()
                 + " android.permission.WRITE_SECURE_SETTINGS");
         code.setLineSpacing(Ui.dpf(6), 1f);
         code.setBackground(pill(0x33000000, 14));

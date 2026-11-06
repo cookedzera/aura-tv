@@ -342,7 +342,7 @@ final class NowPlaying extends FrameLayout {
                 fetching = uri;
                 final String want = uri;
                 new SafeThread(() -> {
-                    Bitmap loaded = Continue.load(act, want);
+                    Bitmap loaded = Continue.load(act, want, Continue.COVER_PX);
                     handler.post(() -> {
                         if (want.equals(fetching)) fetching = null;
                         boolean current = isOpen() && want.equals(MediaWatch.extractArtUri(controller != null ? MediaWatch.meta(controller) : null));
@@ -464,9 +464,9 @@ final class NowPlaying extends FrameLayout {
         }
         long pos = st.getPosition();
         long updated = st.getLastPositionUpdateTime();
-        float speed = st.getPlaybackSpeed();
+        float speed = MediaWatch.speed(st);
         if (st.getState() == PlaybackState.STATE_PLAYING && updated > 0) {
-            pos += (long) (Math.max(0, SystemClock.elapsedRealtime() - updated) * (speed > 0f ? speed : 1f));
+            pos += (long) (Math.max(0, SystemClock.elapsedRealtime() - updated) * speed);
         }
         pos = Math.max(0, Math.min(dur, pos));
         bar.setVisibility(VISIBLE);

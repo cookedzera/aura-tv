@@ -23,8 +23,19 @@ final class Tiles {
         void paint(Canvas c, int w, int h);
     }
 
-    /** Lifted logos by package and size; null marks a banner that had nothing to lift. */
-    private static final Map<String, Bitmap> LOGOS = new HashMap<>();
+    /**
+     * Lifted logos by package and size, the last few dozen used; null marks a banner that had
+     * nothing to lift. Lifted no wider than {@link #MARK_PX} and scaled up to draw: a mark is a
+     * flat shape, which scales without a trace, and at the switcher's size each one was over a
+     * megabyte, kept for good.
+     */
+    private static final Map<String, Bitmap> LOGOS = new java.util.LinkedHashMap<String, Bitmap>(32, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Bitmap> eldest) {
+            return size() > 40;
+        }
+    };
+    private static final int MARK_PX = 320;
 
     static void trim() {
         synchronized (LOGOS) {
@@ -294,24 +305,28 @@ final class Tiles {
     private static void mark(Canvas c, AppRepo.App a, int w, int h) {
         // a pane not laid out yet (or hidden, as the widgets are in the tvOS style) has nothing to draw into
         if (w <= 0 || h <= 0) return;
-        String key = a.pkg + "@" + w + "x" + h;
+        // lifted at a modest size whatever the pane's, and scaled up to fit it
+        int lw = Math.min(w, MARK_PX), lh = Math.max(1, Math.round(h * lw / (float) w));
+        float k = w / (float) lw;
+        String key = a.pkg + "@" + lw + "x" + lh;
         Bitmap logo;
         synchronized (LOGOS) {
             if (!LOGOS.containsKey(key)) {
-                Bitmap lifted = a.banner != null ? lift(a.banner, w, h) : null;
-                if (lifted == null && a.icon != null) lifted = liftIcon(a.icon, h);
+                Bitmap lifted = a.banner != null ? lift(a.banner, lw, lh) : null;
+                if (lifted == null && a.icon != null) lifted = liftIcon(a.icon, lh);
                 LOGOS.put(key, lifted != null ? withShadow(lifted) : null);
             }
             logo = LOGOS.get(key);
         }
         if (logo != null) {
             c.save();
-            if (logo.getWidth() == w) {
+            c.scale(k, k);
+            if (logo.getWidth() == lw && logo.getHeight() == lh) {
                 // a banner's mark: a little breathing room, so no mark touches the pane's rounded edge
-                c.scale(0.8f, 0.8f, w / 2f, h / 2f);
+                c.scale(0.8f, 0.8f, lw / 2f, lh / 2f);
                 c.drawBitmap(logo, 0, 0, new Paint(Paint.FILTER_BITMAP_FLAG));
             } else {
-                c.drawBitmap(logo, (w - logo.getWidth()) / 2f, (h - logo.getHeight()) / 2f, new Paint(Paint.FILTER_BITMAP_FLAG));
+                c.drawBitmap(logo, (lw - logo.getWidth()) / 2f, (lh - logo.getHeight()) / 2f, new Paint(Paint.FILTER_BITMAP_FLAG));
             }
             c.restore();
         } else if (a.icon != null) {

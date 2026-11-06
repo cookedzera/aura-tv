@@ -123,18 +123,30 @@ final class Card extends View {
             } else {
                 // painted for another size: let go, the card paints its own
                 ready = null;
-                bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
-                Canvas cv = new Canvas(bitmap);
-                cv.scale(bw / (float) w, bh / (float) h);
-                painter.paint(cv, w, h);
+                try {
+                    bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
+                    Canvas cv = new Canvas(bitmap);
+                    cv.scale(bw / (float) w, bh / (float) h);
+                    painter.paint(cv, w, h);
+                } catch (OutOfMemoryError e) {
+                    // a 1 GB TV out of room as a shelf refreshes: this card paints straight to the
+                    // screen each time instead, and the caches make space for the next one
+                    bitmap = null;
+                    Continue.trim();
+                    Tiles.trim();
+                }
             }
-            BitmapShader bs = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
-            if (bw != w || bh != h) {
-                Matrix up = new Matrix();
-                up.setScale(w / (float) bw, h / (float) bh);
-                bs.setLocalMatrix(up);
+            if (bitmap != null) {
+                BitmapShader bs = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                if (bw != w || bh != h) {
+                    Matrix up = new Matrix();
+                    up.setScale(w / (float) bw, h / (float) bh);
+                    bs.setLocalMatrix(up);
+                }
+                art.setShader(bs);
+            } else {
+                art.setShader(null);
             }
-            art.setShader(bs);
             // glass has no system shadow (it would show through the pane), so a lifted glass tile
             // casts this one; opaque tiles keep their elevation shadow
             liftShadow = (glass != null && bezel || tvos) && lift ? Ui.shadow(w, h, radius) : null;
@@ -168,7 +180,12 @@ final class Card extends View {
     Bitmap reflection() {
         if (reflection != null || bitmap == null) return reflection;
         int w = bitmap.getWidth(), h = Math.round(bitmap.getHeight() * 0.42f);
-        reflection = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        try {
+            reflection = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        } catch (OutOfMemoryError e) {
+            // the carousel does without its reflection rather than take the home screen down
+            return null;
+        }
         Canvas c = new Canvas(reflection);
         Matrix flip = new Matrix();
         flip.setScale(1f, -1f);
@@ -252,12 +269,20 @@ final class Card extends View {
             float k = Ui.dpf(1.6f) * focus;
             artMatrix.setScale(1.04f, 1.04f, w / 2f, h / 2f);
             artMatrix.postTranslate(-ry * k, rx * k);
-            art.getShader().setLocalMatrix(artMatrix);
+            Ui.place(art, artMatrix);
         } else if (art.getShader() != null && !artMatrix.isIdentity()) {
             artMatrix.reset();
-            art.getShader().setLocalMatrix(artMatrix);
+            Ui.place(art, artMatrix);
         }
-        c.drawRoundRect(rect, radius, radius, art);
+        if (bitmap != null) {
+            c.drawRoundRect(rect, radius, radius, art);
+        } else {
+            // no picture could be kept (memory): painted afresh, clipped to the card's corners
+            c.save();
+            c.clipPath(roundPath(w, h));
+            painter.paint(c, w, h);
+            c.restore();
+        }
         if (focus > 0f) {
             sheen.setAlpha(Math.round(255 * focus));
             c.drawRoundRect(rect, radius, radius, sheen);
@@ -267,13 +292,13 @@ final class Card extends View {
             float cx = w * (0.5f + ry / 6f), cy = h * (0.25f - rx / 5f);
             spotMatrix.setScale(w * 0.55f, w * 0.55f);
             spotMatrix.postTranslate(cx, cy);
-            spot.getShader().setLocalMatrix(spotMatrix);
+            Ui.place(spot, spotMatrix);
             spot.setAlpha(Math.round(70 * focus));
             c.drawRoundRect(rect, radius, radius, spot);
         }
         if (glintPos >= 0f) {
             glintMatrix.setTranslate(-w * 1.1f + glintPos * w * 2.2f, 0);
-            glintShader.setLocalMatrix(glintMatrix);
+            Ui.place(glint, glintMatrix);
             c.drawRoundRect(rect, radius, radius, glint);
         }
         if (dim > 0f) {
@@ -293,6 +318,20 @@ final class Card extends View {
             c.drawRoundRect(-o, -o, w + o, h + o, radius + o, radius + o, ring);
         }
         if (badge) c.drawCircle(w - Ui.dpf(9), Ui.dpf(9), Ui.dpf(3.5f), mark);
+    }
+
+    private android.graphics.Path clip;
+    private int clipW, clipH;
+
+    /** The card's rounded outline as a path, made once per size. */
+    private android.graphics.Path roundPath(int w, int h) {
+        if (clip == null || clipW != w || clipH != h) {
+            clip = new android.graphics.Path();
+            clip.addRoundRect(rect, radius, radius, android.graphics.Path.Direction.CW);
+            clipW = w;
+            clipH = h;
+        }
+        return clip;
     }
 
     @Override

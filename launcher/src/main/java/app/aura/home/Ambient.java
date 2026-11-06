@@ -239,10 +239,14 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         return mi.totalMem > 0 && mi.totalMem <= (2048L << 20);
     }
 
+    /** A screensaver is on screen right now (any instance), for {@link Safety} to tell its crashes from the home screen's. */
+    static volatile boolean showing;
+
     @Override
     public void onDreamingStarted() {
         super.onDreamingStarted();
         dreaming = true;
+        showing = true;
         Runnable room = makeRoom;
         if (room != null && tight(this)) room.run();
         startScene();
@@ -255,13 +259,15 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         story.reveal(1400);
         if (Prefs.saver(this).equals("auto")) main.postDelayed(rotate, SCENE_MS);
         listen();
-        // while the TV rests, the apps you use get compiled (set up on this TV only)
-        Warm.start(this);
+        // while the TV rests, the apps you use get compiled (set up on this TV only); not while a
+        // video is being decoded on a small TV, where the two together left the picture stuttering
+        if (aerial == null || !tight(this)) Warm.start(this);
     }
 
     @Override
     public void onDreamingStopped() {
         dreaming = false;
+        showing = false;
         if (music != null) {
             MusicStrip m = music;
             music = null;

@@ -20,6 +20,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.VideoView;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -167,7 +168,27 @@ public class Cast extends Activity implements Renderer.Player {
             image.setVisibility(audio ? View.VISIBLE : View.GONE);
             video.setVisibility(View.VISIBLE);
             Renderer.setState("TRANSITIONING");
-            video.setVideoURI(Uri.parse(uri));
+            // the same rule as for photos: the stream must come from somewhere other than the TV itself
+            new SafeThread(() -> {
+                final boolean ok = !pointsAtTv(uri);
+                runOnUiThread(() -> {
+                    if (isDestroyed() || gen != loadGen) return;
+                    if (ok) video.setVideoURI(Uri.parse(uri));
+                    else fail(getString(R.string.this_cant_be_played_here));
+                });
+            }, "cast-check").start();
+        }
+    }
+
+    /** Whether an http(s) URL resolves to the TV itself or a link-local address. Off the main thread. */
+    private static boolean pointsAtTv(String url) {
+        try {
+            URL u = new URL(url);
+            if (!"http".equals(u.getProtocol()) && !"https".equals(u.getProtocol())) return false;
+            java.net.InetAddress at = java.net.InetAddress.getByName(u.getHost());
+            return at.isLoopbackAddress() || at.isLinkLocalAddress() || at.isAnyLocalAddress();
+        } catch (IOException | RuntimeException e) {
+            return true;
         }
     }
 
@@ -316,11 +337,10 @@ public class Cast extends Activity implements Renderer.Player {
     private static Bitmap fetch(String url, int w, int h) {
         HttpURLConnection c = null;
         try {
-            URL u = new URL(url);
             // a picture from the network, never from the TV itself or a link-local address: a phone
             // could otherwise point the TV at services that only answer the TV
-            java.net.InetAddress at = java.net.InetAddress.getByName(u.getHost());
-            if (at.isLoopbackAddress() || at.isLinkLocalAddress() || at.isAnyLocalAddress()) return null;
+            if (pointsAtTv(url)) return null;
+            URL u = new URL(url);
             c = (HttpURLConnection) u.openConnection();
             // and no redirect onto one
             c.setInstanceFollowRedirects(false);

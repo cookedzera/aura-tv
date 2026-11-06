@@ -83,6 +83,15 @@ public class HomeKeys extends AccessibilityService {
     private int ignoreShowDialogs;
     private long ignoreShowDialogUntil;
     /**
+     * Without the hardware key log there's no sure sign the button was let go. So a press is taken
+     * for a tap, and steps only so far (VOLUME_TAP_STEPS), unless something says it's really held:
+     * the firmware repeating the key (a second WindowManager step soon after the first), or the
+     * TV's volume dialog log answering and no release having come for a while.
+     */
+    private static final int VOLUME_TAP_STEPS = 6;
+    private int volumeSteps, volumeKeyEvents;
+    private boolean holdConfirmed, hasVolEvents;
+    /**
      * As Android's own repeat: a short pause after the press (380 ms from hardware key-down to
      * account for {@code KeyboardInterceptor}'s 150 ms chord delay, or 230 ms after
      * {@code WindowManager}'s first volume step), then a smooth step every 90 ms, never past 3 s.
@@ -104,6 +113,14 @@ public class HomeKeys extends AccessibilityService {
                 return;
             }
             int dir = volumeHeld == KeyEvent.KEYCODE_VOLUME_UP ? 1 : -1;
+            // a tap that no release signal can end: a few steps, not full volume (3 s of steps is
+            // every step a 15-step TV has)
+            boolean held = hasHardwareKeyLog || holdConfirmed || hasVolEvents && now - volumeSince > 400;
+            if (!held && volumeSteps >= VOLUME_TAP_STEPS) {
+                volumeHeld = 0;
+                return;
+            }
+            volumeSteps++;
             try {
                 int cur = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
                 int max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC);
@@ -168,6 +185,9 @@ public class HomeKeys extends AccessibilityService {
         if (!filtering) return;
         volumeHeld = key;
         volumeSince = now;
+        volumeSteps = 0;
+        volumeKeyEvents = 0;
+        holdConfirmed = false;
         handler.removeCallbacks(volumeRepeat);
         handler.postDelayed(volumeRepeat, fromHardwareLog ? VOLUME_HW_WAIT_MS : VOLUME_WM_WAIT_MS);
     }
@@ -183,6 +203,8 @@ public class HomeKeys extends AccessibilityService {
         long now = SystemClock.uptimeMillis();
         if ("WindowManager".equals(caller)) {
             int dir = Integer.compare(newVal, oldVal);
+            // the firmware stepping again on its own, soon after the first step: the button is really held
+            if (s.volumeHeld != 0 && now - s.volumeSince > 50 && now - s.volumeSince < 500) s.holdConfirmed = true;
             s.expectedVolume = newVal;
             if (dir != 0) s.lastVolumeDir = dir;
             s.lastVolumeStepAt = now;
@@ -219,10 +241,14 @@ public class HomeKeys extends AccessibilityService {
      */
     static void onSystemVolumeDialogEvent(boolean isKeyEvent) {
         HomeKeys s = running;
-        if (s == null || s.volumeHeld == 0 || s.hasHardwareKeyLog) return;
+        if (s == null) return;
+        s.hasVolEvents = true;
+        if (s.volumeHeld == 0 || s.hasHardwareKeyLog) return;
         long now = SystemClock.uptimeMillis();
         if (isKeyEvent) {
-            if (now - s.volumeSince > 120 && now - s.windowVolumeDownAt > 120) {
+            // the first key line after the press is the press's own; the next is the release, however
+            // quick the tap (a release inside the 120 ms used to be missed, and the ramp ran on)
+            if (++s.volumeKeyEvents >= 2 || now - s.volumeSince > 120 && now - s.windowVolumeDownAt > 120) {
                 s.volumeHeld = 0;
                 s.handler.removeCallbacks(s.volumeRepeat);
             }
@@ -270,6 +296,9 @@ public class HomeKeys extends AccessibilityService {
     private final Runnable goHome = () -> {
         handler.removeCallbacks(this.held);
         waiting = false;
+        // from the 1 s safety post (no release ever came): the press is over, or refilter() would
+        // keep waiting for a release that isn't coming
+        if (!released) taken = false;
         home();
         refilterSoon();
     };
@@ -282,12 +311,26 @@ public class HomeKeys extends AccessibilityService {
         if (!open("aura_cc", front)) home();
     };
     private final Runnable refilter = this::refilter;
+    /** When the last key came through the filter, so it isn't switched under a held button. */
+    private long lastKeyAt;
     private final Runnable settleShot = () -> {
-        if (front != null && !front.equals(getPackageName())) shoot(front);
+        if (front != null && !front.equals(getPackageName()) && !midVideo()) shoot(front);
     };
     private final Runnable settleShotLate = () -> {
-        if (front != null && !front.equals(getPackageName())) shoot(front);
+        if (front != null && !front.equals(getPackageName()) && !midVideo()) shoot(front);
     };
+
+    /**
+     * On a small TV (light mode), no picture is taken of an app while it's playing: the capture
+     * is a frame the GPU has to stop for, and a protected video comes out black and is thrown
+     * away anyway, so it only cost a stutter. Its picture is taken while you browse it instead;
+     * the Home press still takes one.
+     */
+    private boolean midVideo() {
+        if (!Perf.light(this)) return false;
+        MediaWatch.Playing p = MediaWatch.now(this);
+        return p != null && p.playing && front.equals(p.pkg);
+    }
 
     /** Aura, with what to show; false when it couldn't be started. */
     private boolean open(String extra, String over) {
@@ -428,6 +471,8 @@ public class HomeKeys extends AccessibilityService {
         if (SystemClock.elapsedRealtime() < 180_000) handler.postDelayed(this::afterBoot, 1500);
         InputManager im = (InputManager) getSystemService(Context.INPUT_SERVICE);
         if (im != null) {
+            // Android can connect the service again without unbinding; one listener is enough
+            if (devices != null) im.unregisterInputDeviceListener(devices);
             devices = new InputManager.InputDeviceListener() {
                 @Override
                 public void onInputDeviceAdded(int id) {
@@ -459,8 +504,9 @@ public class HomeKeys extends AccessibilityService {
      * external HDMI-CEC device woke the TV via One Touch Play.
      */
     private void afterBoot() {
-        if (front != null || !takeover() || Cec.externalActiveSource(this)) return;
-        String last = lastForeground();
+        if (!takeover() || Cec.externalActiveSource(this)) return;
+        // front is already the usage history's answer when nothing has been seen live yet
+        String last = front != null ? front : lastForeground();
         if (last != null ? isOther(last) : !hasInputs()) openHome();
     }
 
@@ -492,7 +538,8 @@ public class HomeKeys extends AccessibilityService {
         try {
             return tim != null && !tim.getTvInputList().isEmpty();
         } catch (RuntimeException e) {
-            return true;
+            // a Fire Stick's TV input service throws rather than say "none"
+            return !Compat.noTvInputs(this);
         }
     }
 
@@ -505,7 +552,9 @@ public class HomeKeys extends AccessibilityService {
     public void onAccessibilityEvent(AccessibilityEvent e) {
         try {
             handleEvent(e);
-        } catch (RuntimeException ex) {
+        } catch (Throwable ex) {
+            // an error here would take the process down, and on Android 11 and later a service that
+            // died isn't started again until Aura is opened by hand: the Home button would be dead
             Trouble.caught("Home button service (window)", ex);
         }
     }
@@ -583,6 +632,13 @@ public class HomeKeys extends AccessibilityService {
         boolean want = teaching != null || !pad && (front == null ? takeover()
                 : !front.equals(getPackageName()) || !keys(this).isEmpty() || takeover());
         if (want == filtering) return;
+        // changing the flag makes Android drop whatever key is held right now (and its repeats):
+        // letting the filter go waits until the remote has been quiet for a moment
+        if (!want && SystemClock.uptimeMillis() - lastKeyAt < 300) {
+            handler.removeCallbacks(refilter);
+            handler.postDelayed(refilter, 300);
+            return;
+        }
         if (!want) {
             volumeHeld = 0;
             handler.removeCallbacks(volumeRepeat);
@@ -629,8 +685,8 @@ public class HomeKeys extends AccessibilityService {
     protected boolean onKeyEvent(KeyEvent e) {
         try {
             return handleKey(e);
-        } catch (RuntimeException ex) {
-            // the key goes on to the app as if this service weren't here
+        } catch (Throwable ex) {
+            // the key goes on to the app as if this service weren't here (see handleEvent's catch)
             Trouble.caught("Home button service (key)", ex);
             return false;
         }
@@ -639,6 +695,7 @@ public class HomeKeys extends AccessibilityService {
     private boolean handleKey(KeyEvent e) {
         int key = e.getKeyCode();
         boolean up = e.getAction() == KeyEvent.ACTION_UP;
+        lastKeyAt = SystemClock.uptimeMillis();
         if (up && e.getRepeatCount() == 0 && key >= KeyEvent.KEYCODE_DPAD_UP && key <= KeyEvent.KEYCODE_DPAD_RIGHT) measure(e);
         // teaching a button: the next one that isn't for moving around is the one
         // the release of a button just taught: it did its job on the press
@@ -683,7 +740,7 @@ public class HomeKeys extends AccessibilityService {
         if (!up && e.getRepeatCount() == 0 && key != KeyEvent.KEYCODE_HOME && key != KeyEvent.KEYCODE_VOLUME_MUTE
                 && front != null && !front.equals(getPackageName()) && Previews.on(this)) {
             Long last = shotOf.get(front);
-            if (key == KeyEvent.KEYCODE_BACK || last == null || SystemClock.uptimeMillis() - last > REFRESH_MS) shoot(front);
+            if ((key == KeyEvent.KEYCODE_BACK || last == null || SystemClock.uptimeMillis() - last > REFRESH_MS) && !midVideo()) shoot(front);
         }
         // a button given an app: short press opens it, holding reassigns it
         String app = mapped(this, key, e.getScanCode());
@@ -1092,6 +1149,14 @@ public class HomeKeys extends AccessibilityService {
                 + "' && settings put secure accessibility_enabled 1";
     }
 
+    /** The shell command that switches this service off, leaving any others: for handing Home back when {@link #set} can't. */
+    static String disableCommand(Context c) {
+        String list = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        java.util.List<String> keep = new java.util.ArrayList<>();
+        if (list != null) for (String s : TextUtils.split(list, ":")) if (!s.isEmpty() && !isMe(c, s)) keep.add(s);
+        return "settings put secure enabled_accessibility_services '" + TextUtils.join(":", keep).replace("'", "") + "'";
+    }
+
     /** Adds or removes Aura from the TV's accessibility services, leaving any others as they were. */
     static boolean set(Context c, boolean on) {
         if (!Compat.granted(c, android.Manifest.permission.WRITE_SECURE_SETTINGS)) return false;
@@ -1129,6 +1194,12 @@ public class HomeKeys extends AccessibilityService {
             Prefs.device(app).edit().putBoolean("keys_healing", false).apply();
             if (done != null) done.run();
             return;
+        }
+        if (!on(c)) {
+            // switched off by hand while Android had it on its crashed list (no onUnbind came): other
+            // services still listed means someone edited the list, and a restart mustn't undo that
+            String list = Settings.Secure.getString(app.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (list != null && !list.isEmpty() && wanted(app)) Prefs.device(app).edit().putBoolean("keys_wanted", false).apply();
         }
         if (healTried || live || !on(c)) {
             if (done != null) done.run();

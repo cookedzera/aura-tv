@@ -73,8 +73,21 @@ final class Watched {
         IO.execute(() -> write(c, pkg, title, by, length, position, now, art));
     }
 
-    private static synchronized void write(Context c, String pkg, String title, String by, long length, long position,
-                                           long at, Bitmap art) {
+    /**
+     * The list and its pictures are written under this lock, never the class's own: {@link #note}
+     * (on the main thread) used to wait behind a picture being saved.
+     */
+    private static final Object FILE = new Object();
+
+    private static void write(Context c, String pkg, String title, String by, long length, long position,
+                              long at, Bitmap art) {
+        synchronized (FILE) {
+            writeNow(c, pkg, title, by, length, position, at, art);
+        }
+    }
+
+    private static void writeNow(Context c, String pkg, String title, String by, long length, long position,
+                                 long at, Bitmap art) {
         try {
             JSONArray old = list(c), out = new JSONArray();
             String key = pkg + "|" + Continue.key(title);
@@ -201,11 +214,15 @@ final class Watched {
     }
 
     /** Settings → forget what was watched (with the stack's other learning). */
-    static synchronized void forget(Context c) {
-        lastKey = null;
-        lastAt = 0;
-        lastPartway = false;
-        prefs(c).edit().remove(KEY).apply();
-        tidy(c, new JSONArray());
+    static void forget(Context c) {
+        synchronized (Watched.class) {
+            lastKey = null;
+            lastAt = 0;
+            lastPartway = false;
+        }
+        synchronized (FILE) {
+            prefs(c).edit().remove(KEY).apply();
+            tidy(c, new JSONArray());
+        }
     }
 }

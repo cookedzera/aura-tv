@@ -116,11 +116,14 @@ final class Gallery {
                         added++;
                     }
                 } catch (InterruptedException e) {
+                    // Android stopped the job: say so to the caller too, and stop here
+                    Thread.currentThread().interrupt();
                     ok = false;
                     break;
                 } catch (IOException | JSONException | RuntimeException e) {
-                    // one source down doesn't keep the others from the wall
+                    // one source down doesn't keep the others from the wall, unless the job was stopped
                     ok = false;
+                    if (Thread.currentThread().isInterrupted()) break;
                 }
             }
             try {
@@ -472,11 +475,15 @@ final class Gallery {
         o.inJustDecodeBounds = false;
         o.inSampleSize = 1;
         while (o.outWidth / (o.inSampleSize * 2) >= W && o.outHeight / (o.inSampleSize * 2) >= H) o.inSampleSize *= 2;
+        // a small TV (light mode) works in 16-bit colour here, half the memory while an app may be
+        // playing behind; the home screen shows the photograph in 16-bit on such a TV anyway
+        boolean thrifty = Perf.light(c);
+        if (thrifty) o.inPreferredConfig = Bitmap.Config.RGB_565;
         Bitmap b, fit;
         try {
             b = BitmapFactory.decodeByteArray(data, 0, data.length, o);
             if (b == null) return null;
-            fit = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
+            fit = Bitmap.createBitmap(W, H, thrifty ? Bitmap.Config.RGB_565 : Bitmap.Config.ARGB_8888);
         } catch (OutOfMemoryError e) {
             // the job shares the home screen's process: skip this one rather than take Aura down
             return null;
@@ -543,7 +550,8 @@ final class Gallery {
                     ByteArrayOutputStream bo = new ByteArrayOutputStream();
                     byte[] buf = new byte[16 * 1024];
                     for (int n; (n = in.read(buf)) > 0; ) {
-                        if (Thread.interrupted()) throw new InterruptedIOException();
+                        // the flag stays set so the whole import winds down, not just this download
+                        if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
                         bo.write(buf, 0, n);
                     }
                     return bo.toByteArray();

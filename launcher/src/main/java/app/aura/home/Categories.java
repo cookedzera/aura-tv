@@ -177,12 +177,23 @@ final class Categories {
             final Map<String, Integer> n = counts(c);
             Collections.sort(list, (a, b) -> Integer.compare(n.containsKey(b) ? n.get(b) : 0, n.containsKey(a) ? n.get(a) : 0));
         } else if (how.equals("recent")) {
-            final Map<String, Long> at = Habits.lastOpened(c);
+            final Map<String, Long> at = lastOpened(c);
             Collections.sort(list, (a, b) -> Long.compare(at.containsKey(b) ? at.get(b) : 0L, at.containsKey(a) ? at.get(a) : 0L));
         }
     }
 
     private static final Map<String, String> labels = new HashMap<>();
+
+    /**
+     * Off the main thread, as the apps are read: their names and kinds go into the caches, so
+     * laying out the rows (on the main thread) never has to ask Android for them one by one.
+     */
+    static void warm(Context c, List<AppRepo.App> apps) {
+        synchronized (Categories.class) {
+            for (AppRepo.App a : apps) if (a.label != null && !labels.containsKey(a.pkg)) labels.put(a.pkg, a.label);
+        }
+        for (AppRepo.App a : apps) kind(c, a.pkg);
+    }
 
     /** An app's name, asked of Android once (A to Z sorts on every rebuild of home). */
     private static synchronized String label(PackageManager pm, String pkg) {
@@ -365,13 +376,23 @@ final class Categories {
     static void launched(Context c, String pkg) {
         if (pkg == null) return;
         SharedPreferences p = usage(c);
-        p.edit().putInt(pkg, p.getInt(pkg, 0) + 1).apply();
+        // the count for Most used, and when, for Recent: both this profile's own
+        p.edit().putInt(pkg, p.getInt(pkg, 0) + 1).putLong("@" + pkg, System.currentTimeMillis()).apply();
     }
 
     static Map<String, Integer> counts(Context c) {
         Map<String, Integer> out = new HashMap<>();
         for (Map.Entry<String, ?> e : usage(c).getAll().entrySet()) {
             if (e.getValue() instanceof Integer) out.put(e.getKey(), (Integer) e.getValue());
+        }
+        return out;
+    }
+
+    /** When each app was last opened under this profile; the TV-wide history stands in for apps this profile hasn't opened yet. */
+    static Map<String, Long> lastOpened(Context c) {
+        Map<String, Long> out = new HashMap<>(Habits.lastOpened(c));
+        for (Map.Entry<String, ?> e : usage(c).getAll().entrySet()) {
+            if (e.getValue() instanceof Long && e.getKey().startsWith("@")) out.put(e.getKey().substring(1), (Long) e.getValue());
         }
         return out;
     }

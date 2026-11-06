@@ -79,6 +79,11 @@
     <string name="bluetooth_off">Bluetooth off</string>
     <string name="offline">Offline</string>
     <string name="wi_fi">Wi-Fi</string>
+    <string name="ethernet">Ethernet</string>
+    <string name="the_tvs_ip">the TV\'s IP</string>
+    <string name="folder">Folder</string>
+    <string name="empty_not_shown">Empty, not shown</string>
+    <string name="set_one">Set one</string>
     <string name="sleep_timer">Sleep timer</string>
     <string name="sunrise">SUNRISE</string>
     <string name="sunset">SUNSET</string>
@@ -684,6 +689,12 @@
     <string name="aura_version_is_out">Aura %1$s is out.</string>
     <string name="install_name">Install %1$s</string>
     <string name="n_on_the_tv">%1$d on the TV</string>
+    <string name="the_tv_keeps_n_remove_some">The TV keeps %1$d. Remove some, or raise the limit under Settings › From your phone</string>
+    <string name="keep_up_to">Keep up to</string>
+    <string name="photo_sharpness">Photo sharpness</string>
+    <string name="soft">Soft</string>
+    <string name="sharp">Sharp</string>
+    <string name="n_of_m_on_the_tv">%1$d of %2$d on the TV</string>
     <plurals name="n_photos">
         <item quantity="one">%1$d photo</item>
         <item quantity="other">%1$d photos</item>
@@ -986,6 +997,8 @@
     <string name="aerial_by_apple">Aerial video by Apple</string>
     <string name="with_data">%1$s · about 2–3 GB of data an hour</string>
     <string name="aerials_use_data">Aerials stream from Apple: about 2–3 GB of data an hour while they show</string>
+    <string name="aerials_on_metered">Aerials on a metered connection</string>
+    <string name="skipped_photos_show_instead">Skipped · photographs show instead</string>
     <string name="screen_off_keep_sound">Screen off (keep sound)</string>
     <string name="screen_off_press_any_button">Screen off · press any button to wake</string>
     <string name="hold_ok_for_screen_off">Hold OK for screen off</string>

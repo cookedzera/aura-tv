@@ -92,8 +92,15 @@ final class Adb {
         static Link open(String host, int port, KeyPair key, String name, boolean mayAsk) throws IOException {
             Socket s = new Socket();
             InetSocketAddress at = new InetSocketAddress(host, port);
-            s.connect(at, 3000);
-            Link l = new Link(s);
+            Link l;
+            try {
+                s.connect(at, 3000);
+                l = new Link(s);
+            } catch (IOException e) {
+                // a stale port is the everyday case: don't leave a half-open socket behind each try
+                try { s.close(); } catch (IOException ignored) { }
+                throw e;
+            }
             try {
                 s.setSoTimeout(REPLY_MS);
                 l.send(CNXN, VERSION, MAX_DATA, "host::\0".getBytes(UTF8));
@@ -472,14 +479,25 @@ final class Adb {
         try (Link l = link(c, false)) {
             List<String> out = new ArrayList<>();
             for (String cmd : commands) out.add(l.run(cmd));
+            failures = 0;
             return out;
         } catch (Denied e) {
             Prefs.device(c).edit().putBoolean("adb_ok", false).apply();
             return null;
         } catch (IOException | RuntimeException e) {
+            // debugging switched off, or the TV's adbd gone for good: after a run of failures the
+            // settings page stops saying "connected" and offers to connect again
+            if (++failures >= FAILURES_BEFORE_OFF) {
+                failures = 0;
+                Prefs.device(c).edit().putBoolean("adb_ok", false).apply();
+            }
             return null;
         }
     }
+
+    /** Consecutive {@link #run} connections that failed, since the last that worked. */
+    private static volatile int failures;
+    private static final int FAILURES_BEFORE_OFF = 5;
 
     /** What setup-aura.ps1 does from a PC, minus installing: each step with what it switches on. */
     static String[][] setup(Context c) {
@@ -572,9 +590,10 @@ final class Adb {
     /** Stops one or more apps outright over a single connection, as Android's own Force stop does. False when Aura can't. */
     static boolean forceStop(Context c, String... pkgs) {
         List<String> cmds = new ArrayList<>();
-        // a package name, and nothing a shell would read as more
+        // a package name, and nothing a shell would read as more; never Aura itself, which would
+        // end the very screen asking
         for (String pkg : pkgs) {
-            if (pkg != null && pkg.matches("[A-Za-z0-9_.]+")) cmds.add("am force-stop " + pkg);
+            if (pkg != null && !pkg.equals(c.getPackageName()) && pkg.matches("[A-Za-z0-9_.]+")) cmds.add("am force-stop " + pkg);
         }
         return !cmds.isEmpty() && run(c, cmds.toArray(new String[0])) != null;
     }

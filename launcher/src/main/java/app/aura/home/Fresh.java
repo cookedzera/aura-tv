@@ -263,7 +263,10 @@ final class Fresh {
     private static byte[] readAll(InputStream in) throws IOException {
         ByteArrayOutputStream bo = new ByteArrayOutputStream();
         byte[] buf = new byte[16 * 1024];
-        for (int n; (n = in.read(buf)) > 0; ) bo.write(buf, 0, n);
+        for (int n; (n = in.read(buf)) > 0; ) {
+            bo.write(buf, 0, n);
+            if (bo.size() > 4 << 20) throw new IOException("response too large");
+        }
         return bo.toByteArray();
     }
 }

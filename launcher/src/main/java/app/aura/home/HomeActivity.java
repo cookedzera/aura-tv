@@ -71,8 +71,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private static final int WIDGET_ROW = 816, WIDGET_GAP = 18;
     static final String[] WIDGET_IDS = {"sky", "stack", "today"};
     static final int[] WIDGET_NAMES = {R.string.widget_sky, R.string.smart_stack, R.string.today};
-    /** Browsing, the photograph sits half-soft behind the glass; resting, it comes back sharp. */
-    private static final float HOME_DEFOCUS = 0.38f;
     private static final int SIDE = 0, WIDGETS = 1, GRID = 2, SHELF = 3, TOP = 4;
     private static final int SIDE_GLOW = 0xFF9FB2D6, DAY_GLOW = 0xFF7FB2FF;
     /** Minimum gap between moves while a direction is held: fast, but every hop stays smooth. */
@@ -140,6 +138,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private ValueAnimator scrollAnim, wiggle;
     private boolean ccOpen, racked, photo, resumed, introPending, editing, held, tipShown, dashboard = true, greetingShown = true;
     private boolean wallReady, appsReady, splashFinishing;
+    /** An app changed while home was behind another (light mode): the list is read again on return. */
+    private boolean appsDirty;
     /** The stack's cards on show since home was last opened, for {@link Taste}. */
     private final Set<String> shownThisVisit = new HashSet<>();
     /** A start's milestones, for the problem report: when Aura began, its apps and its photograph were ready. */
@@ -217,6 +217,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private final BroadcastReceiver clockReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent i) {
+            if (Intent.ACTION_TIMEZONE_CHANGED.equals(i.getAction())) Sun.timeZoneChanged();
             tick();
         }
     };
@@ -235,7 +236,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         public void onReceive(Context c, Intent i) {
             Vpn.forget();
             HomeKeys.packagesChanged();
-            reloadApps();
+            // on a small TV an app updating itself behind a video (the store does it in the
+            // evening) no longer rebuilds the whole app list under the video: it waits for home
+            if (Perf.light(c) && !resumed) appsDirty = true;
+            else reloadApps();
             // an app installed or updated: asked for its home-screen rows, as Google TV's home would
             String act = i.getAction();
             String pkg = i.getData() != null ? i.getData().getSchemeSpecificPart() : null;
@@ -281,8 +285,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         setContentView(root);
         applyLight();
         if (safe != null) {
-            handler.postDelayed(() -> hud(R.drawable.ic_info, safe.equals("safe")
-                    ? getString(R.string.aura_kept_stopping_so_some) : getString(R.string.aura_kept_stopping_home_opens)), 6000);
+            handler.postDelayed(() -> {
+                // "Home opens the TV's own home screen" only once the commands really ran
+                if (safe.equals("home") && !Boolean.TRUE.equals(Safety.handedBack)) return;
+                hud(R.drawable.ic_info, safe.equals("safe")
+                        ? getString(R.string.aura_kept_stopping_so_some) : getString(R.string.aura_kept_stopping_home_opens));
+            }, 6000);
         }
         getWindow().setBackgroundDrawable(null);
         occlude();
@@ -303,7 +311,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         } else if (introPending) {
             playIntro();
         } else {
-            backdrop.setDefocus(HOME_DEFOCUS, 0);
+            backdrop.setDefocus(homeDefocus(), 0);
         }
         if (cache != null) {
             apps = cache;
@@ -334,9 +342,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      * photographs and kept pictures, so the screensaver's have room. They come back on return.
      */
     private final Runnable makeRoom = () -> runOnUiThread(() -> {
-        // on older Android the screensaver is only a window over home, which stays resumed beneath
-        // it without focus: either way, home is out of sight
-        if (isDestroyed() || resumed && hasWindowFocus()) return;
+        // only ever run by the screensaver as it starts, so home is out of sight whatever Android
+        // says: on older Android the screensaver is a window over home, and word of the lost focus
+        // often arrives after this does (the guard on it skipped exactly the small TVs it was for)
+        if (isDestroyed()) return;
         backdrop.stop();
         backdrop.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_MODERATE);
         roomMade = true;
@@ -484,6 +493,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (HomeRole.waiting) handler.postDelayed(homeCheck, 800);
         // the photograph moves only while home is in front (it stops in onPause)
         backdrop.start();
+        if (appsDirty) {
+            appsDirty = false;
+            reloadApps();
+        }
         wake();
         if (awayAt > 0) TopShelf.clearCache();
         // back from an app: "jump back in" now knows what you just watched
@@ -543,6 +556,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if ((code == 7 || code == 8) && results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             refreshStatus();
             if (ccOpen) cc.refresh();
+            if (ccOpen && code == 7) cc.wifiGranted();
         }
     }
 
@@ -622,7 +636,20 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // The last screen taken (0.9 MB) stays too: it's how an app that hasn't drawn yet, still
         // showing the previous app's screen, is told apart, and dropping it each time an app opened
         // let that previous screen be kept as the new app's picture.
-        if (level == TRIM_MEMORY_UI_HIDDEN) return;
+        if (level == TRIM_MEMORY_UI_HIDDEN) {
+            // On a small TV the rule above costs more than it saves: with the Home button service
+            // bound, Android keeps Aura among the apps it never trims, so those levels never come,
+            // and the photographs (tens of MB) sat behind a video app that needed every page on a
+            // 1 GB TV, the video stuttering as the kernel paged them in and out. In light mode they
+            // go here, as they do for the screensaver, and come back with home over the small copy.
+            // The cards and kept screens stay: a Home press still opens the switcher at once.
+            if (Perf.light(this)) {
+                backdrop.trim(TRIM_MEMORY_MODERATE);
+                Previews.dropFresh();
+                Continue.trim();
+            }
+            return;
+        }
         if (level >= TRIM_MEMORY_RUNNING_LOW) {
             Previews.trim();
             Tiles.trim();
@@ -673,7 +700,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // Aura picked in Android's screensaver settings (res/xml/dream.xml): its screensaver page
         if (fromSaverSettings(intent)) {
             lastHomeAt = 0;
-            handler.postDelayed(this::openSaverSettings, 300);
+            // a kids profile asks for the parents' PIN first, as any way into Settings does
+            handler.postDelayed(() -> guarded(this::openSaverSettings), 300);
             return;
         }
         // Home twice inside an app (HomeKeys): the switcher over it, the home screen never showing
@@ -807,8 +835,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         } else if (dock && zone == GRID && rowOf(gridAt) == 0) {
             setPhoto(true);
         } else if (zone == TOP || zone == SHELF || dock && zone == WIDGETS) {
-            // the top buttons, Top Shelf, and the dock's widgets: Back returns to the apps below
-            focusGrid(gridAt % COLS);
+            // the top buttons, Top Shelf, and the dock's widgets: Back returns to the apps below,
+            // to the first row at the same place on screen (on category rows the first row is
+            // not every fifth tile)
+            if (rows && gridAt < rowIdx.length && rowIdx[gridAt] > 0) {
+                focusGrid(rowTarget(0, colIdx[gridAt] - rowInfo.get(rowIdx[gridAt]).first));
+            } else {
+                focusGrid(rows ? gridAt : gridAt % COLS);
+            }
         }
     }
 
@@ -819,7 +853,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         root.setClipChildren(false);
         backdrop = new Backdrop(this);
         // the photograph rests at this softness: drawn from one pre-mixed copy, not two layers
-        backdrop.setSteadyDefocus(HOME_DEFOCUS);
+        backdrop.setSteadyDefocus(homeDefocus());
         backdrop.setListener(this);
         root.addView(backdrop, match());
         bloom = new Bloom(this);
@@ -1694,7 +1728,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             return;
         }
         long pos = st.getPosition();
-        if (on) pos += (long) ((SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * st.getPlaybackSpeed());
+        if (on) pos += (long) ((SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * MediaWatch.speed(st));
         pos = Math.max(0, Math.min(dur, pos));
         lBar.setVisibility(View.VISIBLE);
         lBar.set(pos / (float) dur);
@@ -2192,7 +2226,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         c.set(Calendar.MILLISECOND, 0);
         long rise = Sun.next(c.getTimeInMillis(), true), set = rise > 0 ? Sun.next(rise, false) : -1;
         java.text.DateFormat tf = DateFormat.getTimeFormat(this);
-        String riseAt = rise > 0 ? tf.format(new Date(rise > now ? rise : Sun.next(now, true))).toUpperCase(Locale.getDefault()) : "";
+        // today's sunrise once it's past means tomorrow's, which may not come (polar edge cases)
+        long riseShown = rise > now ? rise : Sun.next(now, true);
+        String riseAt = riseShown > 0 ? tf.format(new Date(riseShown)).toUpperCase(Locale.getDefault()) : "";
         String setAt = set > 0 ? tf.format(new Date(set)).toUpperCase(Locale.getDefault()) : "";
         switch (m) {
             case FIRST_LIGHT:
@@ -2935,6 +2971,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             String pkg = intent.getPackage() != null ? intent.getPackage()
                     : intent.getComponent() != null ? intent.getComponent().getPackageName() : null;
             Habits.opened(getApplicationContext(), pkg);
+            // Most used counts a launch from the switcher as it does one from a tile
+            Categories.launched(getApplicationContext(), pkg);
             // should the app never come up, the switcher puts itself away
             handler.removeCallbacks(launchGaveUp);
             handler.postDelayed(launchGaveUp, 12_000);
@@ -3521,7 +3559,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     // ---- focus -------------------------------------------------------------------------------
 
     private void focusSide(int i) {
+        if (side.isEmpty()) return;
         sideAt = Math.max(0, Math.min(side.size() - 1, i));
+        // the zone is set here as well as on the focus change: in touch mode no focus change
+        // comes, and the next key would have moved from wherever the zone last was
+        zone = SIDE;
         side.get(sideAt).requestFocus();
     }
 
@@ -3531,6 +3573,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             return;
         }
         widgetAt = Math.max(0, Math.min(widgets.size() - 1, i));
+        zone = contentZone = WIDGETS;
         scrollTo(0);
         widgets.get(widgetAt).requestFocus();
     }
@@ -3903,6 +3946,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         });
         scene = made[0];
         scene.onQuiet = this::quietScreen;
+        // under an opaque video the photograph's drift (a new one decoded every minute and a half) was all for nothing
+        scene.onShown = backdrop::stop;
+        scene.onLost = () -> {
+            if (resumed) backdrop.start();
+        };
         // above the photograph and its story, which it covers
         root.addView(scene, root.indexOfChild(story) + 1, match());
         story.hide(400);
@@ -3925,7 +3973,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private void setRacked(boolean on) {
         racked = on;
-        backdrop.setDefocus(on ? 0f : HOME_DEFOCUS, on ? 2600 : 520);
+        backdrop.setDefocus(on ? 0f : homeDefocus(), on ? 2600 : 520);
         bloom.setStrength(on ? 0.35f * glow() : glow(), on ? 2600 : 520);
     }
 
@@ -3949,7 +3997,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         } else {
             photoMusic(false);
             racked = false;
-            backdrop.setDefocus(HOME_DEFOCUS, 520);
+            backdrop.setDefocus(homeDefocus(), 520);
             bloom.setStrength(glow(), 520);
             story.hide(300);
             home.setVisibility(View.VISIBLE);
@@ -5653,8 +5701,21 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     /** A setting just changed: put it into effect straight away. */
+    /**
+     * Browsing, the photograph sits half-soft behind the glass (or nearly sharp, if asked under
+     * Settings > Wallpaper); resting, it comes back sharp.
+     */
+    private float homeDefocus() {
+        return Prefs.on(this, Prefs.PHOTO_SHARP) ? 0.12f : 0.38f;
+    }
+
     private void applySetting(String what) {
         switch (what) {
+            case "sharp":
+                // the pre-mixed resting copy and the live blend both follow the new softness
+                backdrop.setSteadyDefocus(homeDefocus());
+                if (!racked) backdrop.setDefocus(homeDefocus(), 400);
+                break;
             case "tiles":
                 switcher.forget();
                 // falls through: the grid is rebuilt too
@@ -5766,6 +5827,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             case "daily":
                 // pure black, your own photos only, Picture of the Day, or one removed: the wall moves on to the new set
                 backdrop.reload();
+                break;
+            case "moments":
+                // switched off while one was up: it goes now, not eight seconds later
+                if (!Prefs.on(this, Prefs.MOMENTS) && momentCard.getVisibility() == View.VISIBLE) {
+                    handler.removeCallbacks(hideMoment);
+                    hideMoment.run();
+                }
                 break;
             case "picks":
                 // a new taste (or Tonight's pick switched on or off): the Top Shelf, stack and Control Center follow
@@ -6090,7 +6158,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 enter(status, 0, 0, 500, 600);
             }
             for (Widget w : widgets) enter(w, 0, 0, 500, 600);
-            backdrop.setDefocus(HOME_DEFOCUS, 700);
+            backdrop.setDefocus(homeDefocus(), 700);
             bloom.setStrength(glow(), 700);
             return;
         }
@@ -6105,7 +6173,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         for (int i = 0; i < widgets.size(); i++) enter(widgets.get(i), 0, Ui.dp(26), 1120 + i * 90L, 1000);
         enter(gridLabel, 0, 0, 1450, 800);
         handler.postDelayed(() -> {
-            backdrop.setDefocus(HOME_DEFOCUS, 1500);
+            backdrop.setDefocus(homeDefocus(), 1500);
             bloom.setStrength(glow(), 1500);
         }, 1100);
         bloom.setStrength(0f, 0);

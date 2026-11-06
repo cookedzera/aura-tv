@@ -86,6 +86,13 @@ final class Trouble {
     /** Entries noted on the main thread, not yet on disk: readers see them all the same. */
     private static final List<String> pending = new ArrayList<>();
     private static java.util.concurrent.ExecutorService saver;
+    /**
+     * Two locks, so the main thread never waits on the file: {@code QUEUE} guards the pending
+     * list (taken for an instant, on any thread), {@code DISK} the file itself (held through a
+     * read, a rewrite and a sync, on background threads only). {@code DISK} may take {@code QUEUE}
+     * inside it, never the other way round.
+     */
+    private static final Object QUEUE = new Object(), DISK = new Object();
 
     private static void write(String kind, String where, String body) {
         final Context c = app;
@@ -109,7 +116,7 @@ final class Trouble {
         // at once: the process is on its way out
         if (!"CRASH".equals(kind) && Looper.myLooper() == Looper.getMainLooper()) {
             java.util.concurrent.ExecutorService s;
-            synchronized (Trouble.class) {
+            synchronized (QUEUE) {
                 pending.add(entry);
                 pendingCount = pending.size();
                 if (saver == null) saver = Compat.background("trouble", android.os.Process.THREAD_PRIORITY_BACKGROUND);
@@ -121,39 +128,49 @@ final class Trouble {
         }
     }
 
-    private static synchronized void save(Context c, String entry, boolean queued) {
-        // cleared (Settings → Problem reports) while it waited: it goes with the rest
-        if (queued && !pending.remove(entry)) return;
-        pendingCount = pending.size();
-        try {
-            List<String> entries = saved(c);
-            // written at once (a crash, or off the main thread): any still waiting go first, in order,
-            // so a crash just after a noted error doesn't take that note with it
-            if (!queued) {
-                entries.addAll(pending);
-                pending.clear();
-                pendingCount = 0;
-            }
-            entries.add(entry);
-            while (entries.size() > MAX_ENTRIES) entries.remove(0);
-            StringBuilder all = new StringBuilder();
-            for (String e : entries) all.append(all.length() > 0 ? SEP : "").append(e);
-            // the oldest go first should it grow too long
-            while (all.length() > MAX_CHARS && entries.size() > 1) {
-                entries.remove(0);
-                all.setLength(0);
+    private static void save(Context c, String entry, boolean queued) {
+        synchronized (QUEUE) {
+            // cleared (Settings → Problem reports) while it waited: it goes with the rest
+            if (queued && !pending.contains(entry)) return;
+        }
+        synchronized (DISK) {
+            try {
+                List<String> entries = saved(c);
+                // written at once (a crash, or off the main thread): any still waiting go first, in order,
+                // so a crash just after a noted error doesn't take that note with it
+                if (!queued) {
+                    synchronized (QUEUE) {
+                        entries.addAll(pending);
+                        pending.clear();
+                        pendingCount = 0;
+                    }
+                }
+                entries.add(entry);
+                while (entries.size() > MAX_ENTRIES) entries.remove(0);
+                StringBuilder all = new StringBuilder();
                 for (String e : entries) all.append(all.length() > 0 ? SEP : "").append(e);
+                // the oldest go first should it grow too long
+                while (all.length() > MAX_CHARS && entries.size() > 1) {
+                    entries.remove(0);
+                    all.setLength(0);
+                    for (String e : entries) all.append(all.length() > 0 ? SEP : "").append(e);
+                }
+                File f = file(c), part = new File(f.getPath() + ".part");
+                try (FileOutputStream out = new FileOutputStream(part)) {
+                    out.write(all.toString().getBytes(StandardCharsets.UTF_8));
+                    out.getFD().sync();
+                }
+                // Android's rename replaces the old file; a desktop JVM's (the unit tests on Windows) won't
+                if (!part.renameTo(f) && (!f.delete() || !part.renameTo(f))) part.delete();
+                synchronized (QUEUE) {
+                    // off the waiting list and onto the count in one step, so a reader between the
+                    // two never sees the entry in neither (or both)
+                    if (!queued || pending.remove(entry)) known = entries.size();
+                    pendingCount = pending.size();
+                }
+            } catch (Throwable ignored) {
+                // nothing more can be done about a problem with the problem log
             }
-            File f = file(c), part = new File(f.getPath() + ".part");
-            try (FileOutputStream out = new FileOutputStream(part)) {
-                out.write(all.toString().getBytes(StandardCharsets.UTF_8));
-                out.getFD().sync();
-            }
-            // Android's rename replaces the old file; a desktop JVM's (the unit tests on Windows) won't
-            if (!part.renameTo(f) && (!f.delete() || !part.renameTo(f))) part.delete();
-            known = entries.size();
-        } catch (Throwable ignored) {
-            // nothing more can be done about a problem with the problem log
         }
     }
 
@@ -183,9 +200,14 @@ final class Trouble {
     }
 
     /** Every entry: those on disk, then any still on their way there. */
-    private static synchronized List<String> entries(Context c) {
-        List<String> out = saved(c);
-        out.addAll(pending);
+    private static List<String> entries(Context c) {
+        List<String> out;
+        synchronized (DISK) {
+            out = saved(c);
+        }
+        synchronized (QUEUE) {
+            out.addAll(pending);
+        }
         while (out.size() > MAX_ENTRIES) out.remove(0);
         return out;
     }
@@ -206,25 +228,32 @@ final class Trouble {
 
     /** How many entries are kept: Settings shows it. */
     static int count(Context c) {
-        int k = known;
-        if (k >= 0) return Math.min(MAX_ENTRIES, k + pendingCount);
-        synchronized (Trouble.class) {
+        synchronized (QUEUE) {
+            if (known >= 0) return Math.min(MAX_ENTRIES, known + pendingCount);
+        }
+        synchronized (DISK) {
             if (known < 0) known = saved(c).size();
-            return Math.min(MAX_ENTRIES, known + pending.size());
+            synchronized (QUEUE) {
+                return Math.min(MAX_ENTRIES, known + pendingCount);
+            }
         }
     }
 
-    static synchronized void clear(Context c) {
-        //noinspection ResultOfMethodCallIgnored
-        file(c).delete();
-        pending.clear();
-        pendingCount = 0;
-        known = 0;
+    static void clear(Context c) {
+        synchronized (DISK) {
+            //noinspection ResultOfMethodCallIgnored
+            file(c).delete();
+            synchronized (QUEUE) {
+                pending.clear();
+                pendingCount = 0;
+            }
+            known = 0;
+        }
         Prefs.device(c).edit().putInt("trouble_bg_kills", 0).apply();
     }
 
     /** The whole report: what TV this is, then every entry, newest first. Off the main thread. */
-    static synchronized String report(Context c) {
+    static String report(Context c) {
         StringBuilder b = new StringBuilder();
         b.append("Aura problem report\n");
         b.append(about(c));

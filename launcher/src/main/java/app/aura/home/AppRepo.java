@@ -112,6 +112,7 @@ final class AppRepo {
         }
         for (App a : list) a.art = Art.load(c, a.pkg);
         NewApps.mark(c, list);
+        Categories.warm(c, list);
         Collator col = Collator.getInstance();
         java.util.Collections.sort(list, (a, b) -> col.compare(a.label, b.label));
         return list;

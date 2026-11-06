@@ -184,7 +184,7 @@ final class MusicStrip extends LinearLayout {
             final String want = uri;
             final Context app2 = getContext().getApplicationContext();
             new SafeThread(() -> {
-                Bitmap loaded = Continue.load(app2, want);
+                Bitmap loaded = Continue.load(app2, want, Continue.COVER_PX);
                 if (loaded == null) return;
                 MediaWatch.cacheArt(want, loaded);
                 handler.post(() -> {
@@ -211,8 +211,8 @@ final class MusicStrip extends LinearLayout {
         }
         long pos = st.getPosition();
         long updated = st.getLastPositionUpdateTime();
-        float speed = st.getPlaybackSpeed();
-        if (on && updated > 0) pos += (long) (Math.max(0, SystemClock.elapsedRealtime() - updated) * (speed > 0f ? speed : 1f));
+        float speed = MediaWatch.speed(st);
+        if (on && updated > 0) pos += (long) (Math.max(0, SystemClock.elapsedRealtime() - updated) * speed);
         pos = Math.max(0, Math.min(dur, pos));
         bar.setVisibility(VISIBLE);
         bar.set(pos / (float) dur);

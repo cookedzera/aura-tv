@@ -77,7 +77,7 @@ final class Bloom extends View implements Backdrop.Tick {
         if (w == 0 || shader == null) return;
         local.setScale(w * RX * breath, h * RY * breath);
         local.postTranslate(cx * w, cy * h);
-        shader.setLocalMatrix(local);
+        Ui.place(glow, local);
         area.set(Math.max(0, (cx - RX * 1.1f) * w), Math.max(0, (cy - RY * 1.1f) * h),
                 Math.min(w, (cx + RX * 1.1f) * w), Math.min(h, (cy + RY * 1.1f) * h));
         invalidate();
@@ -131,11 +131,20 @@ final class Bloom extends View implements Backdrop.Tick {
 
     /** A colour-filter swap: far cheaper than rebuilding the gradient every frame. */
     private void recolor() {
-        glow.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+        if (color != filteredFor) {
+            // two filters a frame through a colour change: made only when the colour has moved on
+            filteredFor = color;
+            glowFilter = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN);
+            moteFilter = new PorterDuffColorFilter(Ui.mix(color, 0xFFFFFFFF, 0.6f), PorterDuff.Mode.SRC_IN);
+        }
+        glow.setColorFilter(glowFilter);
         glow.setAlpha(Math.round(255 * strength));
-        mote.setColorFilter(new PorterDuffColorFilter(Ui.mix(color, 0xFFFFFFFF, 0.6f), PorterDuff.Mode.SRC_IN));
+        mote.setColorFilter(moteFilter);
         invalidate();
     }
+
+    private int filteredFor = 1;
+    private PorterDuffColorFilter glowFilter, moteFilter;
 
     @Override
     public void onTick(long t) {
