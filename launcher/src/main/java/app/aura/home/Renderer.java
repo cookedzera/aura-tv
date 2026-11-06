@@ -171,6 +171,12 @@ final class Renderer {
                 while (on && http == hs) {
                     try {
                         Socket c = hs.accept();
+                        // phones and computers on the network only: an app on the TV itself could
+                        // otherwise take the screen over through it, unasked
+                        if (c.getInetAddress() != null && c.getInetAddress().isLoopbackAddress()) {
+                            c.close();
+                            continue;
+                        }
                         pool.execute(() -> serve(c));
                     } catch (IOException e) {
                         break;
@@ -444,12 +450,20 @@ final class Renderer {
                     else main.post(this::playNow);
                     break;
                 case "Pause":
+                    if (Profiles.kids(app)) {
+                        fault = "701|Not available in a kids' profile";
+                        break;
+                    }
                     main.post(() -> {
                         Player p = player;
                         if (p != null) p.pause();
                     });
                     break;
                 case "Stop":
+                    if (Profiles.kids(app)) {
+                        fault = "701|Not available in a kids' profile";
+                        break;
+                    }
                     main.post(() -> {
                         Player p = player;
                         if (p != null) p.stop();
@@ -457,6 +471,10 @@ final class Renderer {
                     });
                     break;
                 case "Seek": {
+                    if (Profiles.kids(app)) {
+                        fault = "701|Not available in a kids' profile";
+                        break;
+                    }
                     final long ms = clock(arg(body, "Target"));
                     if (ms < 0) {
                         fault = "711|Seek target not understood";
@@ -520,6 +538,10 @@ final class Renderer {
                     out.put("CurrentVolume", String.valueOf(volume(am)));
                     break;
                 case "SetVolume": {
+                    if (Profiles.kids(app)) {
+                        fault = "701|Not available in a kids' profile";
+                        break;
+                    }
                     int v = Math.max(0, Math.min(100, number(arg(body, "DesiredVolume"))));
                     if (am != null) {
                         int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
@@ -532,6 +554,10 @@ final class Renderer {
                     out.put("CurrentMute", am != null && muted(am) ? "1" : "0");
                     break;
                 case "SetMute": {
+                    if (Profiles.kids(app)) {
+                        fault = "701|Not available in a kids' profile";
+                        break;
+                    }
                     String m = arg(body, "DesiredMute");
                     boolean mute = "1".equals(m) || "true".equalsIgnoreCase(m);
                     if (am != null) {

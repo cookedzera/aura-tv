@@ -1080,4 +1080,6 @@
     <string name="input_channels">TV-Sender</string>
     <string name="n_live">%1$d aktiv</string>
     <plurals name="n_sources"><item quantity="one">%1$d Quelle</item><item quantity="other">%1$d Quellen</item></plurals>
+    <string name="system_xray">System X-Ray</string>
+    <string name="cpu_memory_and_network_overlay">Einblendung für CPU, Speicher und Netzwerk</string>
 </resources>

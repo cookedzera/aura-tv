@@ -752,7 +752,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         // see the first-run welcome again: am start -n app.aura.home/.HomeActivity --ez aura_welcome true
         if (intent.getBooleanExtra("aura_welcome", false)) {
-            handler.postDelayed(this::openWelcome, 500);
+            // not in a kids' profile: the welcome changes the whole TV, and any app can send this
+            if (!Profiles.kids(this)) handler.postDelayed(this::openWelcome, 500);
             return;
         }
         if (welcome != null) return;
@@ -798,9 +799,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (!settings.back()) closeSettings();
         } else if (zone == SIDE) {
             returnToContent();
-        } else if (zone == GRID && gridAt >= COLS) {
+        } else if (rows && zone == GRID && gridAt < rowIdx.length && rowIdx[gridAt] > 0) {
+            // on category rows: back up to the first row, at the same place on screen
+            focusGrid(rowTarget(0, colIdx[gridAt] - rowInfo.get(rowIdx[gridAt]).first));
+        } else if (!rows && zone == GRID && gridAt >= COLS) {
             focusGrid(gridAt % COLS);
-        } else if (dock && zone == GRID && gridAt < COLS) {
+        } else if (dock && zone == GRID && rowOf(gridAt) == 0) {
             setPhoto(true);
         } else if (zone == TOP || zone == SHELF || dock && zone == WIDGETS) {
             // the top buttons, Top Shelf, and the dock's widgets: Back returns to the apps below
@@ -1096,9 +1100,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             @Override
             public List<AppRepo.App> suggested() {
                 List<AppRepo.App> out = new ArrayList<>();
+                Set<String> seen = new HashSet<>();
                 for (Cell c : cells) {
                     AppRepo.App a = find(c.tag);
-                    if (a != null) out.add(a);
+                    if (a != null && seen.add(a.pkg)) out.add(a);
                 }
                 return out;
             }
@@ -2368,6 +2373,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // category rows, in either style: in the tvOS style the first row is the dock
         rows = Categories.on(this);
         rowsDim = rows && Categories.dim(this);
+        if (!rows) {
+            // back to the grid: no row slide may keep moving tiles
+            for (RowInfo r : rowInfo) if (r.anim != null) r.anim.cancel();
+            rowInfo.clear();
+            rowIdx = colIdx = new int[0];
+        }
         paged = !rows && Prefs.on(this, Prefs.GRID_PAGES);
         if (!paged && pageShift != 0f) {
             // pages switched off: the grid lies flat again, from the first column
@@ -2459,6 +2470,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (c.key().equals(keep)) at = i;
         }
         gridLabel.setText(getString(R.string.your_apps_n, sorted.size() + foldered.size()));
+        allAppsCount = 0;
+        for (Object e : entries) allAppsCount += e instanceof Folders.Folder ? folderApps((Folders.Folder) e).size() : 1;
         if (!dock) gridLabel.setVisibility(rows ? View.GONE : View.VISIBLE);
         placeRowLabels();
         int lines = rows ? rowInfo.size() : (cells.size() + COLS - 1) / COLS;
@@ -2547,6 +2560,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private final List<RowInfo> rowInfo = new ArrayList<>();
     private final List<TextView> rowLabels = new ArrayList<>();
     private boolean labelsTvos;
+    /** All apps' count, the apps inside folders included. */
+    private int allAppsCount;
     private static final int ROW_LABEL = 28;
 
     private static final class RowInfo {
@@ -2571,7 +2586,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private void buildRows(Map<String, Cell> old, List<Object> entries, List<String> hidden, int inputs) {
         Map<String, Integer> firstBefore = new java.util.HashMap<>();
-        for (RowInfo r : rowInfo) firstBefore.put(r.id, r.first);
+        for (RowInfo r : rowInfo) {
+            // a slide still running would move tiles that belong to other rows by now
+            if (r.anim != null) r.anim.cancel();
+            firstBefore.put(r.id, r.first);
+        }
         rowInfo.clear();
         List<Integer> ri = new ArrayList<>(), ci = new ArrayList<>();
         // the Aura style gives the inputs a row of their own; in the tvOS style they lead the dock, as on the grid
@@ -2659,7 +2678,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             // the tvOS dock wears no label, as on Apple TV
             t.setVisibility(dock && i == 0 ? View.GONE : View.VISIBLE);
             if (dock) t.setText(r.title);
-            else t.setText(r.id.equals(Categories.ALL) ? getString(R.string.your_apps_n, r.count) : r.title + "  ·  " + r.count);
+            else t.setText(r.id.equals(Categories.ALL) ? getString(R.string.your_apps_n, allAppsCount) : r.title + "  ·  " + r.count);
             t.setTranslationX(Ui.dpf(pageX()));
             t.setTranslationY(Ui.dpf(gridY() + i * rowH() - (dock ? 28 : 24)));
         }
@@ -2691,6 +2710,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         r.anim.setDuration(420);
         r.anim.setInterpolator(Ui.EMPHASIZED);
         r.anim.addUpdateListener(a -> {
+            // the rows were built again meanwhile: this slide belongs to none of them
+            if (!rowInfo.contains(row)) {
+                a.cancel();
+                return;
+            }
             row.shift = (float) a.getAnimatedValue();
             for (int k = row.start; k < row.start + row.count && k < cells.size(); k++) {
                 Cell c = cells.get(k);
@@ -2708,6 +2732,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      * tvOS style those past the dock's right edge too, as the glass ends there.
      */
     private float rowAlpha(int k) {
+        if (k < 0 || k >= rowIdx.length || k >= colIdx.length || rowIdx[k] >= rowInfo.size()) return 1f;
         float shift = rowInfo.get(rowIdx[k]).shift;
         float a = Math.min(1f, 1f - (shift - colIdx[k]));
         if (dock) a = Math.min(a, 1f - (colIdx[k] - (shift + COLS - 1)));
@@ -2811,7 +2836,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     private float cellX(int i) {
-        if (rows && i < colIdx.length) return Ui.dpf(pageX() + (colIdx[i] - rowInfo.get(rowIdx[i]).shift) * (TILE_W + GAP));
+        if (rows && i < colIdx.length && rowIdx[i] < rowInfo.size()) return Ui.dpf(pageX() + (colIdx[i] - rowInfo.get(rowIdx[i]).shift) * (TILE_W + GAP));
         return Ui.dpf(pageX() + pageOf(i) * pageW() + (i % COLS) * (TILE_W + GAP) - pageShift);
     }
 
@@ -3416,7 +3441,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (!Trouble.fireTv(c)) return wanted;
         android.content.pm.ResolveInfo ri = c.getPackageManager().resolveActivity(wanted, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
         String name = ri != null && ri.activityInfo != null ? ri.activityInfo.name : null;
-        if (name != null && !name.contains("Dummy") && !name.contains("CTS")) return wanted;
+        boolean standIn = name == null
+                // Amazon's stand-ins bounce through its home; but its Accessibility one does open the page
+                || (name.contains("Dummy") || name.contains("CTS")) && !Settings.ACTION_ACCESSIBILITY_SETTINGS.equals(wanted.getAction())
+                // the launcher's own Settings shortcut goes back to Amazon's home
+                || "com.amazon.tv.launcher.ui.SettingsActivity".equals(name)
+                // pages only Amazon's own apps may open would throw
+                || ri.activityInfo.permission != null && c.checkCallingOrSelfPermission(ri.activityInfo.permission) != android.content.pm.PackageManager.PERMISSION_GRANTED;
+        if (!standIn) return wanted;
         Intent fire = new Intent("amazon.intent.action.MAINSETTINGS")
                 .setClassName("com.amazon.tv.launcher", "com.amazon.tv.launcher.ui.MainSettingsActivity")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -4167,6 +4199,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (first && (code == KeyEvent.KEYCODE_CHANNEL_UP || code == KeyEvent.KEYCODE_CHANNEL_DOWN
                 || code == KeyEvent.KEYCODE_PAGE_UP || code == KeyEvent.KEYCODE_PAGE_DOWN) && !cells.isEmpty() && !folderPanel.isOpen()) {
             boolean back = code == KeyEvent.KEYCODE_CHANNEL_UP || code == KeyEvent.KEYCODE_PAGE_UP;
+            if (rows && gridAt < rowIdx.length && !rowInfo.isEmpty()) {
+                // on category rows, a row at a time (each is a category), at the same place on screen
+                int r = rowIdx[gridAt], to = Math.max(0, Math.min(rowInfo.size() - 1, r + (back ? -1 : 1)));
+                focusGrid(rowTarget(to, colIdx[gridAt] - rowInfo.get(r).first));
+                return swallow(code);
+            }
             int step = paged ? perPage() : COLS * 2;
             focusGrid(Math.max(0, Math.min(cells.size() - 1, gridAt + (back ? -step : step))));
             return swallow(code);
@@ -4226,7 +4264,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 } else if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
                     if (widgetAt < widgets.size() - 1) focusWidget(widgetAt + 1);
                 } else if (code == KeyEvent.KEYCODE_DPAD_DOWN && !cells.isEmpty()) {
-                    focusGrid(Math.min(cells.size() - 1, colForWidget(widgetAt)));
+                    int slot = colForWidget(widgetAt);
+                    focusGrid(rows && !rowInfo.isEmpty() ? rowTarget(0, slot) : Math.min(cells.size() - 1, slot));
                 } else if (code == KeyEvent.KEYCODE_DPAD_UP && !held) {
                     if (dock) topCc.requestFocus();
                     else if (widgets.get(widgetAt) == fyW) stack.flip();
@@ -4234,7 +4273,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 return true;
             default: {
                 if (cells.isEmpty()) {
-                    focusWidget(widgetAt);
+                    // nothing on home at all (every app hidden, an empty kids' profile): the remote
+                    // must still reach somewhere, or it's stuck with nowhere to go
+                    if (!widgets.isEmpty()) focusWidget(widgetAt);
+                    else if (dock) topCc.requestFocus();
+                    else enterSide();
                     return true;
                 }
                 if (rows && gridAt < rowIdx.length) {
@@ -4854,7 +4897,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 final String rowName = Categories.name(this, cat);
                 items.add(new AppMenu.Item(R.drawable.ic_settings, getString(R.string.rename_row, rowName), () -> {
                     closeMenu(card);
-                    askTag = pkg;
+                    askTag = inRow + "|" + pkg;
                     home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
                     ask.show(getString(R.string.rename_name, rowName.toUpperCase(Locale.getDefault())), rowName,
                             getString(R.string.type_a_name_then_ok), Folders.suggestions(this), name -> {
@@ -5176,7 +5219,21 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     /** Focus the grid tile with this tag, if it's there. */
     private void focusTag(String tag) {
-        for (int i = 0; i < cells.size(); i++) if (cells.get(i).tag.equals(tag)) focusGrid(i);
+        if (tag == null) return;
+        // a category row's tile by its key ("video|com.netflix.ninja"), else the app's first tile:
+        // the last match was All apps at the very bottom
+        for (int i = 0; i < cells.size(); i++) {
+            if (cells.get(i).key().equals(tag)) {
+                focusGrid(i);
+                return;
+            }
+        }
+        for (int i = 0; i < cells.size(); i++) {
+            if (cells.get(i).tag.equals(tag)) {
+                focusGrid(i);
+                return;
+            }
+        }
     }
 
     private boolean menuKey(int code, KeyEvent e) {
@@ -5239,8 +5296,27 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         int i = gridAt, j = i + d;
         // live inputs always open the grid
         if (j < live.size() || j >= cells.size()) return;
-        // on category rows, only along its own row
+        // on category rows, only along its own row; the row slides first so the move lands in view
         if (rows && (j >= rowIdx.length || rowIdx[j] != rowIdx[i])) return;
+        if (rows) {
+            cells.add(j, cells.remove(i));
+            gridAt = j;
+            RowInfo row = rowInfo.get(rowIdx[j]);
+            if (row.anim != null) row.anim.cancel();
+            int first = row.first, col = colIdx[j];
+            if (col < first) first = col;
+            else if (col >= first + COLS) first = col - COLS + 1;
+            row.first = first;
+            row.shift = first;
+            for (int k = row.start; k < row.start + row.count && k < cells.size(); k++) {
+                Cell c = cells.get(k);
+                c.animate().translationX(cellX(k)).translationY(cellY(k)).alpha(rowAlpha(k)).setDuration(k == j ? 420 : 360)
+                        .setStartDelay(0).setInterpolator(k == j ? Ui.SPRING : Ui.EMPHASIZED).start();
+            }
+            scrollTo(scrollFor(rowIdx[j]));
+            glideToCell();
+            return;
+        }
         cells.add(j, cells.remove(i));
         boolean cross = paged && pageOf(j) != gridPage;
         for (int k = Math.min(i, j); k <= Math.max(i, j); k++) {

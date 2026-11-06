@@ -103,6 +103,10 @@ final class Safety {
             } catch (PackageManager.NameNotFoundException ignored) {
             }
         }
+        // every app Free up memory switched off, back on
+        for (String pkg : Prefs.device(c).getStringSet(Debloat.MINE, new java.util.HashSet<>())) {
+            if (pkg.matches("[A-Za-z0-9_.]+")) cmds.add("pm enable " + pkg);
+        }
         // a home taken off for this user can't be seen any more: it's put back by name
         String retired = Prefs.device(c).getString(RETIRED, null);
         if (retired != null && retired.matches("[A-Za-z0-9_.]+")) {
@@ -161,14 +165,30 @@ final class Safety {
      */
     static Boolean retireGoogleHome(Context c, boolean retire) {
         String me = c.getPackageName() + "/" + HomeActivity.class.getName();
-        List<String> out = retire
-                ? Adb.run(c, "am force-stop " + GOOGLE_TV_HOME,
-                        "pm disable-user --user 0 " + GOOGLE_TV_HOME,
-                        "pm disable-user --user 0 " + GOOGLE_TV_SETUP,
-                        "cmd package set-home-activity " + me)
-                : Adb.run(c, "pm enable " + GOOGLE_TV_HOME,
-                        "pm enable " + GOOGLE_TV_SETUP,
-                        "cmd package set-home-activity " + me);
+        // the setup app also pairs remotes, adds accounts and resets the TV: only its recovery home
+        // screens go, where Android allows it; on a TV that refuses that, the whole app as before
+        List<String> setupOff = new ArrayList<>(), setupOn = new ArrayList<>();
+        for (ResolveInfo r : c.getPackageManager().queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
+                PackageManager.GET_DISABLED_COMPONENTS)) {
+            if (r.activityInfo == null || !GOOGLE_TV_SETUP.equals(r.activityInfo.packageName)) continue;
+            String comp = GOOGLE_TV_SETUP + "/" + r.activityInfo.name;
+            if (!comp.matches("[A-Za-z0-9_.$/]+")) continue;
+            setupOff.add("pm disable --user 0 " + comp);
+            setupOn.add("pm enable --user 0 " + comp);
+        }
+        if (setupOff.isEmpty()) setupOff.add("pm disable-user --user 0 " + GOOGLE_TV_SETUP);
+        setupOn.add("pm enable " + GOOGLE_TV_SETUP);
+        List<String> cmds = new ArrayList<>();
+        if (retire) {
+            cmds.add("am force-stop " + GOOGLE_TV_HOME);
+            cmds.add("pm disable-user --user 0 " + GOOGLE_TV_HOME);
+            cmds.addAll(setupOff);
+        } else {
+            cmds.add("pm enable " + GOOGLE_TV_HOME);
+            cmds.addAll(setupOn);
+        }
+        cmds.add("cmd package set-home-activity " + me);
+        List<String> out = Adb.run(c, cmds.toArray(new String[0]));
         if (out == null || out.isEmpty()) return null;
         boolean ok = true;
         // the setup app is missing on some boxes: only the home screen itself has to take it

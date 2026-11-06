@@ -142,7 +142,7 @@ async function refresh() {
       t.querySelector('img').alt = it.title;
       t.querySelector('button').onclick = async () => {
         t.style.opacity = .35;
-        await fetch(base + '/del/' + encodeURIComponent(it.id), {method: 'POST'});
+        await fetch(base + '/del/' + encodeURIComponent(it.id), {method: 'POST', headers: {'X-Aura': '1'}});
         refresh();
       };
       grid.appendChild(t);
@@ -173,6 +173,7 @@ function send(file, el, i, n, title) {
     const x = new XMLHttpRequest();
     const q = '?name=' + encodeURIComponent(file.name || '') + '&title=' + encodeURIComponent(title) + '&i=' + i + '&n=' + n;
     x.open('POST', base + '/up' + q);
+    x.setRequestHeader('X-Aura', '1');
     x.upload.onprogress = e => {
       if (!e.lengthComputable) return;
       const p = e.loaded / e.total;
@@ -208,7 +209,7 @@ $('files').addEventListener('change', async e => {
 $('only').onclick = async () => {
   const on = !$('only').classList.contains('on');
   $('only').classList.toggle('on', on);
-  await fetch(base + '/only?on=' + (on ? 1 : 0), {method: 'POST'});
+  await fetch(base + '/only?on=' + (on ? 1 : 0), {method: 'POST', headers: {'X-Aura': '1'}});
 };
 
 $('tform').onsubmit = async e => {
@@ -217,7 +218,7 @@ $('tform').onsubmit = async e => {
   if (!v) return;
   $('tstat').textContent = 'Sending…';
   try {
-    const r = await fetch(base + '/type', {method: 'POST', body: v});
+    const r = await fetch(base + '/type', {method: 'POST', headers: {'X-Aura': '1'}, body: v});
     const j = await r.json();
     $('tstat').textContent = j.ok ? 'Sent to the TV' : 'Focus a text field on the TV first';
     if (j.ok) $('tbox').value = '';

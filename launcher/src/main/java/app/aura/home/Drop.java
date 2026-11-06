@@ -220,6 +220,12 @@ final class Drop {
                 return;
             }
             String rest = target.substring(base.length());
+            // every change comes from Aura's own page, which sends this header; a page from anywhere
+            // else can't (a custom header needs the TV's leave to cross sites, and it never gives it)
+            if (method.equals("POST") && !"1".equals(head.get("x-aura"))) {
+                send(s, 403, "text/plain", new byte[0]);
+                return;
+            }
             Map<String, String> args = args(query);
             java.util.Set<String> allowed = only;
             if (allowed != null && !rest.isEmpty() && !allowed.contains(rest)) {
@@ -267,14 +273,14 @@ final class Drop {
                                     + "letter-spacing:.3em;text-align:center;padding:16px;border-radius:18px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.07);color:#fff\">"
                                     + "<button class=\"b\" id=\"b\" style=\"border:0\">Pair</button>",
                             "b.onclick=async()=>{const v=k.value.replace(/[^0-9]/g,'');if(v.length!=6){s.textContent='Six digits, as the TV shows them.';return}"
-                                    + "s.textContent='Pairing… look at the TV.';try{const r=await fetch('pair',{method:'POST',body:v});const j=await r.json();"
+                                    + "s.textContent='Pairing… look at the TV.';try{const r=await fetch('pair',{method:'POST',headers:{'X-Aura':'1'},body:v});const j=await r.json();"
                                     + "s.textContent=j.ok?'Sent. The TV takes it from here.':'Six digits, as the TV shows them.'}catch(e){s.textContent='Could not reach the TV.'}}"));
                 }
             } else if (rest.equals("/backup")) {
                 send(s, 200, "text/html; charset=utf-8", page("Your Aura setup", "Save a copy of your profiles, app order, folders, tiles and choices to this phone, or bring one back. Photos stay where they are.",
                         "<a class=\"b\" href=\"backup.json\" download=\"aura-setup.json\">Save a copy</a>"
                                 + "<label class=\"b ghost\">Bring one back<input id=\"f\" type=\"file\" accept=\".json,application/json\" hidden></label>",
-                        "f.onchange=async()=>{const x=f.files[0];if(!x)return;s.textContent='Sending…';try{const r=await fetch('restore',{method:'POST',body:await x.text()});"
+                        "f.onchange=async()=>{const x=f.files[0];if(!x)return;s.textContent='Sending…';try{const r=await fetch('restore',{method:'POST',headers:{'X-Aura':'1'},body:await x.text()});"
                                 + "const j=await r.json();s.textContent=j.ok?'Back on the TV: '+j.count+' settings. Aura is starting again.':'That file is not an Aura setup.'}catch(e){s.textContent='Could not reach the TV.'}}"));
             } else if (rest.equals("/backup.json")) {
                 send(s, 200, "application/json", Backup.export(app).getBytes(StandardCharsets.UTF_8),
@@ -305,7 +311,7 @@ final class Drop {
                 } else {
                     send(s, 200, "text/html; charset=utf-8", page("A picture for its tile", "Choose a photo or a banner: it's cropped to fit the tile, wide like a TV.",
                             "<label class=\"b\">Choose a picture<input id=\"f\" type=\"file\" accept=\"image/*\" hidden></label>",
-                            "f.onchange=async()=>{const x=f.files[0];if(!x)return;s.textContent='Sending…';try{const r=await fetch('art',{method:'POST',body:x});"
+                            "f.onchange=async()=>{const x=f.files[0];if(!x)return;s.textContent='Sending…';try{const r=await fetch('art',{method:'POST',headers:{'X-Aura':'1'},body:x});"
                                     + "const j=await r.json();s.textContent=j.ok?'On the TV now.':'The TV could not read that picture.'}catch(e){s.textContent='Could not reach the TV.'}}"));
                 }
             } else if (method.equals("POST") && rest.equals("/type")) {
@@ -421,7 +427,7 @@ final class Drop {
             + "<textarea id=\"k\" autocomplete=\"off\" autocapitalize=\"off\" spellcheck=\"false\" placeholder=\"Paste your key\"></textarea>"
             + "<button id=\"b\">Send to the TV</button><div id=\"s\"></div></main><script>"
             + "b.onclick=async()=>{const v=k.value.trim();if(!v){s.textContent='Paste the key first.';return}"
-            + "s.textContent='Sending…';try{const r=await fetch(location.pathname,{method:'POST',body:v});"
+            + "s.textContent='Sending…';try{const r=await fetch(location.pathname,{method:'POST',headers:{'X-Aura':'1'},body:v});"
             + "s.textContent=r.ok?'Sent. The TV checks it now: look at the screen.':'The TV did not take it. Try again.'}"
             + "catch(e){s.textContent='Could not reach the TV. Same Wi-Fi?'}}</script></body></html>";
 

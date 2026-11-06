@@ -41,7 +41,8 @@ final class Debloat {
             new Item("com.google.android.backdrop", R.string.db_screensaver, 0, true),
             new Item("com.android.printspooler", R.string.db_print, 0, true),
             new Item("com.google.android.syncadapters.calendar", R.string.db_calendar, 0, true),
-            new Item("com.google.android.play.games", R.string.db_games, 0, true),
+            // offered, not recommended: someone may play
+            new Item("com.google.android.play.games", R.string.db_games, 0, false),
             new Item("com.google.android.videos", R.string.db_store, 0, true),
             new Item("com.realtek.retailmode", R.string.db_demo, 0, true),
             new Item("com.google.android.retaildemo", R.string.db_demo, 0, true),
@@ -49,6 +50,9 @@ final class Debloat {
             new Item("com.google.android.apps.mediashell", R.string.db_cast, R.string.db_cast_lose, false),
             new Item("com.google.android.tv.remote.service", R.string.db_remote, R.string.db_remote_lose, false),
     };
+
+    /** The apps Aura switched off, by name. */
+    static final String MINE = "debloated";
 
     private Debloat() { }
 
@@ -74,6 +78,8 @@ final class Debloat {
         for (Item it : LIST) {
             for (ApplicationInfo ai : all) {
                 if (!(it.pkg.endsWith(".") ? ai.packageName.startsWith(it.pkg) : ai.packageName.equals(it.pkg))) continue;
+                // only what the TV came with: an app of the same name installed later is yours
+                if ((ai.flags & ApplicationInfo.FLAG_SYSTEM) == 0) continue;
                 out.add(new Found(it, ai.packageName, String.valueOf(pm.getApplicationLabel(ai)), ai.enabled));
             }
         }
@@ -89,7 +95,15 @@ final class Debloat {
         List<String> out = off ? Adb.run(c, "am force-stop " + pkg, "pm disable-user --user 0 " + pkg) : Adb.run(c, "pm enable " + pkg);
         if (out == null || out.isEmpty()) return null;
         String last = out.get(out.size() - 1);
-        return off ? last.contains("disabled-user") : last.contains("enabled");
+        boolean ok = off ? last.contains("disabled-user") : last.contains("enabled");
+        // remembered, so Aura leaving (or Turn all back on) can switch every one back on
+        if (ok) {
+            java.util.Set<String> mine = new java.util.HashSet<>(Prefs.device(c).getStringSet(MINE, new java.util.HashSet<>()));
+            if (off) mine.add(pkg);
+            else mine.remove(pkg);
+            Prefs.device(c).edit().putStringSet(MINE, mine).apply();
+        }
+        return ok;
     }
 
     /**
@@ -97,7 +111,7 @@ final class Debloat {
      * setup grants). Off the main thread; empty when it can't be read.
      */
     static Map<String, Integer> memory() {
-        final Map<String, Integer> mb = new HashMap<>();
+        final Map<String, Integer> kb = new HashMap<>();
         // compact lines: proc,<state>,<process>,<pid>,<pss kB>,...
         Reports.read("meminfo", new String[]{"-c"}, s -> {
             if (!s.startsWith("proc,")) return true;
@@ -107,13 +121,15 @@ final class Debloat {
             int colon = name.indexOf(':');
             if (colon > 0) name = name.substring(0, colon);
             try {
-                int kb = Integer.parseInt(f[4].trim());
-                Integer had = mb.get(name);
-                mb.put(name, (had == null ? 0 : had) + Math.round(kb / 1024f));
+                // summed in kB, rounded once: an app's small processes each rounded to 0 MB added up to nothing
+                Integer had = kb.get(name);
+                kb.put(name, (had == null ? 0 : had) + Integer.parseInt(f[4].trim()));
             } catch (NumberFormatException ignored) {
             }
             return true;
         });
+        Map<String, Integer> mb = new HashMap<>();
+        for (Map.Entry<String, Integer> e : kb.entrySet()) mb.put(e.getKey(), Math.round(e.getValue() / 1024f));
         return mb;
     }
 }

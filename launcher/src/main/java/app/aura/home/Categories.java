@@ -182,12 +182,19 @@ final class Categories {
         }
     }
 
-    private static String label(PackageManager pm, String pkg) {
+    private static final Map<String, String> labels = new HashMap<>();
+
+    /** An app's name, asked of Android once (A to Z sorts on every rebuild of home). */
+    private static synchronized String label(PackageManager pm, String pkg) {
+        String l = labels.get(pkg);
+        if (l != null) return l;
         try {
-            return String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)));
+            l = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)));
         } catch (PackageManager.NameNotFoundException e) {
-            return pkg;
+            l = pkg;
         }
+        labels.put(pkg, l);
+        return l;
     }
 
     // ---- what an app is ------------------------------------------------------------------------
@@ -246,6 +253,7 @@ final class Categories {
     /** An app was installed, updated or removed: what it is gets read again. */
     static synchronized void forget(String pkg) {
         kinds.remove(pkg);
+        labels.remove(pkg);
     }
 
     // ---- by hand ------------------------------------------------------------------------------
@@ -299,7 +307,8 @@ final class Categories {
     }
 
     static void setHidden(Context c, String id, boolean hidden) {
-        edit(c, id, (cats, k) -> k.hidden = hidden);
+        // All apps is never hidden: it's where every app outside the other rows lives
+        edit(c, id, (cats, k) -> k.hidden = hidden && !k.id.equals(ALL));
     }
 
     /** OK steps through the orders: yours, A to Z, most used, recently used. */
@@ -348,8 +357,9 @@ final class Categories {
 
     // ---- launches, for Most used ---------------------------------------------------------------
 
+    /** Per profile, as the rows are: one profile's habits don't sort another's. */
     private static SharedPreferences usage(Context c) {
-        return c.getSharedPreferences("aura_launches", Context.MODE_PRIVATE);
+        return c.getSharedPreferences(Profiles.file(c) + "_launches", Context.MODE_PRIVATE);
     }
 
     static void launched(Context c, String pkg) {

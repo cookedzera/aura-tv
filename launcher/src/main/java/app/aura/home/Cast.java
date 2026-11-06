@@ -316,7 +316,14 @@ public class Cast extends Activity implements Renderer.Player {
     private static Bitmap fetch(String url, int w, int h) {
         HttpURLConnection c = null;
         try {
-            c = (HttpURLConnection) new URL(url).openConnection();
+            URL u = new URL(url);
+            // a picture from the network, never from the TV itself or a link-local address: a phone
+            // could otherwise point the TV at services that only answer the TV
+            java.net.InetAddress at = java.net.InetAddress.getByName(u.getHost());
+            if (at.isLoopbackAddress() || at.isLinkLocalAddress() || at.isAnyLocalAddress()) return null;
+            c = (HttpURLConnection) u.openConnection();
+            // and no redirect onto one
+            c.setInstanceFollowRedirects(false);
             c.setConnectTimeout(8000);
             c.setReadTimeout(15000);
             byte[] data;

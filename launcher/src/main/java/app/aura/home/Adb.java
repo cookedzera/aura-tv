@@ -421,14 +421,16 @@ final class Adb {
     }
 
     /**
-     * Whether this TV's Developer options are on. Fire OS 5 and 6 always show them yet leave
-     * Android's flag at 0, and debugging that's on means they're on anywhere.
+     * Whether this TV's Developer options are on, as far as Aura can tell. Debugging that's on
+     * means they're on anywhere.
      */
     static boolean devOptionsOn(Context c) {
         android.content.ContentResolver r = c.getContentResolver();
         return android.provider.Settings.Global.getInt(r, android.provider.Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 0
                 || android.provider.Settings.Global.getInt(r, android.provider.Settings.Global.ADB_ENABLED, 0) != 0
-                || Trouble.fireTv(c) && Build.VERSION.SDK_INT < 28;
+                // Fire TV: 5 and 6 always show them; 7 and 8 keep their unlocking to themselves, so
+                // Aura can't tell, and sends you straight to ADB debugging (step 1 says how to unlock)
+                || Trouble.fireTv(c);
     }
 
     /** Whether Android let Aura in last time. */

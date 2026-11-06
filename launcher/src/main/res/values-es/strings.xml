@@ -1080,4 +1080,6 @@
     <string name="input_channels">Canales de TV</string>
     <string name="n_live">%1$d activas</string>
     <plurals name="n_sources"><item quantity="one">%1$d fuente</item><item quantity="other">%1$d fuentes</item></plurals>
+    <string name="system_xray">System X-Ray</string>
+    <string name="cpu_memory_and_network_overlay">Superposición de CPU, memoria y red</string>
 </resources>

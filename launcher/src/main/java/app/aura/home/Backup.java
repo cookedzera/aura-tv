@@ -30,7 +30,8 @@ final class Backup {
             "update_ver", "update_seen", "update_told", "listings_asked", "tmdb_session", "tmdb_account", "tmdb_user",
             "pick_made_for", "pick_count", "pick_at", "geo_at", "wx_at", "wx", "saver_prev", "sleepAt", "sleepVol", "sleepSet",
             "sleepEnd", "known_pkgs", "new_pkgs", "welcomed", "keys_wanted", "adb_paired", "adb_tls_port", "set_light",
-            "parent_pin", "watched", "wx_json", "wx_temp", "wx_code", "wx_day", "wx_f", "tidied_76"));
+            "parent_pin", "watched", "wx_json", "wx_temp", "wx_code", "wx_day", "wx_f", "tidied_76",
+            "home_choice_ignored", "retired_home", "debloated", "orig_home"));
 
     private Backup() { }
 

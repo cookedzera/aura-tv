@@ -1727,8 +1727,11 @@ final class SettingsPanel {
             act.runOnUiThread(() -> {
                 dbBusy = false;
                 dbMem = null;
-                host.hud(r ? R.drawable.ic_check : R.drawable.ic_info, !r ? act.getString(R.string.couldnt_reach_the_tvs_debugging)
+                host.hud(r && n > 0 ? R.drawable.ic_check : R.drawable.ic_info, !r ? act.getString(R.string.couldnt_reach_the_tvs_debugging)
+                        : n == 0 ? act.getString(R.string.android_didnt_allow_that_change)
                         : act.getResources().getQuantityString(switchOff ? R.plurals.n_apps_off : R.plurals.n_apps_on, n, n));
+                // an app switched off (or on) leaves home's rows (or comes back)
+                if (n > 0) host.applied("apps");
                 if (page.equals("debloat")) {
                     build();
                     focusTag(focus);
@@ -1757,7 +1760,8 @@ final class SettingsPanel {
             host.applied("apps");
             build();
         };
-        add(act.getString(R.string.show_on_home), k.hidden ? act.getString(R.string.off) : act.getString(R.string.on), "c:show", () -> {
+        // All apps stays: hidden, every app outside the other rows (and every folder) would be out of reach
+        if (!k.id.equals(Categories.ALL)) add(act.getString(R.string.show_on_home), k.hidden ? act.getString(R.string.off) : act.getString(R.string.on), "c:show", () -> {
             Categories.setHidden(act, id, !k.hidden);
             changed.run();
             focusTag("c:show");

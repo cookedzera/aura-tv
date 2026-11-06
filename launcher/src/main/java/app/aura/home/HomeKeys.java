@@ -550,6 +550,7 @@ public class HomeKeys extends AccessibilityService {
                 lastApp = pkg;
                 lastAppAt = System.currentTimeMillis();
                 Habits.opened(this, pkg);
+                Categories.launched(this, pkg);
             }
             front = pkg;
             refilter();

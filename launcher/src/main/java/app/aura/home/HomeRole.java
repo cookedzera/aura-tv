@@ -112,9 +112,11 @@ final class HomeRole {
                 }
             }
         }
+        Intent page = new Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (!real(a, page)) return false;
         try {
             HomeKeys.letTvHomePass();
-            a.startActivity(new Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            a.startActivity(page);
             return true;
         } catch (RuntimeException e) {
             return false;
@@ -153,7 +155,9 @@ final class HomeRole {
 
     /** Android 10's question exists on this TV. */
     private static boolean askable(Context c) {
-        if (Build.VERSION.SDK_INT < 29) return true;
+        // before the question existed, the home settings page, where there is a real one (stock
+        // Android TV answers it with an empty stand-in that closes at once)
+        if (Build.VERSION.SDK_INT < 29) return real(c, new Intent(Settings.ACTION_HOME_SETTINGS));
         android.app.role.RoleManager rm = c.getSystemService(android.app.role.RoleManager.class);
         return rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME);
     }
@@ -166,6 +170,12 @@ final class HomeRole {
      */
     static boolean ignoresChoice(Context c) {
         if (held(c)) return false;
+        // only while a launcher that could be keeping Home is still there: with it gone (switched
+        // off, uninstalled), Android is simply waiting to be asked, and asking works again
+        if (others(c).isEmpty()) {
+            Prefs.device(c).edit().remove(IGNORED).apply();
+            return false;
+        }
         if (Prefs.device(c).getBoolean(IGNORED, false)) return true;
         if (Build.VERSION.SDK_INT < 29) return false;
         try {
@@ -207,7 +217,9 @@ final class HomeRole {
     /** An Android settings page that exists here, and isn't a stub standing in for one. */
     static boolean real(Context c, Intent i) {
         ResolveInfo r = c.getPackageManager().resolveActivity(i, PackageManager.MATCH_DEFAULT_ONLY);
+        // a stand-in, by its app (frameworkpackagestubs) or by its own name (Android TV's EmptyStubActivity)
         return r != null && r.activityInfo != null && !r.activityInfo.packageName.contains("stub")
+                && !r.activityInfo.name.toLowerCase(Locale.ROOT).contains("stub")
                 && !"android".equals(r.activityInfo.packageName);
     }
 
