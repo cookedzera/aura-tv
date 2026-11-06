@@ -203,6 +203,7 @@ final class Switcher extends FrameLayout {
 
         empty = Ui.text(a, 17, Ui.medium, 0xCCFFFFFF);
         empty.setText(act.getString(R.string.apps_you_open_will_line));
+        empty.setFocusable(true);
         addView(empty, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
 
         // the app between card and full screen: its colour, its icon and name in the middle
@@ -484,7 +485,11 @@ final class Switcher extends FrameLayout {
         veil.animate().cancel();
         veil.setAlpha(1f);
         closing = false;
-        if (none) return;
+        if (none) {
+            // no card to take the focus, and the home screen beneath is shut to it: the line holds it
+            empty.requestFocus();
+            return;
+        }
         at = Math.min(start, apps.size() - 1);
         layoutDeck(false);
         for (int k = 0; k < items.size(); k++) {

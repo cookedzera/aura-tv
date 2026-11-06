@@ -550,7 +550,7 @@
     <string name="couldnt_reach_tmdb_check_the">Couldn\'t reach TMDB · check the key and the connection</string>
     <string name="waiting_for_you_to_approve">Waiting for you to approve…</string>
     <string name="approve_aura_on_tmdb">Approve Aura on TMDB</string>
-    <string name="connect_in_set_up_on">Connect in Set up on this TV first so the TV\'s own home screen can be turned back on</string>
+    <string name="connect_in_set_up_on">Connect in Set up on this TV first so what Aura switched off can be turned back on</string>
     <string name="handing_the_tv_back">Handing the TV back…</string>
     <string name="uninstall_aura_in_androids_settings">Uninstall Aura in Android\'s settings, Apps</string>
     <string name="press_the_button_on_the">Press the button on the remote now.</string>
@@ -1095,4 +1095,10 @@
     <string name="input_channels">TV channels</string>
     <string name="n_live">%1$d live</string>
     <plurals name="n_sources"><item quantity="one">%1$d source</item><item quantity="other">%1$d sources</item></plurals>
+    <string name="gif">GIF</string>
+    <string name="cant_read_notifications_ok">Aura can\'t read notifications yet · OK to allow</string>
+    <string name="cant_read_notifications_setup">Aura can\'t read notifications yet · Settings, Set up on this TV</string>
+    <string name="mbps_value">%1$s Mbps</string>
+    <plurals name="n_more_caps"><item quantity="one">+%1$d MORE</item><item quantity="other">+%1$d MORE</item></plurals>
+    <string name="couldnt_open_that">Couldn\'t open that</string>
 </resources>

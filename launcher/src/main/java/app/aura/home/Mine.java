@@ -48,6 +48,13 @@ final class Mine {
     static final long MAX_BYTES = 40L << 20;
     private static final int TW = 320, TH = 180;
     private static final Object LOCK = new Object();
+    /**
+     * The index as last read or written, with its file and that file's time, held under LOCK:
+     * Settings asks for it on every OK. Every reader gets this same array, so none changes it.
+     */
+    private static JSONArray cached;
+    private static File cachedFile;
+    private static long cachedAt;
     private static final Random RND = new Random();
 
     private Mine() { }
@@ -415,14 +422,24 @@ final class Mine {
 
     private static JSONArray readIndex(Context c) {
         File f = new File(dir(c), INDEX);
-        if (!f.isFile()) return new JSONArray();
-        try (InputStream in = new FileInputStream(f)) {
-            ByteArrayOutputStream bo = new ByteArrayOutputStream();
-            byte[] buf = new byte[8192];
-            for (int n; (n = in.read(buf)) > 0; ) bo.write(buf, 0, n);
-            return new JSONArray(new String(bo.toByteArray(), StandardCharsets.UTF_8));
-        } catch (IOException | JSONException e) {
-            return new JSONArray();
+        synchronized (LOCK) {
+            long at = f.lastModified();
+            if (f.equals(cachedFile) && at == cachedAt) return cached;
+            JSONArray index = new JSONArray();
+            if (f.isFile()) {
+                try (InputStream in = new FileInputStream(f)) {
+                    ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                    byte[] buf = new byte[8192];
+                    for (int n; (n = in.read(buf)) > 0; ) bo.write(buf, 0, n);
+                    index = new JSONArray(new String(bo.toByteArray(), StandardCharsets.UTF_8));
+                } catch (IOException | JSONException e) {
+                    return new JSONArray();
+                }
+            }
+            cached = index;
+            cachedFile = f;
+            cachedAt = at;
+            return index;
         }
     }
 
@@ -435,5 +452,10 @@ final class Mine {
             fo.write(index.toString().getBytes(StandardCharsets.UTF_8));
         }
         if (!tmp.renameTo(f)) throw new IOException("couldn't write the index");
+        synchronized (LOCK) {
+            cached = index;
+            cachedFile = f;
+            cachedAt = f.lastModified();
+        }
     }
 }

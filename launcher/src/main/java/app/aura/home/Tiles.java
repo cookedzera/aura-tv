@@ -13,9 +13,14 @@ import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
+import android.os.Handler;
+import android.os.Looper;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
 
 /** Painters for card artwork: TV banners, generated icon cards and the Index card. */
 final class Tiles {
@@ -36,10 +41,37 @@ final class Tiles {
         }
     };
     private static final int MARK_PX = 320;
+    /**
+     * Logos being lifted, each with what waits on it; main thread only. A lift costs a weak TV tens of
+     * milliseconds, a row of new tiles hundreds: a card's are lifted on {@link #LIFTER}, never as focus moves.
+     */
+    private static final Map<String, List<Runnable>> LIFTING = new HashMap<>();
+    // just below the screen's priority: the logos are waited for, but never at a frame's expense
+    private static final ExecutorService LIFTER = Compat.background("logos", android.os.Process.THREAD_PRIORITY_DEFAULT + 4);
+    private static final Handler main = new Handler(Looper.getMainLooper());
+    /**
+     * What runs once a logo the painter at work on this thread had to leave out lands (see
+     * {@link #paint}); taken by the first logo left out.
+     */
+    private static final ThreadLocal<Runnable> WAITING = new ThreadLocal<>();
 
     static void trim() {
         synchronized (LOGOS) {
             LOGOS.clear();
+        }
+    }
+
+    /**
+     * Paints {@code p}, on the main thread; false when a logo it needs isn't lifted yet. That logo is
+     * left out and lifted behind the screen, and {@code then} runs on the main thread once it's there.
+     */
+    static boolean paint(Painter p, Canvas c, int w, int h, Runnable then) {
+        WAITING.set(then);
+        try {
+            p.paint(c, w, h);
+            return WAITING.get() != null;
+        } finally {
+            WAITING.remove();
         }
     }
 
@@ -310,13 +342,22 @@ final class Tiles {
         float k = w / (float) lw;
         String key = a.pkg + "@" + lw + "x" + lh;
         Bitmap logo;
+        boolean known;
         synchronized (LOGOS) {
-            if (!LOGOS.containsKey(key)) {
-                Bitmap lifted = a.banner != null ? lift(a.banner, lw, lh) : null;
-                if (lifted == null && a.icon != null) lifted = liftIcon(a.icon, lh);
-                LOGOS.put(key, lifted != null ? withShadow(lifted) : null);
-            }
+            known = LOGOS.containsKey(key);
             logo = LOGOS.get(key);
+        }
+        if (!known) {
+            Runnable then = WAITING.get();
+            if (then != null) {
+                WAITING.remove();
+                liftLater(key, a, lw, lh, then);
+                return;
+            }
+            logo = lifted(a, lw, lh);
+            synchronized (LOGOS) {
+                LOGOS.put(key, logo);
+            }
         }
         if (logo != null) {
             c.save();
@@ -347,6 +388,44 @@ final class Tiles {
             p.setShader(null);
             ib.recycle();
         }
+    }
+
+    /** Lifts {@code key}'s logo on {@link #LIFTER}, once however many wait on it. Main thread. */
+    private static void liftLater(String key, AppRepo.App a, int w, int h, Runnable then) {
+        List<Runnable> waiting = LIFTING.get(key);
+        if (waiting == null) {
+            waiting = new ArrayList<>();
+            LIFTING.put(key, waiting);
+            LIFTER.execute(() -> {
+                Bitmap logo = null;
+                try {
+                    logo = lifted(a, w, h);
+                } catch (OutOfMemoryError e) {
+                    // no room just now: the icon stands in until the logos are next let go
+                } finally {
+                    land(key, logo);
+                }
+            });
+        }
+        waiting.add(then);
+    }
+
+    /** {@code key}'s logo kept, on the main thread, and what waited on it run. */
+    private static void land(String key, Bitmap logo) {
+        main.post(() -> {
+            synchronized (LOGOS) {
+                LOGOS.put(key, logo);
+            }
+            List<Runnable> waiting = LIFTING.remove(key);
+            if (waiting != null) for (Runnable r : waiting) r.run();
+        });
+    }
+
+    /** The app's mark at {@code w}x{@code h} over its shadow: off its banner, else off its icon; null when neither has one. */
+    private static Bitmap lifted(AppRepo.App a, int w, int h) {
+        Bitmap lifted = a.banner != null ? lift(a.banner, w, h) : null;
+        if (lifted == null && a.icon != null) lifted = liftIcon(a.icon, h);
+        return lifted != null ? withShadow(lifted) : null;
     }
 
     /**

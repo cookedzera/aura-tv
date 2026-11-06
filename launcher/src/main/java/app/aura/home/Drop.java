@@ -120,6 +120,8 @@ final class Drop {
     private static final int PORT = 8686, MAX_MISSES = 40;
     private final java.util.concurrent.atomic.AtomicInteger misses = new java.util.concurrent.atomic.AtomicInteger();
     private static final long MAX_APK = 500L << 20;
+    /** How long a request has once a thread takes it up, unless it's bringing a file. */
+    private static final long REQUEST_MS = 15_000;
     private static final String ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
 
     private final Context app;
@@ -211,10 +213,11 @@ final class Drop {
             return;
         }
         try {
-            // the request line and headers must arrive promptly (a connection that trickles them in
-            // would hold one of the few threads); the upload itself may take its time
-            s.setSoTimeout(10_000);
-            InputStream in = new BufferedInputStream(s.getInputStream());
+            // the request line and headers must arrive promptly, and a short request be whole soon
+            // after (a connection that trickles it in would hold one of the few threads); a photo or
+            // an app on its way in may take its time on slow Wi-Fi, so long as it keeps coming
+            Timed timed = new Timed(s, 10_000, SystemClock.uptimeMillis() + REQUEST_MS);
+            InputStream in = new BufferedInputStream(timed);
             String[] req = line(in).split(" ");
             Map<String, String> head = new HashMap<>();
             int headers = 0;
@@ -223,7 +226,7 @@ final class Drop {
                 int colon = h.indexOf(':');
                 if (colon > 0) head.put(h.substring(0, colon).trim().toLowerCase(Locale.ROOT), h.substring(colon + 1).trim());
             }
-            s.setSoTimeout(30_000);
+            timed.idle = 30_000;
             if (req.length < 2) return;
             String method = req[0], target = req[1], query = "";
             int q = target.indexOf('?');
@@ -271,6 +274,7 @@ final class Drop {
                 if (f.isFile()) send(s, 200, "image/jpeg", read(f));
                 else send(s, 404, "text/plain", new byte[0]);
             } else if (method.equals("POST") && rest.equals("/up")) {
+                timed.deadline = Long.MAX_VALUE;
                 upload(s, in, head, args);
             } else if (method.equals("POST") && rest.startsWith("/del/")) {
                 boolean ok = Mine.remove(app, rest.substring(5));
@@ -332,6 +336,7 @@ final class Drop {
                 if (pkg == null) {
                     send(s, 404, "text/plain", new byte[0]);
                 } else if (method.equals("POST")) {
+                    timed.deadline = Long.MAX_VALUE;
                     boolean ok = Art.save(app, pkg, body(in, head, 25 << 20));
                     if (ok) main.post(() -> listener.onArt(pkg));
                     send(s, 200, "application/json", ("{\"ok\":" + ok + "}").getBytes(StandardCharsets.UTF_8));
@@ -532,7 +537,7 @@ final class Drop {
         }
         final long[] shown = {0};
         try {
-            Updater.stream(app, in, len, null, (done, total) -> {
+            Updater.stream(app, new Body(in, len), len, null, (done, total) -> {
                 long now = SystemClock.uptimeMillis();
                 if (now - shown[0] > 120 || done == total) {
                     shown[0] = now;
@@ -626,6 +631,70 @@ final class Drop {
         } catch (IOException | RuntimeException ignored) {
         }
         return any;
+    }
+
+    /**
+     * A connection's reads: each waits at most {@code idle} ms, and none goes on past {@code deadline}
+     * (uptime), however slowly the bytes keep coming.
+     */
+    private static final class Timed extends java.io.FilterInputStream {
+        private final Socket socket;
+        int idle;
+        long deadline;
+
+        Timed(Socket socket, int idle, long deadline) throws IOException {
+            super(socket.getInputStream());
+            this.socket = socket;
+            this.idle = idle;
+            this.deadline = deadline;
+        }
+
+        private void arm() throws IOException {
+            long left = deadline - SystemClock.uptimeMillis();
+            if (left <= 0) throw new java.net.SocketTimeoutException("request took too long");
+            socket.setSoTimeout((int) Math.min(idle, left));
+        }
+
+        @Override
+        public int read() throws IOException {
+            arm();
+            return super.read();
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            arm();
+            return super.read(b, off, len);
+        }
+    }
+
+    /**
+     * A request's body and nothing past it: the phone keeps the connection open for the answer,
+     * so a reader looking for the end of the stream would otherwise wait out the idle limit.
+     */
+    private static final class Body extends java.io.FilterInputStream {
+        private long left;
+
+        Body(InputStream in, long len) {
+            super(in);
+            left = len;
+        }
+
+        @Override
+        public int read() throws IOException {
+            if (left <= 0) return -1;
+            int b = super.read();
+            if (b >= 0) left--;
+            return b;
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            if (left <= 0) return -1;
+            int n = super.read(b, off, (int) Math.min(len, left));
+            if (n > 0) left -= n;
+            return n;
+        }
     }
 
     private static String line(InputStream in) throws IOException {

@@ -129,6 +129,14 @@ final class Bloom extends View implements Backdrop.Tick {
         strengthAnim.start();
     }
 
+    @Override
+    protected void onDetachedFromWindow() {
+        if (moveAnim != null) moveAnim.cancel();
+        if (colorAnim != null) colorAnim.cancel();
+        if (strengthAnim != null) strengthAnim.cancel();
+        super.onDetachedFromWindow();
+    }
+
     /** A colour-filter swap: far cheaper than rebuilding the gradient every frame. */
     private void recolor() {
         if (color != filteredFor) {

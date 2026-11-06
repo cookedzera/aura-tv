@@ -184,6 +184,8 @@ final class AppRepo {
                 }
                 if (out.isEmpty()) return null;
                 NewApps.flag(c, out);
+                // the rows ask what each app is as home lays them out, on the main thread: known by then
+                if (Categories.on(c)) Categories.warm(c, out);
                 return out;
             } catch (IOException | JSONException | RuntimeException | OutOfMemoryError e) {
                 return null;

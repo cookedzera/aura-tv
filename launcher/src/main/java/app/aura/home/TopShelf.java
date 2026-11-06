@@ -18,7 +18,7 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -29,8 +29,16 @@ import java.util.Map;
  */
 final class TopShelf extends FrameLayout {
     private static final int MAX = 3;
-    /** Per app: what was found and when, so resting on an app again costs nothing for a while. */
-    private static final Map<String, Object[]> CACHE = new HashMap<>();
+    /**
+     * Per app: what was found and when, so resting on an app again costs nothing for a while. The last
+     * few apps rested on only: each holds its cards' pictures, and a long dock would keep them all.
+     */
+    private static final Map<String, Object[]> CACHE = new LinkedHashMap<String, Object[]>(8, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Object[]> eldest) {
+            return size() > 4;
+        }
+    };
 
     final List<Card> cards = new ArrayList<>();
     private final LinearLayout row;

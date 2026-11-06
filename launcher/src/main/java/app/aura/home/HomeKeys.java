@@ -54,6 +54,11 @@ public class HomeKeys extends AccessibilityService {
     static final int KEYCODE_PROFILE_SWITCH = 288;
     /** Home goes to Aura even where Android hands it to another launcher (on unless switched off). */
     private static final String TAKEOVER = "home_takeover";
+    /** The TV's list of switched-on accessibility services as Aura last wrote it, or last found it while running. */
+    private static final String LIST = "keys_list";
+    /** {@link #heal} switches the service off and on this many times at most per start of the process, each given this long. */
+    private static final int HEALS = 3;
+    private static final long HEAL_WAIT_MS = 20_000;
 
     /** Running in this process right now. */
     static volatile boolean live;
@@ -61,7 +66,9 @@ public class HomeKeys extends AccessibilityService {
     static volatile String lastApp;
     static volatile long lastAppAt;
     private static HomeKeys running;
-    private static boolean healTried;
+    /** How often {@link #heal} has switched the service off and on in this process, and when it last tried. */
+    private static int heals;
+    private static long healAt;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private String front, firstFront;
@@ -467,7 +474,8 @@ public class HomeKeys extends AccessibilityService {
         super.onServiceConnected();
         live = true;
         running = this;
-        Prefs.device(this).edit().putBoolean("keys_wanted", true).apply();
+        // the list as it stands with the service running: a change to it by anyone else is theirs (relist)
+        Prefs.device(this).edit().putBoolean("keys_wanted", true).putString(LIST, list(this)).apply();
         others = HomeRole.others(this);
         // the TV has just started and opened its own launcher before this service was up
         if (SystemClock.elapsedRealtime() < 180_000) handler.postDelayed(this::afterBoot, 1500);
@@ -1191,23 +1199,55 @@ public class HomeKeys extends AccessibilityService {
         java.util.List<String> keep = new java.util.ArrayList<>();
         if (list != null) for (String s : TextUtils.split(list, ":")) if (!s.isEmpty() && !isMe(c, s)) keep.add(s);
         if (on) keep.add(me(c));
+        String to = keep.isEmpty() ? null : TextUtils.join(":", keep);
         try {
-            Settings.Secure.putString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-                    keep.isEmpty() ? null : TextUtils.join(":", keep));
+            if (!Settings.Secure.putString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, to)) return false;
             Settings.Secure.putInt(c.getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED, keep.isEmpty() ? 0 : 1);
+            android.content.SharedPreferences.Editor ed = Prefs.device(c).edit().putString(LIST, to == null ? "" : to);
             // heal() switches it off and on: only a real switch-off counts as not wanted
-            if (on || !Prefs.device(c).getBoolean("keys_healing", false)) Prefs.device(c).edit().putBoolean("keys_wanted", on).apply();
+            if (on || !Prefs.device(c).getBoolean("keys_healing", false)) ed.putBoolean("keys_wanted", on);
+            ed.apply();
             return true;
         } catch (SecurityException e) {
             return false;
         }
     }
 
+    private static String list(Context c) {
+        String s = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        return s == null ? "" : s;
+    }
+
+    /**
+     * Wanted, yet not listed. Back on when only Aura is gone and the other services are as Aura
+     * last saw them: its own switch-off with the switch back on cut short, or Android dropping it
+     * because Aura was force-stopped (firmware does that in standby) or the list was reset at a
+     * restart. Any other edit to the list was made by hand in Android's settings: that stands.
+     */
+    static void relist(Context c) {
+        if (!wanted(c) || on(c)) return;
+        String was = Prefs.device(c).getString(LIST, null);
+        if (was == null || others(c, was).equals(others(c, list(c)))) set(c, true);
+        else Prefs.device(c).edit().putBoolean("keys_wanted", false).apply();
+    }
+
+    /** The other services in a list, as a set: Android writes the list back in its own order and form. */
+    private static java.util.Set<ComponentName> others(Context c, String list) {
+        java.util.Set<ComponentName> out = new java.util.HashSet<>();
+        for (String s : TextUtils.split(list, ":")) {
+            if (s.isEmpty() || isMe(c, s)) continue;
+            ComponentName cn = ComponentName.unflattenFromString(s);
+            if (cn != null) out.add(cn);
+        }
+        return out;
+    }
+
     /**
      * Switched on, yet not running. When a service's process dies (Aura crashing, say), Android 11
      * puts it on a "crashed" list and won't connect it again until a restart, an update, or someone
      * switching it off and on (AccessibilityUserState.serviceDisconnectedLocked). So Aura does the
-     * switching, once per start of its process.
+     * switching: a few times at most per start of its process, each given a while to bring the
+     * service back, and looked at again after that.
      */
     static void heal(Context c) {
         heal(c, null);
@@ -1215,6 +1255,11 @@ public class HomeKeys extends AccessibilityService {
 
     static void heal(Context c, Runnable done) {
         final Context app = c.getApplicationContext();
+        // a switch off and on of Aura's own is under way, or still being given its time
+        if (healAt > 0 && SystemClock.uptimeMillis() - healAt < HEAL_WAIT_MS) {
+            if (done != null) done.run();
+            return;
+        }
         // a restart cut short (Aura killed between off and on) left it off: on again, first thing
         if (Prefs.device(app).getBoolean("keys_healing", false)) {
             set(app, true);
@@ -1222,17 +1267,17 @@ public class HomeKeys extends AccessibilityService {
             if (done != null) done.run();
             return;
         }
-        if (!on(c)) {
-            // switched off by hand while Android had it on its crashed list (no onUnbind came): other
-            // services still listed means someone edited the list, and a restart mustn't undo that
-            String list = Settings.Secure.getString(app.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            if (list != null && !list.isEmpty() && wanted(app)) Prefs.device(app).edit().putBoolean("keys_wanted", false).apply();
-        }
-        if (healTried || live || !on(c)) {
+        if (!on(app)) {
+            relist(app);
             if (done != null) done.run();
             return;
         }
-        healTried = true;
+        // without the secure-settings permission nothing can be switched: tried again once setup grants it
+        if (live || heals >= HEALS || !Compat.granted(app, android.Manifest.permission.WRITE_SECURE_SETTINGS)) {
+            if (done != null) done.run();
+            return;
+        }
+        healAt = SystemClock.uptimeMillis();
         // written before switching off, so the switch back on survives Aura being killed in between
         Prefs.device(app).edit().putBoolean("keys_healing", true).commit();
         if (!set(app, false)) {
@@ -1240,10 +1285,13 @@ public class HomeKeys extends AccessibilityService {
             if (done != null) done.run();
             return;
         }
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+        heals++;
+        final Handler main = new Handler(Looper.getMainLooper());
+        main.postDelayed(() -> {
             set(app, true);
             Prefs.device(app).edit().putBoolean("keys_healing", false).apply();
             if (done != null) done.run();
+            main.postDelayed(() -> heal(app), HEAL_WAIT_MS);
         }, 400);
     }
 }

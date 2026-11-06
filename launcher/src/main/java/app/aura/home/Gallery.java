@@ -552,6 +552,9 @@ final class Gallery {
                     for (int n; (n = in.read(buf)) > 0; ) {
                         // the flag stays set so the whole import winds down, not just this download
                         if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
+                        // held whole in the home screen's own memory: a picture this big (Wallhaven
+                        // sends originals) is passed over like one that's gone, and the rest still come
+                        if (bo.size() + n > 8 << 20) return null;
                         bo.write(buf, 0, n);
                     }
                     return bo.toByteArray();

@@ -102,7 +102,7 @@ final class BtSheet extends GlassFrame {
         titles.setOrientation(LinearLayout.VERTICAL);
         TextView title = Ui.text(a, 21, Ui.heavy, 0xFFFFFFFF);
         title.setIncludeFontPadding(true);
-        title.setText("Bluetooth");
+        title.setText(act.getString(R.string.bluetooth));
         titles.addView(title);
         status = Ui.text(a, 11, Ui.regular, 0xB3FFFFFF);
         status.setEllipsize(TextUtils.TruncateAt.END);
@@ -192,7 +192,7 @@ final class BtSheet extends GlassFrame {
                     String n = d.getName();
                     if (n != null && !n.isEmpty()) return n;
                 }
-                return "Bluetooth";
+                return act.getString(R.string.bluetooth);
             }
             Set<BluetoothDevice> bonded = bt.getBondedDevices();
             if (bonded != null) {
@@ -205,7 +205,7 @@ final class BtSheet extends GlassFrame {
             }
         } catch (SecurityException ignored) {
         }
-        return "Bluetooth";
+        return act.getString(R.string.bluetooth);
     }
 
     /** Headphones, speakers and receivers; never the TV's own Bluetooth remote, keyboard or gamepad. */

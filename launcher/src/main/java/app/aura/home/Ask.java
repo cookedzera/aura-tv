@@ -139,7 +139,12 @@ final class Ask extends FrameLayout {
         card.setTranslationY(-Ui.dp(14));
         card.animate().translationY(0f).setDuration(420).setStartDelay(0).setInterpolator(Ui.EMPHASIZED).start();
         field.requestFocus();
-        field.post(() -> Compat.svc(getContext(), InputMethodManager.class).showSoftInput(field, InputMethodManager.SHOW_IMPLICIT));
+        field.post(() -> {
+            // shut again before this ran: a keyboard now would take the remote over home
+            if (!shown) return;
+            InputMethodManager imm = Compat.svc(getContext(), InputMethodManager.class);
+            if (imm != null) imm.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT);
+        });
     }
 
     /** Back: nothing changes. */
@@ -159,7 +164,8 @@ final class Ask extends FrameLayout {
     private void hide() {
         if (!shown) return;
         shown = false;
-        Compat.svc(getContext(), InputMethodManager.class).hideSoftInputFromWindow(field.getWindowToken(), 0);
+        InputMethodManager imm = Compat.svc(getContext(), InputMethodManager.class);
+        if (imm != null) imm.hideSoftInputFromWindow(field.getWindowToken(), 0);
         field.clearFocus();
         animate().alpha(0f).setDuration(180).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(() -> {
             if (!shown) setVisibility(GONE);

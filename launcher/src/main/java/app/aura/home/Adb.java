@@ -549,7 +549,10 @@ final class Adb {
         default void restarting(int ok, int n, List<String> failed) {
         }
 
-        /** Finished: how many steps worked, and the names of those that didn't. */
+        /**
+         * Finished: how many steps worked, and the names of those that didn't. Always comes, so a
+         * caller's busy state can end here; on the main thread should setup itself break.
+         */
         void done(int ok, int n, List<String> failed);
     }
 
@@ -557,21 +560,25 @@ final class Adb {
     static void runSetup(Context c, Progress p) {
         final Context app = c.getApplicationContext();
         final String[][] steps = setup(app);
+        final int[] ok = {0}, at = {0};
+        final List<String> failed = new ArrayList<>();
         new SafeThread(() -> {
-            int ok = 0;
-            List<String> failed = new ArrayList<>();
             for (int i = 0; i < steps.length; i++) {
+                at[0] = i;
                 p.step(i, steps.length, steps[i][0]);
-                if (i == steps.length - 1 && steps[i][1].contains("REQUEST_INSTALL_PACKAGES")) p.restarting(ok + 1, steps.length, failed);
+                if (i == steps.length - 1 && steps[i][1].contains("REQUEST_INSTALL_PACKAGES")) p.restarting(ok[0] + 1, steps.length, failed);
                 List<String> out = run(app, steps[i][1]);
                 String o = out == null ? null : out.get(0);
                 // pm and settings say nothing when it works; the rest print Success; "already" is fine too
-                if (o != null && (!o.contains("Exception") && !o.contains("Error") || o.contains("already"))) ok++;
+                if (o != null && (!o.contains("Exception") && !o.contains("Error") || o.contains("already"))) ok[0]++;
                 else failed.add(steps[i][0]);
                 if (out == null) break;
             }
-            p.done(ok, steps.length, failed);
-        }, "adb-setup").start();
+            p.done(ok[0], steps.length, failed);
+        }, "adb-setup", () -> {
+            failed.add(steps[at[0]][0]);
+            p.done(ok[0], steps.length, failed);
+        }).start();
     }
 
     /** Types {@code text} into whatever field is focused on the TV via Android's input shell. */

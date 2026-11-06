@@ -68,6 +68,7 @@ final class Card extends View {
     private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint sheen = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint shade = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint plain = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mark = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint glint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Matrix glintMatrix = new Matrix(), artMatrix = new Matrix(), spotMatrix = new Matrix();
@@ -108,6 +109,7 @@ final class Card extends View {
         ring.setStyle(Paint.Style.STROKE);
         ring.setStrokeWidth(Ui.dpf(radiusDp > 12 ? 2.2f : 1.8f));
         shade.setColor(0xFF000000);
+        plain.setColor(Ui.mix(color, 0xFF000000, 0.55f));
         mark.setColor(0xFFFFFFFF);
         mark.setShadowLayer(Ui.dpf(3), 0, Ui.dpf(1), 0x99000000);
     }
@@ -118,6 +120,7 @@ final class Card extends View {
         reflection = null;
         if (w > 0 && h > 0) {
             int bw = Math.max(1, Math.round(w * res)), bh = Math.max(1, Math.round(h * res));
+            boolean whole = true;
             if (ready != null && ready.getWidth() == bw && ready.getHeight() == bh) {
                 bitmap = ready;
             } else {
@@ -125,28 +128,13 @@ final class Card extends View {
                 ready = null;
                 try {
                     bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
-                    Canvas cv = new Canvas(bitmap);
-                    cv.scale(bw / (float) w, bh / (float) h);
-                    painter.paint(cv, w, h);
+                    whole = paintArt(w, h);
                 } catch (OutOfMemoryError e) {
-                    // a 1 GB TV out of room as a shelf refreshes: this card paints straight to the
-                    // screen each time instead, and the caches make space for the next one
-                    bitmap = null;
-                    Continue.trim();
-                    Tiles.trim();
+                    noRoom();
                 }
             }
-            if (bitmap != null) {
-                BitmapShader bs = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
-                if (bw != w || bh != h) {
-                    Matrix up = new Matrix();
-                    up.setScale(w / (float) bw, h / (float) bh);
-                    bs.setLocalMatrix(up);
-                }
-                art.setShader(bs);
-            } else {
-                art.setShader(null);
-            }
+            if (bitmap != null && whole) showArt(w, h);
+            else art.setShader(null);
             // glass has no system shadow (it would show through the pane), so a lifted glass tile
             // casts this one; opaque tiles keep their elevation shadow
             liftShadow = (glass != null && bezel || tvos) && lift ? Ui.shadow(w, h, radius) : null;
@@ -161,6 +149,52 @@ final class Card extends View {
         glint.setShader(glintShader);
         // the parallax light: made once, moved by a matrix (a new gradient every frame costs this GPU ~10 ms)
         spot.setShader(new android.graphics.RadialGradient(0, 0, 1, 0xFFFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+    }
+
+    /**
+     * Paints the picture into {@link #bitmap}; false when a logo it needs is still being lifted. The
+     * picture isn't shown until it's whole: it's painted again once the logo lands, over itself, which
+     * only a bitmap no frame is drawing from allows. A card taken off screen or given another picture
+     * or size by then is left as it is.
+     */
+    private boolean paintArt(int w, int h) {
+        Bitmap b = bitmap;
+        Tiles.Painter p = painter;
+        Canvas cv = new Canvas(b);
+        cv.scale(b.getWidth() / (float) w, b.getHeight() / (float) h);
+        return Tiles.paint(p, cv, w, h, () -> {
+            if (bitmap != b || painter != p || !isAttachedToWindow()) return;
+            b.eraseColor(0);
+            try {
+                if (paintArt(w, h)) showArt(w, h);
+            } catch (OutOfMemoryError e) {
+                noRoom();
+            }
+            reflection = null;
+            invalidate();
+        });
+    }
+
+    /** The painted picture on the card, scaled up to it from the resolution it was painted at. */
+    private void showArt(int w, int h) {
+        BitmapShader bs = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+        if (bitmap.getWidth() != w || bitmap.getHeight() != h) {
+            Matrix up = new Matrix();
+            up.setScale(w / (float) bitmap.getWidth(), h / (float) bitmap.getHeight());
+            bs.setLocalMatrix(up);
+        }
+        art.setShader(bs);
+    }
+
+    /**
+     * No room for the picture (a 1 GB TV out of memory as a shelf refreshes): the card goes without
+     * it (see {@link #onDraw}), and the caches make space for the next one.
+     */
+    private void noRoom() {
+        bitmap = null;
+        art.setShader(null);
+        Continue.trim();
+        Tiles.trim();
     }
 
     /** A band of light sweeps once across the card, like a reflection catching glass. */
@@ -212,13 +246,23 @@ final class Card extends View {
     @Override
     protected void onDetachedFromWindow() {
         if (swayAnim != null) swayAnim.cancel();
+        // ended at rest rather than cut off midway: the switcher shows its cards again, and one must
+        // not come back half lit or half grown
+        if (focusAnim != null) focusAnim.end();
+        if (glintAnim != null) glintAnim.end();
+        animate().cancel();
+        setScaleX(1f);
+        setScaleY(1f);
+        setTranslationZ(0f);
+        setRotationX(0f);
+        setRotationY(0f);
         if (glass != null) glass.removeMirror(this);
         super.onDetachedFromWindow();
     }
 
-    /** The card's painted picture (for the switcher's zoom to grow from); null before its first layout. */
+    /** The card's painted picture (for the switcher's zoom to grow from); null until it's painted whole. */
     Bitmap art() {
-        return bitmap;
+        return art.getShader() != null ? bitmap : null;
     }
 
     /** A new picture, painted at once (a switcher card whose screen arrived after it was made). */
@@ -274,14 +318,12 @@ final class Card extends View {
             artMatrix.reset();
             Ui.place(art, artMatrix);
         }
-        if (bitmap != null) {
+        if (art.getShader() != null) {
             c.drawRoundRect(rect, radius, radius, art);
-        } else {
-            // no picture could be kept (memory): painted afresh, clipped to the card's corners
-            c.save();
-            c.clipPath(roundPath(w, h));
-            painter.paint(c, w, h);
-            c.restore();
+        } else if (glass == null) {
+            // no picture on show (no room for one, or its logo still being lifted): the card's colour.
+            // Never the painter here: painters allocate, and this runs on every frame the card animates
+            c.drawRoundRect(rect, radius, radius, plain);
         }
         if (focus > 0f) {
             sheen.setAlpha(Math.round(255 * focus));
@@ -318,20 +360,6 @@ final class Card extends View {
             c.drawRoundRect(-o, -o, w + o, h + o, radius + o, radius + o, ring);
         }
         if (badge) c.drawCircle(w - Ui.dpf(9), Ui.dpf(9), Ui.dpf(3.5f), mark);
-    }
-
-    private android.graphics.Path clip;
-    private int clipW, clipH;
-
-    /** The card's rounded outline as a path, made once per size. */
-    private android.graphics.Path roundPath(int w, int h) {
-        if (clip == null || clipW != w || clipH != h) {
-            clip = new android.graphics.Path();
-            clip.addRoundRect(rect, radius, radius, android.graphics.Path.Direction.CW);
-            clipW = w;
-            clipH = h;
-        }
-        return clip;
     }
 
     @Override

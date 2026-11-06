@@ -700,7 +700,10 @@ final class Welcome extends FrameLayout {
                         : r.equals(Adb.OFF) ? act.getString(R.string.aura_cant_reach_debugging_yet)
                         : act.getString(R.string.couldnt_connect_try_again_in));
             });
-        }, "welcome-connect").start();
+        }, "welcome-connect", () -> {
+            setupBusy = false;
+            if (page == 5) setupStatus.setText(act.getString(R.string.couldnt_connect_try_again_in));
+        }).start();
     }
 
     /** Setup's steps, counted on the line; Android restarts Aura at the very end, and the welcome comes back to say it's done. */
@@ -898,7 +901,10 @@ final class Welcome extends FrameLayout {
                         : r.equals(Adb.OFF) ? act.getString(R.string.no_pairing_dialog_found_open_2)
                         : act.getString(R.string.pairing_didnt_finish_try_again));
             });
-        }, "welcome-pair").start();
+        }, "welcome-pair", () -> {
+            pairing = false;
+            if (page == 7) setupStatus.setText(act.getString(R.string.pairing_didnt_finish_try_again));
+        }).start();
     }
 
     /** The same from a computer: the TV's address and two adb lines, and Aura finishes once the computer has run them. */

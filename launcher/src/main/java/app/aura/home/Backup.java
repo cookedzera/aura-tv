@@ -26,7 +26,7 @@ final class Backup {
     private static final int VERSION = 1;
     /** This TV's own state, never carried to another: its debugging link, crash history, caches and sign-ins. */
     private static final Set<String> LOCAL = new HashSet<>(Arrays.asList(
-            "adb_ok", "adb_open", "keys_lag", "keys_healing", "crashes", "safe_at", "setup_note", "welcome_resume",
+            "adb_ok", "adb_open", "keys_lag", "keys_healing", "keys_list", "crashes", "safe_at", "setup_note", "welcome_resume",
             "update_ver", "update_seen", "update_told", "listings_asked", "tmdb_session", "tmdb_account", "tmdb_user",
             "pick_made_for", "pick_count", "pick_at", "geo_at", "wx_at", "wx", "saver_prev", "sleepAt", "sleepVol", "sleepSet",
             "sleepEnd", "known_pkgs", "new_pkgs", "welcomed", "keys_wanted", "adb_paired", "adb_tls_port", "set_light",

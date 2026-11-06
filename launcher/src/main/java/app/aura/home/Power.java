@@ -43,15 +43,32 @@ final class Power {
     }
 
     static boolean screenOff(Context c) {
+        return screenOff(c, null);
+    }
+
+    /**
+     * As {@link #screenOff(Context)}; {@code then} runs on the main thread once the TV has been sent
+     * to standby. Over the debugging link that's known only when the command has run, and a link
+     * that failed (debugging switched off since, the TV's adbd gone) never runs it.
+     */
+    static boolean screenOff(Context c, Runnable then) {
         if (admin(c)) {
             Compat.svc(c, DevicePolicyManager.class).lockNow();
+            if (then != null) then.run();
             return true;
         }
-        if (HomeKeys.sleep()) return true;
+        if (HomeKeys.sleep()) {
+            if (then != null) then.run();
+            return true;
+        }
         if (!Adb.on(c)) return false;
         // the remote's own Sleep key, through the TV's debugging link
         final Context app = c.getApplicationContext();
-        new SafeThread(() -> Adb.run(app, "input keyevent 223"), "standby").start();
+        new SafeThread(() -> {
+            java.util.List<String> out = Adb.run(app, "input keyevent 223");
+            if (then == null || out == null || out.isEmpty() || out.get(0).contains("Exception") || out.get(0).contains("Error")) return;
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(then);
+        }, "standby").start();
         return true;
     }
 
@@ -250,7 +267,8 @@ final class Power {
         // put the volume back once the panel is off, so it's normal the next time the TV wakes. Had
         // nothing switched it off, the sound stays faded rather than coming back loud in the night:
         // it's put back when Aura is next on screen
-        if (screenOff(c)) schedule(c, RESTORE, 0, System.currentTimeMillis() + 4_000);
+        final Context app = c.getApplicationContext();
+        screenOff(c, () -> schedule(app, RESTORE, 0, System.currentTimeMillis() + 4_000));
     }
 
     /** A fade that ended without standby left the volume low: back to normal now someone's here. */

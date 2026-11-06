@@ -101,7 +101,7 @@ final class ControlCenter {
         if (on) {
             nowTitle.setText(p.title);
             nowBy.setText(p.by != null ? p.by : "");
-            // the app's name from the same store as the notification rows: looked up once, not on every song
+            // the app's name and icon from the same store as the notification rows: looked up once, not on every song
             Object[] f = p.pkg != null ? face(p.pkg) : null;
             String app = f != null && f[1] != null ? "  ·  " + ((String) f[0]).toUpperCase(Locale.getDefault()) : "";
             nowState.setText((p.playing ? act.getString(R.string.now_playing_caps) : act.getString(R.string.paused)) + app);
@@ -114,11 +114,7 @@ final class ControlCenter {
                 }
             } else {
                 nowShown = null;
-                try {
-                    nowArt.setImageDrawable(act.getPackageManager().getApplicationIcon(p.pkg));
-                } catch (Exception e) {
-                    nowArt.setImageDrawable(null);
-                }
+                nowArt.setImageDrawable(f != null ? (Drawable) f[1] : null);
             }
         } else {
             nowShown = null;
@@ -145,6 +141,10 @@ final class ControlCenter {
     private final HomeActivity.Meter nowBar;
     private Bitmap nowShown;
     private final LinearLayout notesBox;
+    private final TextView notesCap;
+    /** In the rows' place while Aura may not read the TV's notifications: OK lets it, where Aura can. */
+    private final Pad notesOff;
+    private final TextView notesOffText;
     private final Pad[] noteRows = new Pad[3];
     private final ImageView[] noteIcons = new ImageView[3];
     private final TextView[] noteKicks = new TextView[3], noteTitles = new TextView[3], noteBodies = new TextView[3];
@@ -325,9 +325,24 @@ final class ControlCenter {
         notesBox = new LinearLayout(a);
         notesBox.setOrientation(LinearLayout.VERTICAL);
         notesBox.setClipChildren(false);
-        TextView ncap = Ui.caps(a, 7, 0x8CFFFFFF, 0.24f);
-        ncap.setText(act.getString(R.string.notifications));
-        notesBox.addView(ncap);
+        notesCap = Ui.caps(a, 7, 0x8CFFFFFF, 0.24f);
+        notesCap.setText(act.getString(R.string.notifications));
+        notesBox.addView(notesCap);
+        notesOff = new Pad(a, null, 16, 0f);
+        notesOff.plainColor = MODULE;
+        notesOff.edgeLight = false;
+        notesOff.focusScale = 1.03f;
+        notesOffText = notesOff.tint(Ui.text(a, 10.5f, Ui.medium, 0xFFFFFFFF), 0.8f);
+        notesOffText.setSingleLine(false);
+        notesOffText.setMaxLines(2);
+        notesOffText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        notesOffText.setPadding(Ui.dp(14), Ui.dp(10), Ui.dp(14), Ui.dp(10));
+        notesOff.addView(notesOffText, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        notesOff.onClick = () -> host.guarded(this::allowNotes);
+        notesOff.setVisibility(View.GONE);
+        LinearLayout.LayoutParams nol = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        nol.topMargin = Ui.dp(8);
+        notesBox.addView(notesOff, nol);
         for (int k = 0; k < noteRows.length; k++) {
             // a card as on Apple TV: the app's round icon, its name and how long ago in a quiet line,
             // then the title and the text in clear type
@@ -530,6 +545,7 @@ final class ControlCenter {
         standby = place(button(a, R.drawable.ic_power, act.getString(R.string.standby)), 2, 3, 2, 1);
         focusables.addAll(Arrays.asList(inputs, picture, sound, boost, settings, standby, pick, vpnPill, nowCard));
         focusables.addAll(Arrays.asList(noteRows));
+        focusables.add(notesOff);
 
         wifi.onClick = this::showWifi;
         bt.onClick = this::showBt;
@@ -678,7 +694,7 @@ final class ControlCenter {
             }
             if (best == null) return null;
             int t = best.getType();
-            String where = t == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ? "Bluetooth"
+            String where = t == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ? act.getString(R.string.bluetooth)
                     : t == 29 ? act.getString(R.string.soundbar_earc) : t == android.media.AudioDeviceInfo.TYPE_HDMI_ARC ? act.getString(R.string.soundbar_arc)
                     : t == android.media.AudioDeviceInfo.TYPE_LINE_DIGITAL ? act.getString(R.string.optical)
                     : t == android.media.AudioDeviceInfo.TYPE_HDMI ? "HDMI"
@@ -761,6 +777,7 @@ final class ControlCenter {
         isOpen = false;
         panel.removeCallbacks(delayedRefresh);
         panel.removeCallbacks(delayedBt);
+        panel.removeCallbacks(delayedInputs);
         panel.removeCallbacks(delayedNotes);
         inputs.removeCallbacks(inputsRetry);
         if (MediaWatch.onNotes == notesChanged) MediaWatch.onNotes = null;
@@ -791,9 +808,8 @@ final class ControlCenter {
     private void refreshNotes() {
         if (panel.getVisibility() != View.VISIBLE) return;
         final int gen = ++notesGen;
-        final int noteMax = noteRows.length;
         new SafeThread(() -> {
-            final List<MediaWatch.Note> notes = MediaWatch.notes(act, noteMax);
+            final List<MediaWatch.Note> notes = MediaWatch.notes(act, Integer.MAX_VALUE);
             final java.util.Map<String, Object[]> faces = faces(notes);
             act.runOnUiThread(() -> {
                 if (gen != notesGen || act.isDestroyed() || panel.getVisibility() != View.VISIBLE) return;
@@ -803,11 +819,11 @@ final class ControlCenter {
         }, "cc-notes").start();
     }
 
-    /** Off the main thread: the name and icon of each app behind {@code notes} not already known. */
+    /** Off the main thread: the name and icon of each app behind the notes given a row, not already known. */
     private java.util.Map<String, Object[]> faces(List<MediaWatch.Note> notes) {
         java.util.Map<String, Object[]> out = new java.util.HashMap<>();
         PackageManager pm = act.getPackageManager();
-        for (MediaWatch.Note n : notes) {
+        for (MediaWatch.Note n : notes.subList(0, Math.min(notes.size(), noteRows.length))) {
             if (out.containsKey(n.pkg) || appFaces.containsKey(n.pkg)) continue;
             try {
                 out.put(n.pkg, new Object[]{String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(n.pkg, 0))), pm.getApplicationIcon(n.pkg)});
@@ -846,7 +862,33 @@ final class ControlCenter {
             noteBodies[k].setVisibility(n.text.isEmpty() ? View.GONE : View.VISIBLE);
             row.setVisibility(View.VISIBLE);
         }
-        notesBox.setVisibility(list.isEmpty() ? View.GONE : View.VISIBLE);
+        // the ones past the rows are counted on the title line, which adds no height to the column
+        int more = list.size() - noteRows.length;
+        notesCap.setText(more > 0 ? act.getString(R.string.notifications) + "  ·  " + act.getResources().getQuantityString(R.plurals.n_more_caps, more, more)
+                : act.getString(R.string.notifications));
+        // a kids' profile is never asked to set anything up
+        boolean off = !MediaWatch.notesReadable() && !Profiles.kids(act), fix = off && Adb.on(act);
+        if (notesOff.hasFocus() && !fix) focusBoard();
+        notesOff.setFocusable(fix);
+        notesOffText.setText(act.getString(fix ? R.string.cant_read_notifications_ok : R.string.cant_read_notifications_setup));
+        notesOff.setVisibility(off ? View.VISIBLE : View.GONE);
+        notesBox.setVisibility(list.isEmpty() && !off ? View.GONE : View.VISIBLE);
+    }
+
+    /** Aura approved to read the TV's notifications over the TV's own debugging link, as setup does it. */
+    private void allowNotes() {
+        final Context app = act.getApplicationContext();
+        new SafeThread(() -> {
+            // "cmd notification allow_listener" arrived in Android 8.1; before it the setting itself is written
+            List<String> out = Adb.run(app, android.os.Build.VERSION.SDK_INT >= 27
+                    ? "cmd notification allow_listener " + app.getPackageName() + "/" + MediaWatch.class.getName()
+                    : MediaWatch.enableCommand(app));
+            // once Android connects the listener, the rows refresh and this line goes by itself
+            if (out != null && !out.get(0).contains("Exception") && !out.get(0).contains("Error")) return;
+            act.runOnUiThread(() -> {
+                if (!act.isDestroyed()) host.hud(R.drawable.ic_info, act.getString(out == null ? R.string.couldnt_reach_the_tvs_debugging : R.string.the_tv_didnt_allow_that));
+            });
+        }, "cc-notes-allow").start();
     }
 
     /** What the notification leads to, as the TV's own panel would open it. */
@@ -937,12 +979,14 @@ final class ControlCenter {
     // ---- open / close / keys -----------------------------------------------------------------
 
     private boolean isOpen;
-    private final Runnable delayedRefresh = this::refresh, delayedBt = this::showBt, inputsRetry = this::buildSegments;
+    private final Runnable delayedRefresh = this::refresh, delayedBt = this::showBt, delayedInputs = this::showInputs,
+            inputsRetry = this::buildSegments;
 
     void open(boolean inputs) {
         isOpen = true;
         panel.removeCallbacks(delayedRefresh);
         panel.removeCallbacks(delayedBt);
+        panel.removeCallbacks(delayedInputs);
         // readings are kept warm while the home screen idles; opening only refreshes them once the
         // board has settled, so no system lookups land on the first frames of the animation
         if (inputsSig == null) {
@@ -976,13 +1020,14 @@ final class ControlCenter {
         }
         wifi.requestFocus();
         // the TV's own Inputs button: straight to the sheet of sources
-        if (inputs && !sources.isEmpty()) panel.postDelayed(this::showInputs, 300);
+        if (inputs && !sources.isEmpty()) panel.postDelayed(delayedInputs, 300);
     }
 
     void close(boolean animate, Runnable done) {
         isOpen = false;
         panel.removeCallbacks(delayedRefresh);
         panel.removeCallbacks(delayedBt);
+        panel.removeCallbacks(delayedInputs);
         inputs.removeCallbacks(inputsRetry);
         if (wifiSheet.isOpen()) hideWifi(false);
         if (btSheet.isOpen()) hideBt(false);
@@ -1005,6 +1050,7 @@ final class ControlCenter {
             host.guarded(() -> launch(new android.content.Intent(android.provider.Settings.ACTION_SETTINGS), wifi));
             return;
         }
+        onlySheet(wifiSheet);
         board.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     if (wifiSheet.isOpen()) board.setVisibility(View.INVISIBLE);
@@ -1014,6 +1060,7 @@ final class ControlCenter {
 
     private void hideWifi(boolean focusToggle) {
         wifiSheet.close();
+        if (sheetOpen()) return;
         board.animate().cancel();
         board.setVisibility(View.VISIBLE);
         board.setAlpha(1f);
@@ -1035,6 +1082,7 @@ final class ControlCenter {
             host.guarded(() -> launch(new android.content.Intent(android.provider.Settings.ACTION_SETTINGS), bt));
             return;
         }
+        onlySheet(btSheet);
         board.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     if (btSheet.isOpen()) board.setVisibility(View.INVISIBLE);
@@ -1044,6 +1092,7 @@ final class ControlCenter {
 
     private void hideBt(boolean focusToggle) {
         btSheet.close();
+        if (sheetOpen()) return;
         board.animate().cancel();
         board.setVisibility(View.VISIBLE);
         board.setAlpha(1f);
@@ -1116,14 +1165,13 @@ final class ControlCenter {
         // apps, Wi-Fi, Bluetooth, memory): read off the main thread, then shown. Just after a restart
         // Android answers them slowly, and on the main thread they held the remote for seconds
         final int gen = ++readGen;
-        final int noteMax = noteRows.length;
         new SafeThread(() -> {
             final String pic = pictureLine(), snd = soundLine();
             List<String> apps = Vpn.apps(act);
             final boolean vpnOn = Vpn.on(act), noVpnApps = apps.isEmpty();
             String mine = Vpn.chosen(act, apps);
             final String vpnName = mine != null ? Vpn.label(act, mine) : null;
-            final List<MediaWatch.Note> notes = MediaWatch.notes(act, noteMax);
+            final List<MediaWatch.Note> notes = MediaWatch.notes(act, Integer.MAX_VALUE);
             final java.util.Map<String, Object[]> faces = faces(notes);
             final boolean online = Compat.onWifi(Compat.svc(act, ConnectivityManager.class), true);
             // a wired box is online but not on Wi-Fi: the button lights, its caption says which
@@ -1403,6 +1451,7 @@ final class ControlCenter {
 
     private void showInputs() {
         if (!isOpen || sources.isEmpty()) return;
+        onlySheet(inputSheet);
         board.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     if (inputSheet.isOpen()) board.setVisibility(View.INVISIBLE);
@@ -1412,10 +1461,28 @@ final class ControlCenter {
 
     private void hideInputs(boolean focusToggle) {
         inputSheet.close();
+        if (sheetOpen()) return;
         board.animate().cancel();
         board.setVisibility(View.VISIBLE);
         board.setAlpha(1f);
         if (focusToggle) inputs.requestFocus();
+    }
+
+    private boolean sheetOpen() {
+        return wifiSheet.isOpen() || btSheet.isOpen() || inputSheet.isOpen();
+    }
+
+    /**
+     * One sheet at a time, the one asked for last: any other closes, and one still on its way (the
+     * Inputs or Bluetooth sheet just after opening) no longer comes. Two in the same place would have
+     * Back bring the board up under the other, with the focus on it.
+     */
+    private void onlySheet(View keep) {
+        panel.removeCallbacks(delayedBt);
+        panel.removeCallbacks(delayedInputs);
+        if (keep != wifiSheet && wifiSheet.isOpen()) wifiSheet.close();
+        if (keep != btSheet && btSheet.isOpen()) btSheet.close();
+        if (keep != inputSheet && inputSheet.isOpen()) inputSheet.close();
     }
 
     /**

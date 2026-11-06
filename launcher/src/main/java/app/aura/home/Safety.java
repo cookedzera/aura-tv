@@ -45,7 +45,7 @@ final class Safety {
                     times.add(String.valueOf(now));
                     p.edit().putString("saver_crashes", TextUtils.join(",", times)).commit();
                     if (times.size() >= CRASHES) Prefs.of(c).edit().putString(Prefs.SAVER, "photos").commit();
-                } else if (!from(e, JOBS)) {
+                } else if (!beside(e)) {
                     List<String> times = recent(p.getString("crashes", ""), now - AFTER_MS);
                     times.add(String.valueOf(now));
                     p.edit().putString("crashes", TextUtils.join(",", times)).commit();
@@ -56,9 +56,14 @@ final class Safety {
         });
     }
 
-    /** The screensaver's own classes, and the background jobs that fetch pictures and listings. */
+    /**
+     * The screensaver's own classes; and the parts of Aura that run beside the home screen, on their
+     * own: the media listener, phones and computers playing on the TV or sending to it, the remote's
+     * log reader, the debugging link, the sleep timer, updates, the restart and the background jobs.
+     */
     private static final String[] SAVER = {"Ambient", "AerialView", "Sayings", "Story"},
-            JOBS = {"DailyJob", "Gallery", "Picks", "Fresh", "Weather"};
+            BESIDE = {"MediaWatch", "Renderer", "Cast", "Drop", "ProfileButton", "Adb", "AdbTls", "Power", "SleepReceiver",
+                    "SleepAdmin", "Updater", "Release", "Boot", "DailyJob", "Gallery", "Picks", "Fresh", "Weather"};
 
     /** Whether {@code e} (or what caused it) went through one of these classes, or the screensaver is on screen. */
     private static boolean from(Throwable e, String[] classes) {
@@ -67,6 +72,28 @@ final class Safety {
             for (StackTraceElement f : x.getStackTrace()) {
                 String cls = f.getClassName();
                 for (String k : classes) if (cls.startsWith("app.aura.home." + k)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether {@code e} broke out of one of the parts beside the home screen: the part is the one
+     * Android (or a message on the main thread) called into, the outermost of Aura's own frames.
+     * The home screen calling into one of them and failing there is still the home screen failing;
+     * where Android wrapped the error in its own ("Unable to start activity"), the cause tells.
+     */
+    static boolean beside(Throwable e) {
+        for (Throwable x = e; x != null; x = x.getCause()) {
+            StackTraceElement[] st = x.getStackTrace();
+            for (int i = st.length - 1; i >= 0; i--) {
+                String cls = st[i].getClassName();
+                if (!cls.startsWith("app.aura.home.")) continue;
+                cls = cls.substring("app.aura.home.".length());
+                // its inner classes and lambdas too ("Drop$1", "Drop$$ExternalSyntheticLambda0"), not
+                // another class that starts the same ("WeatherSheet" is the home screen's)
+                for (String k : BESIDE) if (cls.equals(k) || cls.startsWith(k + "$")) return true;
+                return false;
             }
         }
         return false;
@@ -103,14 +130,14 @@ final class Safety {
                         .putBoolean(Prefs.PARALLAX, false).putBoolean(Prefs.TOP_SHELF, false).putString(Prefs.SAVER, "photos").apply();
             }
             Previews.set(c, false);
+            // a heal cut short would otherwise switch it straight back on at the next start
+            Prefs.device(c).edit().putBoolean("keys_healing", false).commit();
             HomeKeys.set(c, false);
             return "safe";
         }
         // a home taken off for this user can't be seen by original(): the retired name, or apps
         // Free up memory switched off, are reason enough to hand things back
-        boolean retired = Prefs.device(c).getString(RETIRED, null) != null
-                || !Prefs.device(c).getStringSet(Debloat.MINE, new java.util.HashSet<>()).isEmpty();
-        if ((original(c) == null && !retired) || !Adb.on(c)) return null;
+        if ((original(c) == null && !switchedOff(c)) || !Adb.on(c)) return null;
         final Context app = c.getApplicationContext();
         // Aura's own Home button must not drag the crashing home screen back over the TV's own
         HomeKeys.setTakeover(app, false);
@@ -272,6 +299,12 @@ final class Safety {
     /** The TV's own home that Aura switched off, remembered: taken off for this user, it can't be found any more. */
     private static final String RETIRED = "retired_home";
 
+    /** A home taken off for this user, or apps Free up memory switched off: remembered, as only ADB brings them back. */
+    private static boolean switchedOff(Context c) {
+        return Prefs.device(c).getString(RETIRED, null) != null
+                || !Prefs.device(c).getStringSet(Debloat.MINE, new java.util.HashSet<>()).isEmpty();
+    }
+
     /**
      * The package of the TV's own home screen that can be switched off, or null. Google TV's, else
      * whatever system home the TV came with (Android TV's, a maker's). Never Fire TV's: Amazon's
@@ -344,10 +377,13 @@ final class Safety {
         return ok;
     }
 
-    /** Whether the TV's own home screen was switched off over ADB and needs re-enabling before Aura leaves. */
+    /**
+     * Whether the TV's own home screen, or an app Free up memory switched off, was switched off over
+     * ADB and needs re-enabling before Aura leaves.
+     */
     static boolean originalDisabled(Context c) {
-        // taken off for this user: Android can't show it, so the remembered name has to say
-        if (Prefs.device(c).getString(RETIRED, null) != null) return true;
+        // a home taken off for this user: Android can't show it, so the remembered name has to say
+        if (switchedOff(c)) return true;
         String home = original(c);
         if (home == null) return false;
         try {

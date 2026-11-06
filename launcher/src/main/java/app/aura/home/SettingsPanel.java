@@ -124,6 +124,7 @@ final class SettingsPanel {
         help = Ui.text(a, 14, Ui.medium, 0xF2FFFFFF);
         help.setSingleLine(false);
         help.setMaxLines(5);
+        help.setEllipsize(TextUtils.TruncateAt.END);
         help.setMaxWidth(Ui.dp(280));
         help.setLineSpacing(Ui.dpf(4), 1f);
         help.setMinLines(4);
@@ -276,6 +277,7 @@ final class SettingsPanel {
 
     /** Redraws the page on show, after something outside changed what it says. */
     void refresh() {
+        catsEmpty.clear();
         if (isOpen()) build();
     }
 
@@ -381,6 +383,7 @@ final class SettingsPanel {
         if (!page.isEmpty()) {
             String was = page;
             if (was.equals("drop") || was.equals("backup") || was.equals("trouble")) stopDrop();
+            disarm();
             page = "";
             build();
             // back on the main list, on the row that led to the page
@@ -400,9 +403,20 @@ final class SettingsPanel {
         confirmProfile = confirmPhoto = confirmKey = dbConfirm = null;
     }
 
+    /** The keyboard for a field just shown, unless it was hidden again before this ran: on a TV it would take the remote. */
+    private void keyboardFor(View v) {
+        v.post(() -> {
+            if (v.getVisibility() != View.VISIBLE || !v.hasFocus()) return;
+            InputMethodManager imm = Compat.svc(act, InputMethodManager.class);
+            if (imm != null) imm.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT);
+        });
+    }
+
     private void go(String p) {
         disarm();
         if (p.equals("tv")) tvHomeCache = null;
+        if (p.equals("home") || p.equals("cats")) catsEmpty.clear();
+        if (p.equals("apps")) inputNames.clear();
         boolean back = p.isEmpty() || page.equals("photos") && p.equals("drop")
                 || (page.equals("widgets") || page.equals("keys") || page.equals("cats")) && p.equals("home")
                 || page.equals("cat") && p.equals("cats")
@@ -430,6 +444,9 @@ final class SettingsPanel {
         rows.animate().alpha(1f).translationX(0f).setStartDelay(0).setDuration(300).setInterpolator(Ui.EMPHASIZED).start();
     }
 
+    /** Hidden inputs' names, asked of the TV once a visit to Hidden apps: each is a call into Android. */
+    private final java.util.Map<String, String> inputNames = new java.util.HashMap<>();
+
     private void build() {
         String keep = focusedTag();
         final int sy = scroll.getScrollY();
@@ -447,13 +464,17 @@ final class SettingsPanel {
             android.media.tv.TvInputManager tim = (android.media.tv.TvInputManager) act.getSystemService(android.content.Context.TV_INPUT_SERVICE);
             for (String h : Prefs.hidden(act)) {
                 if (!h.startsWith("input:")) continue;
-                android.media.tv.TvInputInfo info;
-                try {
-                    info = tim == null ? null : tim.getTvInputInfo(h.substring(6));
-                } catch (RuntimeException e) {
-                    info = null;
+                String name = inputNames.get(h);
+                if (name == null) {
+                    android.media.tv.TvInputInfo info;
+                    try {
+                        info = tim == null ? null : tim.getTvInputInfo(h.substring(6));
+                    } catch (RuntimeException e) {
+                        info = null;
+                    }
+                    name = info != null ? String.valueOf(info.loadLabel(act)) : act.getString(R.string.an_input);
+                    inputNames.put(h, name);
                 }
-                String name = info != null ? String.valueOf(info.loadLabel(act)) : act.getString(R.string.an_input);
                 add(name, act.getString(R.string.hidden_ok_shows_it), h, () -> {
                     Prefs.hide(act, h, false);
                     host.applied("inputs");
@@ -895,7 +916,7 @@ final class SettingsPanel {
             for (int i = 0; i < list.length(); i++) {
                 org.json.JSONObject o = list.optJSONObject(i);
                 final String id = o.optString("id");
-                add(o.optString("title") + (o.optBoolean("gif") ? "  ·  GIF" : ""), id.equals(confirmPhoto) ? act.getString(R.string.press_ok_again) : act.getString(R.string.remove),
+                add(o.optString("title") + (o.optBoolean("gif") ? "  ·  " + act.getString(R.string.gif) : ""), id.equals(confirmPhoto) ? act.getString(R.string.press_ok_again) : act.getString(R.string.remove),
                         "p:" + id, photoThumb(id), () -> {
                             if (!id.equals(confirmPhoto)) {
                                 confirmPhoto = id;
@@ -1255,7 +1276,7 @@ final class SettingsPanel {
         city.selectAll();
         city.setVisibility(View.VISIBLE);
         city.requestFocus();
-        city.post(() -> Compat.svc(act, InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
+        keyboardFor(city);
     }
 
     /** A key typed here or pasted on the phone: checked with TMDB before it's kept. */
@@ -1616,13 +1637,24 @@ final class SettingsPanel {
         return pkg;
     }
 
+    /**
+     * Which category rows have no apps, by id: worked out once a visit to Home screen or Categories
+     * (each asks Android about every app, and those pages are drawn again on every OK), and again
+     * after a change from outside (an app installed or removed, another profile).
+     */
+    private final java.util.Map<String, Boolean> catsEmpty = new java.util.HashMap<>();
+
     /** Whether a category row would have no apps on home right now (All apps always has them). */
     private boolean catEmpty(Categories.Cat k) {
         if (k.id.equals(Categories.ALL)) return false;
+        Boolean known = catsEmpty.get(k.id);
+        if (known != null) return known;
         java.util.Set<String> hidden = Prefs.hidden(act);
         List<String> installed = new java.util.ArrayList<>();
         for (AppRepo.App a : host.apps()) if (!hidden.contains(a.pkg)) installed.add(a.pkg);
-        return Categories.members(act, k, AppRepo.order(Prefs.of(act)), installed).isEmpty();
+        boolean empty = Categories.members(act, k, AppRepo.order(Prefs.of(act)), installed).isEmpty();
+        catsEmpty.put(k.id, empty);
+        return empty;
     }
 
     /** Listens for the next button (Home button in apps does the listening), for thirty seconds. */
@@ -2112,7 +2144,7 @@ final class SettingsPanel {
         city.setText("");
         city.setVisibility(View.VISIBLE);
         city.requestFocus();
-        city.post(() -> Compat.svc(act, InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
+        keyboardFor(city);
     }
 
     /** A hostname you typed: tried from the TV first, so a typo can never cut the internet. */
@@ -2168,7 +2200,10 @@ final class SettingsPanel {
                 if (page.equals("shield")) build();
                 for (String[] f : Shield.FILTERS) if (f[1].equals(b)) focusTag("dns:" + f[0]);
             });
-        }, "dns-probe").start();
+        }, "dns-probe", () -> {
+            probing = false;
+            if (page.equals("shield")) build();
+        }).start();
     }
 
     private void toggleShield() {
@@ -2228,7 +2263,12 @@ final class SettingsPanel {
                         : act.getString(R.string.couldnt_reach_port_853, name));
                 build();
             });
-        }, "shield").start();
+        }, "shield", () -> {
+            // unchecked is as bad as broken: the TV could be left without internet
+            if (Shield.on(act)) Shield.set(act, false);
+            shieldNote = null;
+            build();
+        }).start();
     }
 
     // ---- updates ------------------------------------------------------------------------------
@@ -2360,8 +2400,8 @@ final class SettingsPanel {
     }
 
     private void openDrop() {
+        disarm();
         page = "drop";
-        confirmClear = false;
         rows.removeCallbacks(stopDropIdle);
         if (keepDrop && drop != null && dropCard != null) {
             if (dropCard.getParent() instanceof ViewGroup) ((ViewGroup) dropCard.getParent()).removeView(dropCard);
@@ -2537,8 +2577,8 @@ final class SettingsPanel {
         return n.length() > 24 ? n.substring(0, 21) + "…" : n;
     }
 
-    private static String mb(long bytes) {
-        return bytes < 1 << 20 ? Math.max(1, bytes >> 10) + " KB" : String.format(java.util.Locale.ROOT, "%.1f MB", bytes / 1048576f);
+    private String mb(long bytes) {
+        return android.text.format.Formatter.formatShortFileSize(act, bytes);
     }
 
     /** A QR code drawn dark on a white card with its quiet zone, crisp at any size. */
@@ -2815,7 +2855,7 @@ final class SettingsPanel {
         city.setText("");
         city.setVisibility(View.VISIBLE);
         city.requestFocus();
-        city.post(() -> Compat.svc(act, InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
+        keyboardFor(city);
     }
 
     private void setPin(String pin) {
@@ -2843,7 +2883,7 @@ final class SettingsPanel {
         city.setText("");
         city.setVisibility(View.VISIBLE);
         city.requestFocus();
-        city.post(() -> Compat.svc(act, InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
+        keyboardFor(city);
     }
 
     private void addProfile(String name) {
@@ -2875,7 +2915,7 @@ final class SettingsPanel {
         city.setText("");
         city.setVisibility(View.VISIBLE);
         city.requestFocus();
-        city.post(() -> Compat.svc(act, InputMethodManager.class).showSoftInput(city, InputMethodManager.SHOW_IMPLICIT));
+        keyboardFor(city);
     }
 
     /** Open-Meteo's free geocoder (no key) turns the name into coordinates. */

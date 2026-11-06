@@ -550,7 +550,7 @@
     <string name="couldnt_reach_tmdb_check_the">Não foi possível falar com o TMDB · confira a chave e a conexão</string>
     <string name="waiting_for_you_to_approve">Esperando você aprovar…</string>
     <string name="approve_aura_on_tmdb">Aprove o Aura no TMDB</string>
-    <string name="connect_in_set_up_on">Conecte primeiro em Configurar nesta TV para que a tela inicial da TV possa ser religada</string>
+    <string name="connect_in_set_up_on">Conecte primeiro em Configurar nesta TV para que o que a Aura desligou possa ser religado</string>
     <string name="handing_the_tv_back">Devolvendo a TV…</string>
     <string name="uninstall_aura_in_androids_settings">Desinstale o Aura nas configurações do Android, Apps</string>
     <string name="press_the_button_on_the">Aperte agora o botão no controle.</string>
@@ -1095,4 +1095,10 @@
     <plurals name="n_sources"><item quantity="one">%1$d fonte</item><item quantity="other">%1$d fontes</item></plurals>
     <string name="system_xray">System X-Ray</string>
     <string name="cpu_memory_and_network_overlay">Sobreposição de CPU, memória e rede</string>
+    <string name="gif">GIF</string>
+    <string name="cant_read_notifications_ok">O Aura ainda não consegue ler as notificações · OK para permitir</string>
+    <string name="cant_read_notifications_setup">O Aura ainda não consegue ler as notificações · Configurações, Configurar nesta TV</string>
+    <string name="mbps_value">%1$s Mbps</string>
+    <plurals name="n_more_caps"><item quantity="one">+%1$d MAIS</item><item quantity="other">+%1$d MAIS</item></plurals>
+    <string name="couldnt_open_that">Não foi possível abrir</string>
 </resources>

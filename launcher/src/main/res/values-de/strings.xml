@@ -550,7 +550,7 @@
     <string name="couldnt_reach_tmdb_check_the">TMDB nicht erreichbar · prüf den Schlüssel und die Verbindung</string>
     <string name="waiting_for_you_to_approve">Warte auf deine Freigabe…</string>
     <string name="approve_aura_on_tmdb">Aura bei TMDB freigeben</string>
-    <string name="connect_in_set_up_on">Verbinde zuerst unter Auf diesem TV einrichten, damit der Startbildschirm des TVs wieder angeht</string>
+    <string name="connect_in_set_up_on">Verbinde zuerst unter Auf diesem TV einrichten, damit alles, was Aura ausgeschaltet hat, wieder angeht</string>
     <string name="handing_the_tv_back">TV wird zurückgegeben…</string>
     <string name="uninstall_aura_in_androids_settings">Deinstalliere Aura in den Android-Einstellungen, Apps</string>
     <string name="press_the_button_on_the">Drück jetzt die Taste auf der Fernbedienung.</string>
@@ -1095,4 +1095,10 @@
     <plurals name="n_sources"><item quantity="one">%1$d Quelle</item><item quantity="other">%1$d Quellen</item></plurals>
     <string name="system_xray">System X-Ray</string>
     <string name="cpu_memory_and_network_overlay">Einblendung für CPU, Speicher und Netzwerk</string>
+    <string name="gif">GIF</string>
+    <string name="cant_read_notifications_ok">Aura kann Mitteilungen noch nicht lesen · OK zum Erlauben</string>
+    <string name="cant_read_notifications_setup">Aura kann Mitteilungen noch nicht lesen · Einstellungen, Auf diesem TV einrichten</string>
+    <string name="mbps_value">%1$s Mbit/s</string>
+    <plurals name="n_more_caps"><item quantity="one">+%1$d WEITERE</item><item quantity="other">+%1$d WEITERE</item></plurals>
+    <string name="couldnt_open_that">Das ließ sich nicht öffnen</string>
 </resources>

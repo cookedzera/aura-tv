@@ -178,6 +178,7 @@ final class SmartStack extends FrameLayout {
     void stop() {
         running = false;
         handler.removeCallbacks(advance);
+        dots.settle();
     }
 
     private void schedule() {
@@ -379,22 +380,29 @@ final class SmartStack extends FrameLayout {
                     Ui.withAlpha(deep, 0xF0), Ui.withAlpha(deep, 0xA6), Ui.withAlpha(deep, 0x1F)}));
         }
 
-        /** An app's card: its colour as a deep gradient, its white mark on the right. */
+        /** An app's card: its colour as a deep gradient, its white mark on the right; null when memory is short. */
         private static Bitmap markArt(Slide s, int w, int h) {
-            Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-            Canvas c = new Canvas(b);
-            Paint p = new Paint();
-            p.setShader(new LinearGradient(0, 0, w, h, Ui.mix(s.color, 0xFF000000, 0.72f), Ui.mix(s.color, 0xFF000000, 0.35f),
-                    Shader.TileMode.CLAMP));
-            c.drawRect(0, 0, w, h, p);
-            int mw = Math.round(w * 0.42f), mh = Math.round(mw * 9 / 16f);
-            if (s.mark != null && mw > 0 && mh > 0) {
-                c.save();
-                c.translate(w - mw - w * 0.09f, (h - mh) / 2f);
-                s.mark.paint(c, mw, mh);
-                c.restore();
+            Bitmap b = null;
+            try {
+                b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                Canvas c = new Canvas(b);
+                Paint p = new Paint();
+                p.setShader(new LinearGradient(0, 0, w, h, Ui.mix(s.color, 0xFF000000, 0.72f), Ui.mix(s.color, 0xFF000000, 0.35f),
+                        Shader.TileMode.CLAMP));
+                c.drawRect(0, 0, w, h, p);
+                int mw = Math.round(w * 0.42f), mh = Math.round(mw * 9 / 16f);
+                if (s.mark != null && mw > 0 && mh > 0) {
+                    c.save();
+                    c.translate(w - mw - w * 0.09f, (h - mh) / 2f);
+                    s.mark.paint(c, mw, mh);
+                    c.restore();
+                }
+                return b;
+            } catch (OutOfMemoryError e) {
+                // a 1 GB TV short of room: the card stands on its shade alone, and its next showing tries again
+                if (b != null) b.recycle();
+                return null;
             }
-            return b;
         }
     }
 
@@ -556,6 +564,17 @@ final class SmartStack extends FrameLayout {
                 invalidate();
             });
             glide.start();
+        }
+
+        /** A glide under way ends at once with the pill on its dot: never left between two, nor running on unseen. */
+        void settle() {
+            if (glide != null && glide.isRunning()) glide.end();
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            settle();
+            super.onDetachedFromWindow();
         }
 
         @Override

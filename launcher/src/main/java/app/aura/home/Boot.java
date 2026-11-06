@@ -8,9 +8,10 @@ import android.os.Looper;
 
 /**
  * After a restart, on a TV where Aura's Home button service is what makes Aura home (Google TV):
- * some updates and restarts leave the service switched off, or switched on but never started
- * (Projectivy's users met both). Aura isn't the home Android opens, so nothing of Aura would run
- * to notice: this does, once the TV has started.
+ * some restarts leave the service switched on but never started (Projectivy's users met it), and
+ * one in the middle of Aura's own switching it off and on leaves it off. Aura isn't the home
+ * Android opens, so nothing of Aura would run to notice: this does, once the TV has started. Taken
+ * off the list by anyone else, the service stays off: that was their choice.
  */
 public class Boot extends BroadcastReceiver {
     @Override
@@ -26,7 +27,8 @@ public class Boot extends BroadcastReceiver {
         }
         if (!HomeKeys.wanted(app) || HomeRole.held(app) || !HomeKeys.takeover(app)) return;
         if (!HomeKeys.on(app)) {
-            HomeKeys.set(app, true);
+            // back on only where Aura's own switching left it off; taken off by anyone else, it stays off
+            HomeKeys.relist(app);
             return;
         }
         // on, yet it may not have started: given a few seconds, then switched off and on again

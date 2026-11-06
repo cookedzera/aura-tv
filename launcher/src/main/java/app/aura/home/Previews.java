@@ -80,9 +80,9 @@ final class Previews {
         final HardwareBuffer buffer = shot.getHardwareBuffer();
         final ColorSpace space = shot.getColorSpace();
         IO.execute(() -> {
-            Bitmap small;
+            Bitmap small, full = null;
             try (HardwareBuffer b = buffer) {
-                Bitmap full = Bitmap.wrapHardwareBuffer(b, space);
+                full = Bitmap.wrapHardwareBuffer(b, space);
                 if (full == null) return;
                 // drawn into a picture and rendered at 640×360 by the GPU: 0.9 MB read back, not 3.7
                 Picture p = new Picture();
@@ -92,16 +92,20 @@ final class Previews {
                 small = Bitmap.createBitmap(p, W, H, Bitmap.Config.ARGB_8888);
                 full.recycle();
             } catch (RuntimeException | OutOfMemoryError e) {
+                if (full != null) full.recycle();
                 return;
             }
+            if (small == null) return;
             // protected: whatever was kept before (or the fallback) stays
-            if (small == null || blank(small)) {
+            if (blank(small)) {
+                small.recycle();
                 return;
             }
             // the app hadn't drawn yet (some, like YouTube, leave the last app on screen while they
             // start): a picture that's the previous app's screen again isn't this app's
             Bitmap prev = last;
             if (prev != null && !pkg.equals(lastPkg) && same(small, prev)) {
+                small.recycle();
                 return;
             }
             last = small;

@@ -45,6 +45,8 @@ public class Cast extends Activity implements Renderer.Player {
     private boolean prepared, photo, playWhenReady;
     /** Which load this is: a photograph still downloading for an earlier one is let go. */
     private int loadGen;
+    /** The load the video view was last given: its player's word on anything earlier is let go. */
+    private int videoGen;
 
     private final Runnable tick = new Runnable() {
         @Override
@@ -78,6 +80,7 @@ public class Cast extends Activity implements Renderer.Player {
         buildBar();
         setContentView(root);
         video.setOnPreparedListener(m -> {
+            if (videoGen != loadGen) return;
             mp = m;
             prepared = true;
             Renderer.durMs = Math.max(0, video.getDuration());
@@ -92,11 +95,13 @@ public class Cast extends Activity implements Renderer.Player {
             else Renderer.setState("STOPPED");
         });
         video.setOnCompletionListener(m -> {
+            if (videoGen != loadGen) return;
             Renderer.posMs = Renderer.durMs;
             Renderer.setState("STOPPED");
             finish();
         });
         video.setOnErrorListener((m, what, extra) -> {
+            if (videoGen != loadGen) return true;
             Trouble.note("CAST", "couldn't play " + Renderer.mime + " (" + what + ", " + extra + ")");
             fail(getString(R.string.this_cant_be_played_here));
             return true;
@@ -136,6 +141,8 @@ public class Cast extends Activity implements Renderer.Player {
         playWhenReady = play;
         prepared = false;
         mp = null;
+        // what was playing stops now, not once the next is checked and ready to take its place
+        video.stopPlayback();
         String uri = Renderer.uri;
         photo = Renderer.mime.startsWith("image/");
         boolean audio = Renderer.mime.startsWith("audio/");
@@ -145,7 +152,6 @@ public class Cast extends Activity implements Renderer.Player {
         progress.set(0f);
         showBar();
         if (photo) {
-            video.stopPlayback();
             video.setVisibility(View.GONE);
             image.setVisibility(View.VISIBLE);
             Renderer.setState("TRANSITIONING");
@@ -173,8 +179,12 @@ public class Cast extends Activity implements Renderer.Player {
                 final boolean ok = !pointsAtTv(uri);
                 runOnUiThread(() -> {
                     if (isDestroyed() || gen != loadGen) return;
-                    if (ok) video.setVideoURI(Uri.parse(uri));
-                    else fail(getString(R.string.this_cant_be_played_here));
+                    if (ok) {
+                        videoGen = gen;
+                        video.setVideoURI(Uri.parse(uri));
+                    } else {
+                        fail(getString(R.string.this_cant_be_played_here));
+                    }
                 });
             }, "cast-check").start();
         }
@@ -330,7 +340,11 @@ public class Cast extends Activity implements Renderer.Player {
         titleText.setText(why);
         showBar();
         Renderer.setState("STOPPED");
-        main.postDelayed(this::finish, 4000);
+        // something new cast in the meantime keeps the screen
+        final int gen = loadGen;
+        main.postDelayed(() -> {
+            if (gen == loadGen) finish();
+        }, 4000);
     }
 
     /** A photograph from the network, decoded no larger than the screen. Off the main thread. */

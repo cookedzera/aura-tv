@@ -308,7 +308,10 @@ final class WifiSheet extends GlassFrame {
         Map<String, Net> nets = new HashMap<>();
         if (on) {
             try {
-                for (ScanResult r : wifi.getScanResults()) {
+                List<ScanResult> found = wifi.getScanResults();
+                // some firmware answers null rather than an empty list while scanning is off
+                if (found == null) found = java.util.Collections.emptyList();
+                for (ScanResult r : found) {
                     if (r.SSID == null || r.SSID.isEmpty()) continue;
                     Net n = nets.get(r.SSID);
                     int level = WifiManager.calculateSignalLevel(r.level, 4);
@@ -549,10 +552,10 @@ final class WifiSheet extends GlassFrame {
         new SafeThread(() -> t.run((phase, ping, down, up, done) -> act.runOnUiThread(() -> {
             String p = ping < 0 ? "" : "  ·  " + ping + " ms";
             String text;
-            if (done) text = ping < 0 ? act.getString(R.string.no_connection) : "↓ " + mbps(down) + "   ↑ " + mbps(up) + " Mbps" + p;
+            if (done) text = ping < 0 ? act.getString(R.string.no_connection) : "↓ " + mbps(down) + "   ↑ " + act.getString(R.string.mbps_value, mbps(up)) + p;
             else if (phase.equals("ping")) text = ping < 0 ? act.getString(R.string.no_connection) : act.getString(R.string.ping_ms, ping);
-            else if (phase.equals("down")) text = "↓ " + mbps(down) + " Mbps";
-            else text = "↓ " + mbps(down) + "   ↑ " + mbps(up) + " Mbps";
+            else if (phase.equals("down")) text = "↓ " + act.getString(R.string.mbps_value, mbps(down));
+            else text = "↓ " + mbps(down) + "   ↑ " + act.getString(R.string.mbps_value, mbps(up));
             showSpeed(text);
             if (done) speed = null;
         })), "speed-test").start();
@@ -612,8 +615,12 @@ final class WifiSheet extends GlassFrame {
             password.setText("");
             join.setVisibility(View.VISIBLE);
             password.requestFocus();
-            InputMethodManager imm = Compat.svc(act, InputMethodManager.class);
-            password.post(() -> imm.showSoftInput(password, InputMethodManager.SHOW_IMPLICIT));
+            password.post(() -> {
+                // closed again before this ran: a keyboard now would take the remote
+                if (join.getVisibility() != View.VISIBLE || !password.hasFocus()) return;
+                InputMethodManager imm = Compat.svc(act, InputMethodManager.class);
+                if (imm != null) imm.showSoftInput(password, InputMethodManager.SHOW_IMPLICIT);
+            });
         }
     }
 

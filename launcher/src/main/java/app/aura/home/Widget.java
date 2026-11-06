@@ -73,6 +73,12 @@ final class Widget extends GlassFrame {
                 .setUpdateListener(null).start();
     }
 
+    @Override
+    protected void onDetachedFromWindow() {
+        if (anim != null) anim.cancel();
+        super.onDetachedFromWindow();
+    }
+
     /** Holding OK, timed from the press as on app tiles: IR remotes barely repeat. */
     private final Runnable hold = () -> {
         if (onLongClick == null || !isFocused()) return;

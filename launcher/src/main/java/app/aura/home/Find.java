@@ -175,7 +175,12 @@ final class Find extends FrameLayout {
         field.setSelection(field.length());
         fill(typed);
         field.requestFocus();
-        field.post(() -> Compat.svc(getContext(), InputMethodManager.class).showSoftInput(field, InputMethodManager.SHOW_IMPLICIT));
+        field.post(() -> {
+            // shut again before this ran (Back at once): a keyboard now would rise over home and take the remote
+            if (!shown) return;
+            InputMethodManager imm = Compat.svc(getContext(), InputMethodManager.class);
+            if (imm != null) imm.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT);
+        });
     }
 
     /** The list of apps changed (one installed or removed): the matches made again. */
@@ -187,7 +192,8 @@ final class Find extends FrameLayout {
         if (!shown) return;
         shown = false;
         first = null;
-        Compat.svc(getContext(), InputMethodManager.class).hideSoftInputFromWindow(field.getWindowToken(), 0);
+        InputMethodManager imm = Compat.svc(getContext(), InputMethodManager.class);
+        if (imm != null) imm.hideSoftInputFromWindow(field.getWindowToken(), 0);
         field.clearFocus();
         animate().cancel();
         animate().alpha(0f).setDuration(180).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(() -> {

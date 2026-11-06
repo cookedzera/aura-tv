@@ -414,6 +414,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (welcome != null) return;
         if (switcher.isOpen()) closeSwitcher();
         if (ccOpen) closeCc(false);
+        closeOverlays();
         if (!settings.isOpen()) openSettings();
         settings.show("wallpaper");
     }
@@ -645,6 +646,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         endLaunch();
         unregisterReceiver(clockReceiver);
         if (tim != null) {
+            liveGen++;
             try {
                 tim.unregisterCallback(inputWatch);
             } catch (RuntimeException ignored) {
@@ -770,7 +772,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             lastHomeAt = 0;
             if (welcome != null || switcher.isOpen()) return;
             boolean inputs = "com.amazon.tv.action.NAVIGATE_TO_INPUTS".equals(act);
-            if (ccOpen && "android.app.action.TOGGLE_NOTIFICATION_HANDLER_PANEL".equals(act)) closeCc(true);
+            if (ccOpen && "android.app.action.TOGGLE_NOTIFICATION_HANDLER_PANEL".equals(act)) closeCcBack();
             else if (!ccOpen) openCc(inputs);
             return;
         }
@@ -791,7 +793,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (welcome != null || switcher.isOpen()) return;
             // the remote's notification button on the home screen (HomeKeys): Control Center, or shut again
             if (ccFor.isEmpty()) {
-                if (ccOpen) closeCc(true);
+                if (ccOpen) closeCcBack();
                 else if (settings.isOpen()) {
                     if (!settings.back()) closeSettings();
                 } else openCc(false);
@@ -822,6 +824,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (switcher.isOpen()) closeSwitcher();
             if (ccOpen) closeCc(false);
             if (settings.isOpen()) closeSettings();
+            closeOverlays();
             if (editing) stopEdit();
             wake();
             focusGrid(0);
@@ -857,7 +860,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         if (editing) stopEdit();
         // Home means home: whatever is open closes (Settings, a folder, the hold-OK menu, Now
-        // Playing, finding an app, a name or PIN being typed)
+        // Playing, finding an app, a name or PIN being typed, Who's watching)
         closeOverlays();
         if (settings.isOpen()) closeSettings();
         if (ccOpen) closeCc(true);
@@ -868,10 +871,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     @Override
     public void onBackPressed() {
         if (ccOpen) {
-            if (!cc.back()) {
-                if (ccOver != null) backToCcApp();
-                else closeCc(true);
-            }
+            if (!cc.back()) closeCcBack();
         } else if (settings.isOpen()) {
             if (!settings.back()) closeSettings();
         } else if (zone == SIDE) {
@@ -991,6 +991,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 if (nowPlaying.isOpen()) closeNowPlaying();
                 if (weatherSheet.isOpen()) closeWeather();
                 if (folderPanel.isOpen()) closeFolder();
+                if (who.isOpen()) closeWho(true);
                 openFind(text);
                 return true;
             }
@@ -2015,10 +2016,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return b;
     }
 
-    /** Who's watching, over whatever was on show; Back returns to it untouched. */
+    /**
+     * Who's watching, over the home screen. Anything else open closes first: left beneath, it kept
+     * the remote's keys. Back returns to where you were.
+     */
     private void openWho() {
         if (who.isOpen() || welcome != null) return;
-        if (weatherSheet.isOpen()) closeWeather();
+        if (switcher.isOpen()) closeSwitcher();
+        if (ccOpen) closeCc(false);
+        if (settings.isOpen()) closeSettings();
+        closeOverlays();
         if (editing) stopEdit();
         stopPreview();
         hideTip();
@@ -3048,6 +3055,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (beforeSwitcher == null || !beforeSwitcher.isShown() || !beforeSwitcher.requestFocus()) focusGrid(gridAt);
     }
 
+    /** {@code label}: what's opened, for "Couldn't open ..."; null for something with no name of its own. */
     private void launch(Intent intent, View from, String label) {
         // the TV's own settings (Wi-Fi, Bluetooth, display, the whole Settings app): on Fire OS 8 they
         // pass through Amazon's home on the way, which the Home button service mustn't answer
@@ -3073,8 +3081,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
         } catch (RuntimeException e) {
             // not on this TV (a settings page Fire OS doesn't have), not allowed, or refused
-            if (!(e instanceof ActivityNotFoundException)) Trouble.caught("opening " + label, e);
-            hud(R.drawable.ic_info, getString(R.string.couldnt_open, label));
+            if (!(e instanceof ActivityNotFoundException)) Trouble.caught("opening " + (label != null ? label : intent.getAction()), e);
+            hud(R.drawable.ic_info, label != null ? getString(R.string.couldnt_open, label) : getString(R.string.couldnt_open_that));
         }
     }
 
@@ -3461,7 +3469,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.art = x.pickArt.get(i);
             s.color = 0xFFE8B04A;
             s.intent = Picks.watch(this, p);
-            s.label = p.name + " trailer";
+            s.label = p.name;
             s.dwellMs = 6_000;
             s.key = Continue.key(p.name);
             s.note = p.about != null && !p.about.isEmpty()
@@ -3498,8 +3506,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.intent = new Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             // Android's storage page uninstalls and clears apps: a kids' profile asks for the PIN first
             final Intent room = s.intent;
-            s.action = () -> guarded(() -> launch(room, fyW, "storage"));
-            s.label = "storage";
+            s.action = () -> guarded(() -> launch(room, fyW, null));
             out.add(Math.min(out.size(), remotes != null ? remotes.size() : 0), s);
         }
         for (int i = out.size() - 1; i >= 0; i--) if (out.get(i).decline != null && getString(R.string.not_now).equals(out.get(i).decline) && taste.declined(out.get(i).key)) out.remove(i);
@@ -4017,7 +4024,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return welcome != null || settings != null && settings.isOpen() || folderPanel != null && folderPanel.isOpen()
                 || switcher != null && switcher.isOpen() || nowPlaying != null && nowPlaying.isOpen()
                 || menu != null && menu.isOpen() || ask != null && ask.isOpen() || findPanel != null && findPanel.isOpen()
-                || weatherSheet != null && weatherSheet.isOpen();
+                || weatherSheet != null && weatherSheet.isOpen() || who != null && who.isOpen();
     }
 
     private void setRacked(boolean on) {
@@ -4249,7 +4256,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         if (first && (code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS || code == KeyEvent.KEYCODE_INFO
                 || code == KeyEvent.KEYCODE_NOTIFICATION)) {
-            if (ccOpen) closeCc(true);
+            if (ccOpen) closeCcBack();
             else openCc(false);
             return swallow(code);
         }
@@ -4802,7 +4809,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // app was hidden from it) mustn't offer what that profile hides
         java.util.LinkedHashMap<String, Long> shown = new java.util.LinkedHashMap<>();
         for (Map.Entry<String, Long> e : recent.entrySet()) if (HomeKeys.allowed(this, e.getKey())) shown.put(e.getKey(), e.getValue());
-        beforeSwitcher = getCurrentFocus();
+        // opened again while still closing, the focus is on the switcher itself: keep the place it came from
+        if (!switcher.isClosing()) beforeSwitcher = getCurrentFocus();
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
@@ -4850,6 +4858,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         switcher.close(() -> {
             Previews.dropFresh();
+            // Who's watching opened meanwhile: it holds home and the focus, and gives them back as it closes
+            if (who.isOpen()) return;
             for (View v : behindCc()) v.setVisibility(View.VISIBLE);
             home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
             stack.hold(false);
@@ -4929,6 +4939,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.hide_from_home), () -> {
                 closeMenu(card);
                 Prefs.hide(this, tag, true);
+                liveGen++;
                 live.clear();
                 live.addAll(liveInputs());
                 populate();
@@ -5273,7 +5284,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 });
     }
 
-    /** Every small overlay closed: the hold-OK menu, a folder, Now Playing, finding an app, the name or PIN card. */
+    /** Every small overlay closed: the hold-OK menu, a folder, Now Playing, finding an app, the name or PIN card, Who's watching. */
     private void closeOverlays() {
         if (menu.isOpen()) closeMenu(null);
         if (folderPanel.isOpen()) closeFolder();
@@ -5281,6 +5292,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (weatherSheet.isOpen()) closeWeather();
         if (findPanel.isOpen()) closeFind();
         if (ask.isOpen()) closeAsk();
+        if (who.isOpen()) closeWho(true);
     }
 
     /** Back on the name card: the name stays as it was. */
@@ -5462,9 +5474,25 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
     }
 
-    /** A set-top box or console just woke up: it takes the first tile and says so. */
+    /** Moved on when {@link #live} is read again in place (a setting changed it) or home stops: an answer still on its way is dropped. */
+    private int liveGen;
+
+    /**
+     * The inputs read again on home's worker: each one's state and name is a call into the TV's
+     * input service, slow on a busy TV, and a box waking up sends several changes in a row.
+     */
     private void refreshLive(boolean announce) {
-        List<String[]> now = liveInputs();
+        final int gen = liveGen;
+        worker.execute(() -> {
+            final List<String[]> now = liveInputs();
+            runOnUiThread(() -> {
+                if (gen == liveGen && !isDestroyed()) applyLive(now, announce);
+            });
+        });
+    }
+
+    /** A set-top box or console just woke up: it takes the first tile and says so. */
+    private void applyLive(List<String[]> now, boolean announce) {
         StringBuilder a = new StringBuilder(), b = new StringBuilder();
         for (String[] x : live) a.append(x[0]).append('|');
         for (String[] x : now) b.append(x[0]).append('|');
@@ -5485,6 +5513,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private void openCc(boolean inputs) {
         if (ccOpen) return;
+        // the notification or panel button with Who's watching up: left open, it would cover Control Center and keep the keys
+        if (who.isOpen()) closeWho(true);
         if (editing) stopEdit();
         stopPreview();
         beforeCc = getCurrentFocus();
@@ -5521,6 +5551,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         openCc(false);
         ccOver = pkg;
+    }
+
+    /** Control Center put away as Back does it: opened over an app, that app comes straight back. */
+    private void closeCcBack() {
+        if (ccOver != null) backToCcApp();
+        else closeCc(true);
     }
 
     /** Back from Control Center opened over an app: the app again, the home screen never showing. */
@@ -5644,7 +5680,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     @Override
     public void open(Intent intent, View from) {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        launch(intent, from, "that");
+        launch(intent, from, null);
     }
 
     // ---- clock, status, caption, hud ---------------------------------------------------------
@@ -5771,6 +5807,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             case "inputs":
                 // an input shown again (or its live picture switched): the switched-on list read afresh
                 stopPreview();
+                liveGen++;
                 live.clear();
                 live.addAll(liveInputs());
                 // falls through: the grid is rebuilt
@@ -5824,6 +5861,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 beforeSettings = null;
                 switcher.forget();
                 stopPreview();
+                liveGen++;
                 live.clear();
                 live.addAll(liveInputs());
                 if (!Prefs.on(this, Prefs.TOP_SHELF)) hideShelf();
@@ -6119,6 +6157,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (welcome != null || isDestroyed()) return;
         if (settings.isOpen()) closeSettings();
         if (switcher.isOpen()) closeSwitcher();
+        if (ccOpen) closeCc(false);
+        closeOverlays();
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
         stopPreview();

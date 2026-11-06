@@ -113,4 +113,10 @@ final class Scrim extends View {
         });
         anim.start();
     }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        if (anim != null) anim.cancel();
+        super.onDetachedFromWindow();
+    }
 }
