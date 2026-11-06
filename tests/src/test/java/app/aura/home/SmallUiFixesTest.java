@@ -133,7 +133,8 @@ public class SmallUiFixesTest {
         run(100);
         Assert.assertTrue(s.isOpen());
         Assume.assumeFalse("the simulated TV left touch mode", root.isInTouchMode());
-        View focus = act.getCurrentFocus();
+        // Robolectric's Activity.getCurrentFocus() only echoes setCurrentFocus(); the platform asks the window
+        View focus = act.getWindow().getCurrentFocus();
         Assert.assertNotNull("the focus isn't lost", focus);
         Assert.assertTrue("it rests in the switcher, on something on show", inside(focus, s) && focus.isShown());
         Assert.assertTrue("the arrows are taken, with nowhere to go", s.key(KeyEvent.KEYCODE_DPAD_RIGHT));

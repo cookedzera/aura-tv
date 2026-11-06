@@ -105,7 +105,8 @@ public class TileArtFixesTest {
         root.removeView(gone);
         gate.countDown();
         lifter.submit(() -> { }).get(10, TimeUnit.SECONDS);
-        ShadowLooper.idleMainLooper();
+        // the removal's layout holds plain messages back until the next frame, as on a TV
+        run(100);
 
         Assert.assertFalse(lifting.containsKey("com.test.lifted@300x169"));
         Bitmap art = kept.art();

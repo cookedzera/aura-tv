@@ -130,7 +130,8 @@ public class ControlCenterFixesTest {
         run(500);
         Assert.assertTrue(wifiSheet.isOpen());
         Assert.assertFalse("never two sheets in the same place", btSheet.isOpen());
-        Assert.assertTrue("the focus is on the sheet in front", inside(a.getCurrentFocus(), wifiSheet));
+        // the window's own answer: Robolectric's Activity.getCurrentFocus() only returns what was last set on it
+        Assert.assertTrue("the focus is on the sheet in front", inside(a.getWindow().getCurrentFocus(), wifiSheet));
         a.onBackPressed();
         run(300);
         Assert.assertFalse(wifiSheet.isOpen() || btSheet.isOpen());
