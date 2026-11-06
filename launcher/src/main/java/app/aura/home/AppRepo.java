@@ -39,7 +39,12 @@ import java.util.Map;
 final class AppRepo {
     static final class App {
         String pkg, label;
-        Drawable banner, icon;
+        /**
+         * Its banner and icon as read. Light mode lets both go behind a video where Aura's saved copy
+         * can bring them back ({@link #letGo}): what may run after that reads {@link #banner()} and
+         * {@link #icon()}, which read them back.
+         */
+        volatile Drawable banner, icon;
         int color;
         Intent launch;
         /** Your own picture for its tile, sent from the phone (see {@link Art}); null for its own art. */
@@ -50,6 +55,109 @@ final class AppRepo {
         String category, cls, src;
         /** Its banner was read for Light mode: only as sharp as its tile, and 16-bit where nothing on it is transparent. */
         boolean light;
+        /** The densities its saved copies were kept at (see {@link AppRepo#save}); -1 while it has none. */
+        volatile int bannerAt = -1, iconAt = -1;
+        /** Let go behind a video: read back from the saved copy when next wanted. */
+        private volatile boolean bannerGone, iconGone;
+
+        /** Its banner, null when it has none; read back from Aura's saved copy (or the app) if it was let go. */
+        Drawable banner() {
+            Drawable d = banner;
+            return d != null || !bannerGone ? d : readBack(true);
+        }
+
+        /** Its icon, null when it has none; read back from Aura's saved copy (or the app) if it was let go. */
+        Drawable icon() {
+            Drawable d = icon;
+            return d != null || !iconGone ? d : readBack(false);
+        }
+
+        /** It has a banner, held now or let go for a while. */
+        boolean hasBanner() {
+            return banner != null || bannerGone;
+        }
+
+        /** Its banner or icon was let go and isn't back yet. */
+        boolean gone() {
+            return bannerGone || iconGone;
+        }
+
+        /**
+         * Lets go of its banner and, unless {@code keepIcon}, its icon, where Aura's saved copy can
+         * bring them back: nothing else of the app's needs them once its tiles are painted. False when
+         * nothing went.
+         */
+        synchronized boolean letGo(boolean keepIcon) {
+            Context c = appContext;
+            if (c == null) return false;
+            File dir = new File(c.getFilesDir(), SAVED);
+            boolean went = false;
+            // gone is said before the picture goes: whoever finds it missing knows to read it back
+            if (banner != null && bannerAt >= 0 && new File(dir, pkg + ".b.png").isFile()) {
+                bannerGone = true;
+                banner = null;
+                went = true;
+            }
+            if (!keepIcon && icon != null && iconAt >= 0 && new File(dir, pkg + ".i.png").isFile()) {
+                iconGone = true;
+                icon = null;
+                went = true;
+            }
+            return went;
+        }
+
+        /**
+         * The banner or icon let go, read back from the saved copy, else from the app's own package.
+         * Once a picture is read it stays; with no room to read it now, it's tried again when next wanted.
+         */
+        private synchronized Drawable readBack(boolean wantBanner) {
+            if (wantBanner ? !bannerGone : !iconGone) return wantBanner ? banner : icon;
+            Context c = appContext;
+            Drawable d = null;
+            if (c != null) {
+                try {
+                    Resources res = c.getResources();
+                    File f = new File(new File(c.getFilesDir(), SAVED), pkg + (wantBanner ? ".b.png" : ".i.png"));
+                    d = picture(res, f, wantBanner ? bannerAt : iconAt, wantBanner && light);
+                    if (d == null) d = fromPackage(c, wantBanner);
+                    if (wantBanner && Perf.light(c)) d = slim(res, d);
+                } catch (OutOfMemoryError e) {
+                    return null;
+                }
+            }
+            // the picture before the word: whoever finds it back reads it as it is
+            if (wantBanner) {
+                banner = d;
+                bannerGone = false;
+            } else {
+                icon = d;
+                iconGone = false;
+            }
+            return d;
+        }
+
+        /** Its banner or icon read from its own package, as {@link AppRepo#load} reads them; null when it can't be. */
+        private Drawable fromPackage(Context c, boolean wantBanner) {
+            if (cls == null) return null;
+            try {
+                PackageManager pm = c.getPackageManager();
+                ActivityInfo ai = pm.getActivityInfo(new android.content.ComponentName(pkg, cls), 0);
+                float density = c.getResources().getDisplayMetrics().density;
+                if (wantBanner) return loadBannerHighRes(pm, ai, bannerDensity(density, light));
+                int resId = ai.getIconResource();
+                Drawable d = resId != 0 ? forDensity(pm, ai.applicationInfo, resId, bannerDensity(density, false)) : null;
+                return d != null ? d : ai.loadIcon(pm);
+            } catch (PackageManager.NameNotFoundException | RuntimeException e) {
+                return null;
+            }
+        }
+    }
+
+    /** Aura's own context, for reading back what apps let go behind a video. */
+    private static volatile Context appContext;
+
+    private static void remember(Context c) {
+        if (c != null) appContext = c.getApplicationContext();
     }
 
     private static final List<String> DEFAULT_DOCK = Arrays.asList(
@@ -66,6 +174,7 @@ final class AppRepo {
      * package can't be read is left out, rather than leaving the whole grid empty. Off the main thread.
      */
     static List<App> load(Context c) {
+        remember(c);
         PackageManager pm = c.getPackageManager();
         Resources res = c.getResources();
         boolean light = Perf.light(c);
@@ -177,6 +286,7 @@ final class AppRepo {
      * list follows. Null when there's none, or it can't be read. Off the main thread.
      */
     static List<App> saved(Context c) {
+        remember(c);
         synchronized (SAVE_LOCK) {
             File dir = new File(c.getFilesDir(), SAVED);
             try {
@@ -200,8 +310,10 @@ final class AppRepo {
                     x.launch = launchFor(x.pkg, x.cls, x.category);
                     x.light = made;
                     x.banner = picture(res, new File(dir, x.pkg + ".b.png"), o.optInt("bd", 0), made);
+                    if (x.banner != null) x.bannerAt = o.optInt("bd", 0);
                     if (light) x.banner = slim(res, x.banner);
                     x.icon = picture(res, new File(dir, x.pkg + ".i.png"), o.optInt("id", 0), false);
+                    if (x.icon != null) x.iconAt = o.optInt("id", 0);
                     if (x.banner == null && x.icon == null) return null;
                     x.art = Art.load(c, x.pkg);
                     out.add(x);
@@ -222,7 +334,7 @@ final class AppRepo {
         StringBuilder s = new StringBuilder();
         for (App a : list) {
             s.append(a.pkg).append('|').append(a.label).append('|').append(a.cls).append('|').append(a.src)
-                    .append('|').append(a.banner != null);
+                    .append('|').append(a.hasBanner());
             // Light mode's list says so: a copy made for the other mode is made again (the full mode's is as before)
             if (a.light) s.append("|light");
             s.append('\n');
@@ -233,12 +345,17 @@ final class AppRepo {
     /** Keeps {@code list} for the next start, unless it's what's kept already. Off the main thread, at low priority. */
     static void save(Context c, List<App> list) {
         if (list == null || list.isEmpty()) return;
+        remember(c);
         synchronized (SAVE_LOCK) {
             File dir = new File(c.getFilesDir(), SAVED);
             String sig = signature(list);
             File index = new File(dir, "index.json");
             try {
-                if (index.isFile() && sig.equals(new JSONObject(read(new File(dir, "sig.json"))).optString("sig"))) return;
+                if (index.isFile() && sig.equals(new JSONObject(read(new File(dir, "sig.json"))).optString("sig"))) {
+                    // kept already: each app learns where its pictures can be read back from
+                    noteKept(index, list);
+                    return;
+                }
             } catch (IOException | JSONException ignored) {
                 // made again below
             }
@@ -251,8 +368,19 @@ final class AppRepo {
                     JSONObject o = new JSONObject().put("pkg", x.pkg).put("label", x.label).put("cls", x.cls)
                             .put("cat", x.category).put("src", x.src != null ? x.src : "").put("color", x.color)
                             .put("light", x.light);
-                    int bd = write(x.banner, new File(dir, x.pkg + ".b.png"), 640, 360);
-                    int id = write(x.icon, new File(dir, x.pkg + ".i.png"), 256, 256);
+                    Drawable banner, icon;
+                    boolean bannerGone, iconGone;
+                    synchronized (x) {
+                        banner = x.banner;
+                        icon = x.icon;
+                        bannerGone = banner == null && x.bannerGone;
+                        iconGone = icon == null && x.iconGone;
+                    }
+                    // a picture let go behind a video is the very copy kept here: it stays as it is
+                    int bd = bannerGone ? x.bannerAt : write(banner, new File(dir, x.pkg + ".b.png"), 640, 360);
+                    int id = iconGone ? x.iconAt : write(icon, new File(dir, x.pkg + ".i.png"), 256, 256);
+                    x.bannerAt = bd;
+                    x.iconAt = id;
                     if (bd < 0 && id < 0) continue;
                     if (bd >= 0) {
                         o.put("bd", bd);
@@ -274,6 +402,22 @@ final class AppRepo {
                 //noinspection ResultOfMethodCallIgnored
                 index.delete();
             }
+        }
+    }
+
+    /** The copy in {@code index} was made from {@code list}: each app learns the densities its pictures were kept at. */
+    private static void noteKept(File index, List<App> list) throws IOException, JSONException {
+        JSONArray a = new JSONArray(read(index));
+        Map<String, JSONObject> kept = new HashMap<>();
+        for (int i = 0; i < a.length(); i++) {
+            JSONObject o = a.getJSONObject(i);
+            kept.put(o.optString("pkg"), o);
+        }
+        for (App x : list) {
+            JSONObject o = kept.get(x.pkg);
+            if (o == null) continue;
+            x.bannerAt = o.optInt("bd", -1);
+            x.iconAt = o.optInt("id", -1);
         }
     }
 

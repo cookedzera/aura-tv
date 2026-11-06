@@ -306,7 +306,8 @@ final class TopShelf extends FrameLayout {
         for (int i = 0; i < art.length; i++) {
             if (widths[i] <= 0 || h <= 0) continue;
             try {
-                art[i] = Bitmap.createBitmap(widths[i], h, Bitmap.Config.ARGB_8888);
+                // every card starts from near-black, nothing transparent: 16 bits on LOW, dithered as it's painted
+                art[i] = Bitmap.createBitmap(widths[i], h, Ui.light ? Bitmap.Config.RGB_565 : Bitmap.Config.ARGB_8888);
                 paint(items.get(i), color).paint(new Canvas(art[i]), widths[i], h);
             } catch (OutOfMemoryError e) {
                 // the card paints itself as it's laid out, as before
@@ -374,6 +375,8 @@ final class TopShelf extends FrameLayout {
                 card.setGrowRoom(9);
                 card.setContentDescription(Continue.spoken(it));
                 card.ready = r.art[i];
+                card.opaque = true;
+                if (r.art[i] != null && android.os.Build.VERSION.SDK_INT >= 24) r.art[i].prepareToDraw();
                 card.tvos = tvos;
                 card.onClick = () -> open.open(it);
                 card.onLongClick = hold != null ? () -> hold.hold(it, card) : null;
@@ -389,6 +392,11 @@ final class TopShelf extends FrameLayout {
             setTranslationY(Ui.dp(10));
         }
         animate().alpha(1f).translationY(0f).setDuration(420).setStartDelay(0).setInterpolator(Ui.EMPHASIZED).withEndAction(null).start();
+    }
+
+    /** Behind a video on LOW: the cards let go of their pictures, painted again behind the screen as home comes back. */
+    void release() {
+        for (Card c : cards) c.release();
     }
 
     void hide() {

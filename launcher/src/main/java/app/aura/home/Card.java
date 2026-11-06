@@ -19,7 +19,11 @@ import android.graphics.Shader;
 import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * App card. Focused, a bright ring hugs it, it glows in the app's own colour and catches a sheen;
@@ -52,10 +56,18 @@ final class Card extends View {
      */
     float res = 1f;
     /**
-     * The picture already painted off the main thread at this card's size (Top Shelf): used as it
-     * is, instead of being painted on the main thread as the card is laid out.
+     * The picture already painted off the main thread at this card's size (Top Shelf, and home's
+     * tiles handed over by {@link #take}): used as it is, instead of being painted on the main thread
+     * as the card is laid out.
      */
     Bitmap ready;
+    /**
+     * Home's tiles: the picture is painted behind the screen and handed over ({@link #take}), never
+     * on the main thread as the card is laid out; until it lands, the card shows its colour.
+     */
+    boolean deferred;
+    /** Its picture covers it edge to edge with nothing transparent: on LOW it's painted in 16-bit colour. */
+    boolean opaque;
     /**
      * Set before the card is attached: it becomes a pane of frosted glass over the photograph,
      * tinted with the app's colour, and its art (a lifted logo) is laid on top.
@@ -118,6 +130,16 @@ final class Card extends View {
     private static final int LIGHT_IN = 150;
     /** The glass's colour filter at 65 strengths of focus, shared by every card: none is made as a card lights. */
     private static final ColorMatrixColorFilter[] PANES = new ColorMatrixColorFilter[65];
+    /** It let its picture go ({@link #release}), or shows another tile's until its own lands ({@link #standIn}). */
+    private boolean released, stale;
+    /** No room for its picture last time: its colour until it's let go again. */
+    private boolean starved;
+    private boolean attached;
+    /** What its pictures add to {@link #HELD} while it's attached. */
+    private int counted;
+    /** The bytes held by the pictures of attached cards, and how many cards hold one: read in Problem reports. */
+    private static final AtomicLong HELD = new AtomicLong();
+    private static final AtomicInteger PICTURED = new AtomicInteger();
 
     Card(Context c, Tiles.Painter painter, int color, float radiusDp) {
         super(c);
@@ -190,11 +212,17 @@ final class Card extends View {
             boolean whole = true;
             if (ready != null && ready.getWidth() == bw && ready.getHeight() == bh) {
                 bitmap = ready;
+            } else if (deferred) {
+                // painted behind the screen and handed over (take): its colour until then
+                ready = null;
+                bitmap = null;
+                stale = false;
             } else {
                 // painted for another size: let go, the card paints its own
                 ready = null;
                 try {
-                    bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
+                    bitmap = Bitmap.createBitmap(bw, bh, config(opaque));
+                    released = false;
                     whole = paintArt(w, h);
                 } catch (OutOfMemoryError e) {
                     noRoom();
@@ -216,6 +244,12 @@ final class Card extends View {
         glint.setShader(glintShader);
         // the parallax light: made once, moved by a matrix (a new gradient every frame costs this GPU ~10 ms)
         spot.setShader(new android.graphics.RadialGradient(0, 0, 1, 0xFFFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+        account();
+    }
+
+    /** 16 bits for an opaque picture on LOW, half the memory and the upload; anything with transparency in 32. */
+    private static Bitmap.Config config(boolean opaque) {
+        return opaque && Ui.light ? Bitmap.Config.RGB_565 : Bitmap.Config.ARGB_8888;
     }
 
     /**
@@ -242,6 +276,7 @@ final class Card extends View {
                 noRoom();
             }
             reflection = null;
+            account();
             invalidate();
         });
     }
@@ -282,6 +317,7 @@ final class Card extends View {
         art.setShader(null);
         Continue.trim();
         Tiles.trim();
+        account();
     }
 
     /** A band of light sweeps once across the card, like a reflection catching glass. */
@@ -320,6 +356,7 @@ final class Card extends View {
         fade.setShader(new LinearGradient(0, 0, 0, h, 0x47FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
         fade.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
         c.drawRect(0, 0, w, h, fade);
+        account();
         return reflection;
     }
 
@@ -331,6 +368,8 @@ final class Card extends View {
         setElevation(lift || Ui.light ? 0f : Ui.dpf(3));
         // glass repaints with the photograph's drift, like the other glass
         if (glass != null) glass.addMirror(this);
+        attached = true;
+        account();
     }
 
     @Override
@@ -358,6 +397,8 @@ final class Card extends View {
         setRotationY(0f);
         if (moved != null) moved.run();
         if (glass != null) glass.removeMirror(this);
+        attached = false;
+        account();
         super.onDetachedFromWindow();
     }
 
@@ -373,6 +414,137 @@ final class Card extends View {
         int w = getWidth(), h = getHeight();
         if (w > 0 && h > 0) onSizeChanged(w, h, w, h);
         invalidate();
+        account();
+    }
+
+    /** What its picture is painted from. */
+    Tiles.Painter painter() {
+        return painter;
+    }
+
+    /** Its size in px: as laid out, else as its layout params fix it (home's tiles, before their first layout); null when neither says. */
+    int[] size() {
+        int w = getWidth(), h = getHeight();
+        if (w > 0 && h > 0) return new int[]{w, h};
+        ViewGroup.LayoutParams lp = getLayoutParams();
+        return lp != null && lp.width > 0 && lp.height > 0 ? new int[]{lp.width, lp.height} : null;
+    }
+
+    /**
+     * A picture should be painted for it behind the screen: a tile of home's without one, a card that
+     * let its own go, or one showing another tile's in its place.
+     */
+    boolean wantsArt() {
+        if (!(deferred || released) || starved) return false;
+        if (bitmap != null || ready != null) return stale;
+        return size() != null;
+    }
+
+    /**
+     * Its picture, painted behind the screen at its size (main thread): shown at once if it's laid out
+     * at that size, else kept for when it is. Landing over its colour on HIGH it comes up in 150 ms;
+     * taking another picture's place it's swapped in place, so nothing flashes.
+     */
+    void take(Bitmap b) {
+        if (b == null) return;
+        int w = getWidth(), h = getHeight();
+        boolean laid = w > 0 && h > 0;
+        // painted for a size it no longer has: it's painted again at this one
+        if (laid && (b.getWidth() != Math.max(1, Math.round(w * res)) || b.getHeight() != Math.max(1, Math.round(h * res)))) return;
+        boolean had = art.getShader() != null;
+        ready = b;
+        released = stale = starved = false;
+        // its upload to the GPU starts now, on the render thread, before the frame that first draws it
+        if (android.os.Build.VERSION.SDK_INT >= 24) b.prepareToDraw();
+        if (laid) {
+            bitmap = b;
+            reflection = null;
+            showArt(w, h);
+            if (!had && !Ui.light && isShown()) fadeArtIn();
+            invalidate();
+        }
+        account();
+    }
+
+    /**
+     * Lets go of its picture so its memory can go (far from what's on screen, or behind a video on
+     * LOW). Never recycled, since a frame may still be drawing it: the card shows its colour until a
+     * new one is painted behind the screen and handed over ({@link #take}).
+     */
+    void release() {
+        // one that had no room is tried again when it next comes near
+        starved = false;
+        if (bitmap == null && ready == null) return;
+        bitmap = null;
+        ready = null;
+        reflection = null;
+        stale = false;
+        released = true;
+        art.setShader(null);
+        if (artFade != null && artFade.isStarted()) artFade.end();
+        invalidate();
+        account();
+    }
+
+    /**
+     * Until its own picture lands it shows {@code was}, the picture of the tile it takes the place of
+     * (when that was painted at the size it's laid out at): no tile goes blank as home is rebuilt.
+     */
+    void standIn(Bitmap was) {
+        if (was == null || bitmap != null || ready != null) return;
+        ready = was;
+        stale = true;
+        account();
+    }
+
+    /** No room for its picture (a 1 GB TV out of memory): its colour until it's let go again, and the caches make space. */
+    void starve() {
+        starved = true;
+        ready = null;
+        stale = false;
+        noRoom();
+    }
+
+    /**
+     * {@code p} painted into a new picture for a card {@code w}x{@code h} at {@code res}, in 16 bits
+     * where it's {@code opaque} on LOW. On the calling thread, which isn't the main one: logos it needs
+     * are lifted right here, and a banner or icon let go behind a video is read back. Null when there's
+     * no room for it.
+     */
+    static Bitmap paintBehind(Tiles.Painter p, int w, int h, float res, boolean opaque) {
+        int bw = Math.max(1, Math.round(w * res)), bh = Math.max(1, Math.round(h * res));
+        try {
+            Bitmap b = Bitmap.createBitmap(bw, bh, config(opaque));
+            Canvas cv = new Canvas(b);
+            cv.scale(bw / (float) w, bh / (float) h);
+            p.paint(cv, w, h);
+            return b;
+        } catch (OutOfMemoryError e) {
+            return null;
+        }
+    }
+
+    /** The bytes the pictures of attached cards hold now (home's tiles on its page, Top Shelf, the switcher's deck): for Problem reports. */
+    static long heldBytes() {
+        return HELD.get();
+    }
+
+    /** How many attached cards hold a picture now. */
+    static int heldCount() {
+        return PICTURED.get();
+    }
+
+    /** Its pictures counted in {@link #HELD} while it's attached, and taken out as they go or it leaves. Main thread. */
+    private void account() {
+        int now = attached ? bytes(bitmap) + (ready != bitmap ? bytes(ready) : 0) + bytes(reflection) : 0;
+        if (now == counted) return;
+        HELD.addAndGet(now - counted);
+        PICTURED.addAndGet((now > 0 ? 1 : 0) - (counted > 0 ? 1 : 0));
+        counted = now;
+    }
+
+    private static int bytes(Bitmap b) {
+        return b == null || b.isRecycled() ? 0 : b.getAllocationByteCount();
     }
 
     void setDim(float d) {

@@ -60,6 +60,7 @@ final class MusicStrip extends LinearLayout {
             if (controller != null) handler.postDelayed(this, 1000);
         }
     };
+    private final Runnable follow = this::follow;
 
     MusicStrip(Context c) {
         super(c);
@@ -116,10 +117,36 @@ final class MusicStrip extends LinearLayout {
         animate().alpha(1f).setDuration(1200).setStartDelay(600).setInterpolator(Ui.SOFT).start();
         handler.removeCallbacks(tick);
         handler.post(tick);
+        MediaWatch.follow(follow, true);
+    }
+
+    /** Another player started and the remote's Play key would reach it now: the strip shows that one instead. */
+    private void follow() {
+        if (controller == null) return;
+        MediaWatch.Playing p = MediaWatch.now(getContext());
+        if (p == null || !p.playing || p.controller == null || p.controller.getSessionToken().equals(controller.getSessionToken())) return;
+        try {
+            p.controller.registerCallback(watch, handler);
+        } catch (RuntimeException e) {
+            return;
+        }
+        try {
+            controller.unregisterCallback(watch);
+        } catch (RuntimeException ignored) {
+        }
+        controller = p.controller;
+        show();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        MediaWatch.follow(follow, false);
+        super.onDetachedFromWindow();
     }
 
     /** The music stopped, or the screensaver ended: it fades and lets go. */
     void stop() {
+        MediaWatch.follow(follow, false);
         handler.removeCallbacks(tick);
         if (controller != null) {
             try {

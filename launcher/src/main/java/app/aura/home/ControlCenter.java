@@ -21,6 +21,7 @@ import android.media.tv.TvInputManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.TrafficStats;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.format.DateFormat;
@@ -149,7 +150,29 @@ final class ControlCenter {
     private final ImageView[] noteIcons = new ImageView[3];
     private final TextView[] noteKicks = new TextView[3], noteTitles = new TextView[3], noteBodies = new TextView[3];
     private final List<MediaWatch.Note> notesShown = new ArrayList<>();
+    /**
+     * After a hold on a notification its row stays, offering (OK) to mute that app's banners, until
+     * Control Center opens again: the row (-1: none), the app, the notification, and whether it's
+     * still there (one its app keeps up can't be dismissed).
+     */
+    private int offerRow = -1;
+    private String offerPkg, offerKey;
+    private boolean offerKept;
     private final TextView wifiCap, btCap, sleepCap, screenOffCap;
+    /** The network's live speed under the Wi-Fi button's name, while Control Center is open. */
+    private final TextView wifiSpeed;
+    private long rxWas = -1, txWas, speedAt;
+    private boolean netUp;
+    /** Google TV's own panel (its dashboard), where it's on this TV and home can open it. */
+    private final Pad googlePill;
+
+    /** Opens Google TV's own panel for Aura; set by home where it can (see HomeKeys). */
+    interface SystemPanel {
+        /** False when it couldn't be opened just now. */
+        boolean open();
+    }
+
+    volatile SystemPanel systemPanel;
     private final Round wifi, bt, sleep, screenOff;
     private final Slider volume;
     /** The inputs tile: the source that's live, large; OK lays every source out on a sheet. */
@@ -227,6 +250,28 @@ final class ControlCenter {
         LinearLayout.LayoutParams vpl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(32));
         vpl.topMargin = Ui.dp(12);
         header.addView(vpnPill, vpl);
+
+        // Google TV's own quick settings, as holding Home opens them there: a Streamer keeps both panels
+        googlePill = new Pad(a, null, 16, 0f);
+        googlePill.plainColor = MODULE;
+        googlePill.row = true;
+        LinearLayout gr = new LinearLayout(a);
+        gr.setGravity(Gravity.CENTER_VERTICAL);
+        gr.setPadding(Ui.dp(12), 0, Ui.dp(14), 0);
+        gr.addView(googlePill.tint(icon(a, R.drawable.ic_tune), 1f), new LinearLayout.LayoutParams(Ui.dp(15), Ui.dp(15)));
+        TextView gt = googlePill.tint(Ui.text(a, 10.5f, Ui.medium, 0xFFFFFFFF), 0.9f);
+        gt.setText(a.getString(R.string.google_tv_panel));
+        gt.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        gt.setMaxWidth(Ui.dp(240));
+        LinearLayout.LayoutParams gtl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        gtl.leftMargin = Ui.dp(8);
+        gr.addView(gt, gtl);
+        googlePill.addView(gr, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        googlePill.onClick = () -> host.guarded(this::openSystemPanel);
+        googlePill.setVisibility(View.GONE);
+        LinearLayout.LayoutParams gpl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(32));
+        gpl.topMargin = Ui.dp(8);
+        header.addView(googlePill, gpl);
 
         // Tonight's pick: from TVmaze, or TMDB with your own key, to your taste; OK plays its trailer
         pick = new Pad(a, null, 18, 0f);
@@ -322,7 +367,8 @@ final class ControlCenter {
         ncp.topMargin = Ui.dp(22);
         header.addView(nowCard, ncp);
 
-        // the TV's notifications, the newest few, quietly: OK opens one, hold OK dismisses it
+        // the TV's notifications, the newest few, quietly: OK opens one, hold OK dismisses it (its row
+        // then offers, with OK, to mute that app's banners)
         notesBox = new LinearLayout(a);
         notesBox.setOrientation(LinearLayout.VERTICAL);
         notesBox.setClipChildren(false);
@@ -473,6 +519,14 @@ final class ControlCenter {
         sleepCap = caps[2];
         screenOffCap = caps[3];
         label(screenOff, screenOffCap, act.getString(R.string.screen_off));
+        // what's coming in and going out right now, under the Wi-Fi button's name
+        wifiSpeed = Ui.text(a, 8, Ui.medium, 0x99FFFFFF);
+        wifiSpeed.setGravity(Gravity.CENTER);
+        wifiSpeed.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        wifiSpeed.setVisibility(View.INVISIBLE);
+        FrameLayout.LayoutParams wsl = new FrameLayout.LayoutParams(Ui.dp(half), ViewGroup.LayoutParams.WRAP_CONTENT);
+        wsl.topMargin = Ui.dp(88);
+        connect.addView(wifiSpeed, wsl);
 
         // 1x2: volume
         volume = place(new Slider(a), 2, 0, 1, 2);
@@ -543,7 +597,7 @@ final class ControlCenter {
 
         settings = place(button(a, R.drawable.ic_settings, act.getString(R.string.settings)), 0, 3, 2, 1);
         standby = place(button(a, R.drawable.ic_power, act.getString(R.string.standby)), 2, 3, 2, 1);
-        focusables.addAll(Arrays.asList(inputs, picture, sound, boost, settings, standby, pick, vpnPill, nowCard));
+        focusables.addAll(Arrays.asList(inputs, picture, sound, boost, settings, standby, pick, vpnPill, googlePill, nowCard));
         focusables.addAll(Arrays.asList(noteRows));
         focusables.add(notesOff);
 
@@ -782,6 +836,7 @@ final class ControlCenter {
         panel.removeCallbacks(delayedBt);
         panel.removeCallbacks(delayedInputs);
         panel.removeCallbacks(delayedNotes);
+        panel.removeCallbacks(speedTick);
         inputs.removeCallbacks(inputsRetry);
         if (MediaWatch.onNotes == notesChanged) MediaWatch.onNotes = null;
         // a sheet still open as home goes: its Wi-Fi or Bluetooth listener goes with it
@@ -843,16 +898,27 @@ final class ControlCenter {
 
     private void showNotes(List<MediaWatch.Note> list) {
         notesShown.clear();
-        notesShown.addAll(list);
+        // one just dismissed that a late reading still has stays gone: its row is the offer
+        for (MediaWatch.Note n : list) if (offerRow < 0 || offerKept || !n.key.equals(offerKey)) notesShown.add(n);
+        // the offer never sits below the last row shown: it moves up, the focus with it
+        boolean offerFocus = false;
+        if (offerRow > notesShown.size()) {
+            offerFocus = noteRows[offerRow].hasFocus();
+            offerRow = notesShown.size();
+        }
         long now = System.currentTimeMillis();
         for (int k = 0; k < noteRows.length; k++) {
             Pad row = noteRows[k];
-            if (k >= list.size()) {
+            if (k == offerRow) {
+                showOffer(k);
+                continue;
+            }
+            MediaWatch.Note n = noteAt(k);
+            if (n == null) {
                 if (row.hasFocus()) focusBoard();
                 row.setVisibility(View.GONE);
                 continue;
             }
-            MediaWatch.Note n = list.get(k);
             Object[] f = face(n.pkg);
             String app = (String) f[0];
             android.graphics.drawable.Drawable icon = (android.graphics.drawable.Drawable) f[1];
@@ -865,8 +931,9 @@ final class ControlCenter {
             noteBodies[k].setVisibility(n.text.isEmpty() ? View.GONE : View.VISIBLE);
             row.setVisibility(View.VISIBLE);
         }
+        if (offerFocus) noteRows[offerRow].requestFocus();
         // the ones past the rows are counted on the title line, which adds no height to the column
-        int more = list.size() - noteRows.length;
+        int more = notesShown.size() - noteRows.length + (offerRow >= 0 ? 1 : 0);
         notesCap.setText(more > 0 ? act.getString(R.string.notifications) + "  ·  " + act.getResources().getQuantityString(R.plurals.n_more_caps, more, more)
                 : act.getString(R.string.notifications));
         // a kids' profile is never asked to set anything up
@@ -875,7 +942,44 @@ final class ControlCenter {
         notesOff.setFocusable(fix);
         notesOffText.setText(act.getString(fix ? R.string.cant_read_notifications_ok : R.string.cant_read_notifications_setup));
         notesOff.setVisibility(off ? View.VISIBLE : View.GONE);
-        notesBox.setVisibility(list.isEmpty() && !off ? View.GONE : View.VISIBLE);
+        notesBox.setVisibility(notesShown.isEmpty() && offerRow < 0 && !off ? View.GONE : View.VISIBLE);
+    }
+
+    /** The notification row {@code k} shows: null for the offer's row, or past the list. */
+    private MediaWatch.Note noteAt(int k) {
+        if (k == offerRow) return null;
+        int i = offerRow >= 0 && k > offerRow ? k - 1 : k;
+        return i < notesShown.size() ? notesShown.get(i) : null;
+    }
+
+    /** The offer's row: the app, what became of its notification, and what OK does now. */
+    private void showOffer(int k) {
+        Object[] f = face(offerPkg);
+        String app = (String) f[0];
+        android.graphics.drawable.Drawable icon = (android.graphics.drawable.Drawable) f[1];
+        if (noteIcons[k].getDrawable() != icon) noteIcons[k].setImageDrawable(icon);
+        noteKicks[k].setText(app);
+        noteTitles[k].setText(act.getString(offerKept ? R.string.this_one_stays_until_its : R.string.dismissed));
+        noteBodies[k].setText(act.getString(MediaWatch.muted(act, offerPkg) ? R.string.ok_unmutes_banners : R.string.ok_mutes_banners, app));
+        noteBodies[k].setVisibility(View.VISIBLE);
+        noteRows[k].setVisibility(View.VISIBLE);
+    }
+
+    /** OK on the offer: that app's banners muted, or back on when they were muted already. */
+    private void muteOffered() {
+        boolean mute = !MediaWatch.muted(act, offerPkg);
+        MediaWatch.mute(act, offerPkg, mute);
+        host.hud(mute ? R.drawable.ic_moon : R.drawable.ic_check,
+                act.getString(mute ? R.string.banners_muted : R.string.banners_back, (String) face(offerPkg)[0]));
+        showOffer(offerRow);
+    }
+
+    /** The offer's row is a notification again, as Control Center opens anew. */
+    private void endOffer() {
+        if (offerRow < 0) return;
+        offerRow = -1;
+        offerPkg = offerKey = null;
+        showNotes(new ArrayList<>(notesShown));
     }
 
     /** Aura approved to read the TV's notifications over the TV's own debugging link, as setup does it. */
@@ -894,10 +998,14 @@ final class ControlCenter {
         }, "cc-notes-allow").start();
     }
 
-    /** What the notification leads to, as the TV's own panel would open it. */
+    /** What the notification leads to, as the TV's own panel would open it; on the offer's row, the mute. */
     private void openNote(int k) {
-        if (k >= notesShown.size()) return;
-        MediaWatch.Note n = notesShown.get(k);
+        if (k == offerRow) {
+            muteOffered();
+            return;
+        }
+        MediaWatch.Note n = noteAt(k);
+        if (n == null) return;
         if (n.open != null) {
             try {
                 host.closeCc(false);
@@ -911,15 +1019,21 @@ final class ControlCenter {
         if (i != null) launch(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), noteRows[k]);
     }
 
+    /** Hold OK: dismissed (when it can be), and its row stays to offer muting its app's banners. */
     private void dismissNote(int k) {
-        if (k >= notesShown.size()) return;
-        MediaWatch.Note n = notesShown.get(k);
-        if (!n.clearable) {
+        MediaWatch.Note n = noteAt(k);
+        if (n == null) return;
+        if (n.clearable) {
+            MediaWatch.dismiss(n.key);
+            host.hud(R.drawable.ic_check, act.getString(R.string.dismissed));
+        } else {
             host.hud(R.drawable.ic_info, act.getString(R.string.this_one_stays_until_its));
-            return;
         }
-        MediaWatch.dismiss(n.key);
-        host.hud(R.drawable.ic_check, act.getString(R.string.dismissed));
+        offerRow = k;
+        offerPkg = n.pkg;
+        offerKey = n.key;
+        offerKept = !n.clearable;
+        showNotes(new ArrayList<>(notesShown));
     }
 
     private static Pad button(Context c, int iconRes, String label) {
@@ -963,6 +1077,10 @@ final class ControlCenter {
         vl.topMargin = on ? 0 : Ui.dp(12);
         vl.bottomMargin = on ? Ui.dp(10) : 0;
         vpnPill.setLayoutParams(vl);
+        LinearLayout.LayoutParams gl = (LinearLayout.LayoutParams) googlePill.getLayoutParams();
+        gl.topMargin = on ? 0 : Ui.dp(8);
+        gl.bottomMargin = on ? Ui.dp(10) : 0;
+        googlePill.setLayoutParams(gl);
         LinearLayout.LayoutParams nl = (LinearLayout.LayoutParams) nowCard.getLayoutParams();
         nl.topMargin = on ? 0 : Ui.dp(22);
         nowCard.setLayoutParams(nl);
@@ -1003,6 +1121,12 @@ final class ControlCenter {
         panel.removeCallbacks(delayedRefresh);
         panel.removeCallbacks(delayedBt);
         panel.removeCallbacks(delayedInputs);
+        endOffer();
+        // the live speed starts counting once the board has arrived, not on its first frames
+        rxWas = -1;
+        wifiSpeed.setVisibility(View.INVISIBLE);
+        panel.removeCallbacks(speedTick);
+        panel.postDelayed(speedTick, Ui.light ? Ui.LOW_CC_OPEN : Ui.CC_OPEN);
         // readings are kept warm while the home screen idles; opening only refreshes them once the
         // board has settled, so no system lookups land on the first frames of the animation
         if (inputsSig == null) {
@@ -1055,6 +1179,7 @@ final class ControlCenter {
         panel.removeCallbacks(delayedRefresh);
         panel.removeCallbacks(delayedBt);
         panel.removeCallbacks(delayedInputs);
+        panel.removeCallbacks(speedTick);
         inputs.removeCallbacks(inputsRetry);
         // the sheets go with the panel, and the next opening sets the board up again. The Inputs sheet
         // left open came back over the board next time, stale, with the focus underneath it
@@ -1239,6 +1364,7 @@ final class ControlCenter {
             final String btName = btOn ? btSheet.connectedName() : act.getString(R.string.bluetooth_off);
             final ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
             Compat.svc(act, ActivityManager.class).getMemoryInfo(mi);
+            final boolean google = googlePanel();
             act.runOnUiThread(() -> {
                 if (gen != readGen || act.isDestroyed()) return;
                 // what the picture and the sound are doing now, under their buttons
@@ -1248,13 +1374,76 @@ final class ControlCenter {
                 keepFaces(faces);
                 showNotes(notes);
                 wifi.setOn(online);
+                netUp = online;
                 label(wifi, wifiCap, act.getString(onWifi ? R.string.wi_fi : online ? R.string.ethernet : R.string.offline));
                 bt.setOn(btOn);
                 label(bt, btCap, btName);
                 showMemory(mi);
+                if (!google && googlePill.hasFocus()) focusBoard();
+                googlePill.setVisibility(google ? View.VISIBLE : View.GONE);
             });
         }, "cc-read").start();
         refreshDay();
+    }
+
+    /**
+     * Off the main thread: whether Google TV's own panel can be offered. Google's home is switched on
+     * (the panel lives in it, and goes when it's switched off), its panel answers on this TV, and
+     * the Home button service home asks it through is on.
+     */
+    private boolean googlePanel() {
+        try {
+            if (systemPanel == null || !Safety.googleTvHomeOn(act) || !HomeKeys.on(act)) return false;
+            Intent i = new Intent("android.app.action.TOGGLE_NOTIFICATION_HANDLER_PANEL").setPackage(Safety.GOOGLE_TV_HOME);
+            return !act.getPackageManager().queryIntentActivities(i, 0).isEmpty();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** Google TV's own panel over home, Control Center put away first. */
+    private void openSystemPanel() {
+        SystemPanel p = systemPanel;
+        host.closeCc(false);
+        if (p == null || !p.open()) host.hud(R.drawable.ic_info, act.getString(R.string.the_tv_didnt_allow_that));
+    }
+
+    private final Runnable speedTick = this::speedTick;
+
+    /**
+     * Once a second while Control Center is open: what came in and went out since the last look, in
+     * megabits a second, under the Wi-Fi button. Nothing where Android can't count, or offline.
+     */
+    private void speedTick() {
+        if (!isOpen) return;
+        long rx, tx, now = SystemClock.elapsedRealtime();
+        try {
+            rx = TrafficStats.getTotalRxBytes();
+            tx = TrafficStats.getTotalTxBytes();
+        } catch (RuntimeException e) {
+            rx = tx = TrafficStats.UNSUPPORTED;
+        }
+        if (rx == TrafficStats.UNSUPPORTED || tx == TrafficStats.UNSUPPORTED) {
+            wifiSpeed.setVisibility(View.INVISIBLE);
+            return;
+        }
+        if (!netUp) {
+            wifiSpeed.setVisibility(View.INVISIBLE);
+        } else if (rxWas >= 0 && now > speedAt) {
+            float s = (now - speedAt) / 1000f;
+            String line = "↓" + mbps(rx - rxWas, s) + "  ↑" + act.getString(R.string.mbps_value, mbps(tx - txWas, s));
+            if (!line.contentEquals(wifiSpeed.getText())) wifiSpeed.setText(line);
+            wifiSpeed.setVisibility(View.VISIBLE);
+        }
+        rxWas = rx;
+        txWas = tx;
+        speedAt = now;
+        panel.postDelayed(speedTick, 1000);
+    }
+
+    private static String mbps(long bytes, float seconds) {
+        float v = Math.max(0L, bytes) * 8f / 1_000_000f / seconds;
+        return String.format(Locale.getDefault(), v < 10f ? "%.1f" : "%.0f", v);
     }
 
     void tick(Calendar now) {

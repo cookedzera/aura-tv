@@ -1,22 +1,31 @@
 package app.aura.home;
 
+import android.app.NotificationManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
+import android.media.AudioManager;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
+import android.media.session.MediaSession;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.service.notification.NotificationListenerService;
+import android.service.notification.StatusBarNotification;
+import android.view.KeyEvent;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Lets Aura see which app is playing (Android shares media sessions only with approved
@@ -63,6 +72,16 @@ public class MediaWatch extends NotificationListenerService {
      */
     private static final Map<android.media.session.MediaSession.Token, MediaMetadata> metaOf = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<android.media.session.MediaSession.Token, PlaybackState> stateOf = new java.util.concurrent.ConcurrentHashMap<>();
+    /**
+     * When each player last started playing (elapsedRealtime), kept as the list of players changes:
+     * Android sends the remote's Play to the latest. Those found playing as the list is read count
+     * as starting together, so the list's own order (the latest first) decides between them.
+     */
+    private static final Map<MediaSession.Token, Long> playingSince = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Players playing at their last report. */
+    private static final Set<MediaSession.Token> playingNow = Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<MediaSession.Token, Boolean>());
+    /** While the list of players is read, the moment it was read; otherwise 0. */
+    private static long bindAt;
     private static MediaSessionManager.OnActiveSessionsChangedListener sessionListener;
     private static volatile boolean listening;
     private static Playing lastAny;
@@ -98,12 +117,60 @@ public class MediaWatch extends NotificationListenerService {
         String key, pkg, title, text;
         long when;
         boolean clearable;
+        /** Its app asked that an update of it not alert again. */
+        boolean alertOnce;
         android.app.PendingIntent open;
     }
 
+    /** Told (on the main thread) of each new notification worth a banner: the home screen's {@link Banner}. */
+    interface Posted {
+        void posted(Note n);
+    }
+
+    static volatile Posted onPosted;
+
     @Override
-    public void onNotificationPosted(android.service.notification.StatusBarNotification sbn) {
+    public void onNotificationPosted(StatusBarNotification sbn) {
+        posted(sbn, null);
+    }
+
+    @Override
+    public void onNotificationPosted(StatusBarNotification sbn, RankingMap rankings) {
+        posted(sbn, rankings);
+    }
+
+    private void posted(StatusBarNotification sbn, RankingMap rankings) {
         notesChanged();
+        final Posted p = onPosted;
+        if (p == null || sbn == null) return;
+        final Note n;
+        try {
+            n = note(this, sbn);
+            // a muted app, or one Android itself keeps quiet (Do Not Disturb, a silent channel), never shows one
+            if (n == null || muted(this, n.pkg) || !loud(sbn, rankings)) return;
+        } catch (RuntimeException e) {
+            return;
+        }
+        main.post(() -> {
+            try {
+                p.posted(n);
+            } catch (RuntimeException e) {
+                Trouble.caught("banner", e);
+            }
+        });
+    }
+
+    /**
+     * Whether Android itself lets it interrupt: Do Not Disturb doesn't hold it back, and its app
+     * didn't post it quietly (low importance: no sound and no peek on a phone either).
+     */
+    private static boolean loud(StatusBarNotification sbn, RankingMap rankings) {
+        Ranking r = new Ranking();
+        if (rankings == null || !rankings.getRanking(sbn.getKey(), r)) return true;
+        if (!r.matchesInterruptionFilter()) return false;
+        if (Build.VERSION.SDK_INT < 24) return !r.isAmbient();
+        int importance = r.getImportance();
+        return importance == NotificationManager.IMPORTANCE_UNSPECIFIED || importance >= NotificationManager.IMPORTANCE_DEFAULT;
     }
 
     @Override
@@ -135,7 +202,7 @@ public class MediaWatch extends NotificationListenerService {
         List<Note> out = new ArrayList<>();
         MediaWatch w = connected;
         if (w == null) return out;
-        android.service.notification.StatusBarNotification[] all;
+        StatusBarNotification[] all;
         try {
             all = w.getActiveNotifications();
         } catch (RuntimeException e) {
@@ -143,30 +210,37 @@ public class MediaWatch extends NotificationListenerService {
         }
         if (all == null) return out;
         java.util.Arrays.sort(all, (a, b) -> Long.compare(b.getPostTime(), a.getPostTime()));
-        for (android.service.notification.StatusBarNotification sbn : all) {
+        for (StatusBarNotification sbn : all) {
             if (out.size() >= max) break;
-            android.app.Notification n = sbn.getNotification();
-            if (n == null || sbn.isOngoing() || sbn.getPackageName().equals(c.getPackageName())
-                    || !HomeKeys.allowed(c, sbn.getPackageName())) continue;
-            if ((n.flags & android.app.Notification.FLAG_GROUP_SUMMARY) != 0) continue;
-            android.os.Bundle x = n.extras;
-            if (x == null) continue;
-            String template = x.getString(android.app.Notification.EXTRA_TEMPLATE, "");
-            if (template.contains("MediaStyle")) continue;
-            CharSequence title = x.getCharSequence(android.app.Notification.EXTRA_TITLE);
-            CharSequence text = x.getCharSequence(android.app.Notification.EXTRA_TEXT);
-            if (title == null || title.toString().trim().isEmpty()) continue;
-            Note note = new Note();
-            note.key = sbn.getKey();
-            note.pkg = sbn.getPackageName();
-            note.title = title.toString().trim();
-            note.text = text != null ? text.toString().trim() : "";
-            note.when = sbn.getPostTime();
-            note.clearable = sbn.isClearable();
-            note.open = n.contentIntent;
-            out.add(note);
+            Note note = note(c, sbn);
+            if (note != null) out.add(note);
         }
         return out;
+    }
+
+    /** What an app said in {@code sbn}, or null when it isn't worth a look (see {@link #notes}); a kids' profile skips hidden apps. */
+    private static Note note(Context c, StatusBarNotification sbn) {
+        android.app.Notification n = sbn.getNotification();
+        if (n == null || sbn.isOngoing() || sbn.getPackageName().equals(c.getPackageName())
+                || !HomeKeys.allowed(c, sbn.getPackageName())) return null;
+        if ((n.flags & android.app.Notification.FLAG_GROUP_SUMMARY) != 0) return null;
+        android.os.Bundle x = n.extras;
+        if (x == null) return null;
+        String template = x.getString(android.app.Notification.EXTRA_TEMPLATE, "");
+        if (template.contains("MediaStyle")) return null;
+        CharSequence title = x.getCharSequence(android.app.Notification.EXTRA_TITLE);
+        CharSequence text = x.getCharSequence(android.app.Notification.EXTRA_TEXT);
+        if (title == null || title.toString().trim().isEmpty()) return null;
+        Note note = new Note();
+        note.key = sbn.getKey();
+        note.pkg = sbn.getPackageName();
+        note.title = title.toString().trim();
+        note.text = text != null ? text.toString().trim() : "";
+        note.when = sbn.getPostTime();
+        note.clearable = sbn.isClearable();
+        note.alertOnce = (n.flags & android.app.Notification.FLAG_ONLY_ALERT_ONCE) != 0;
+        note.open = n.contentIntent;
+        return note;
     }
 
     /** Dismissed from Control Center: gone from the TV's notifications, as a swipe would. */
@@ -177,6 +251,20 @@ public class MediaWatch extends NotificationListenerService {
             w.cancelNotification(key);
         } catch (RuntimeException ignored) {
         }
+    }
+
+    /** Apps whose banners were muted from Control Center, as this profile chose; their notifications stay listed there. */
+    static final String MUTED = "set_banners_muted";
+
+    static boolean muted(Context c, String pkg) {
+        return pkg != null && Prefs.of(c).getStringSet(MUTED, Collections.<String>emptySet()).contains(pkg);
+    }
+
+    static void mute(Context c, String pkg, boolean on) {
+        Set<String> s = new HashSet<>(Prefs.of(c).getStringSet(MUTED, Collections.<String>emptySet()));
+        if (on) s.add(pkg);
+        else s.remove(pkg);
+        Prefs.of(c).edit().putStringSet(MUTED, s).apply();
     }
 
     /**
@@ -249,6 +337,8 @@ public class MediaWatch extends NotificationListenerService {
             callbacks.clear();
             metaOf.clear();
             stateOf.clear();
+            playingSince.clear();
+            playingNow.clear();
             listening = false;
         });
     }
@@ -267,30 +357,40 @@ public class MediaWatch extends NotificationListenerService {
         callbacks.clear();
         metaOf.clear();
         stateOf.clear();
-        if (list == null) return;
-        for (final MediaController m : list) {
-            if (m == null) continue;
-            MediaController.Callback cb = new MediaController.Callback() {
-                // another app's player, read over Android's binder: it can die, or send something
-                // malformed, mid-call; that report is let go rather than Aura with it
-                @Override
-                public void onPlaybackStateChanged(PlaybackState state) {
-                    safeRecord(c, m, meta(m), state);
-                }
+        if (list == null) list = Collections.emptyList();
+        bindAt = SystemClock.elapsedRealtime();
+        try {
+            for (final MediaController m : list) {
+                if (m == null) continue;
+                MediaController.Callback cb = new MediaController.Callback() {
+                    // another app's player, read over Android's binder: it can die, or send something
+                    // malformed, mid-call; that report is let go rather than Aura with it
+                    @Override
+                    public void onPlaybackStateChanged(PlaybackState state) {
+                        safeRecord(c, m, meta(m), state);
+                    }
 
-                @Override
-                public void onMetadataChanged(MediaMetadata metadata) {
-                    safeRecord(c, m, metadata, state(m));
+                    @Override
+                    public void onMetadataChanged(MediaMetadata metadata) {
+                        safeRecord(c, m, metadata, state(m));
+                    }
+                };
+                try {
+                    m.registerCallback(cb, main);
+                    watched.add(m);
+                    callbacks.put(m, cb);
+                    record(c, m);
+                } catch (RuntimeException ignored) {
                 }
-            };
-            try {
-                m.registerCallback(cb, main);
-                watched.add(m);
-                callbacks.put(m, cb);
-                record(c, m);
-            } catch (RuntimeException ignored) {
             }
+        } finally {
+            bindAt = 0;
         }
+        // a player gone from the list is forgotten; the rest keep when they last started playing
+        Set<MediaSession.Token> live = new HashSet<>();
+        for (MediaController m : watched) live.add(m.getSessionToken());
+        playingSince.keySet().retainAll(live);
+        playingNow.retainAll(live);
     }
 
     /** Captures a live controller's metadata and progress into memory (and preferences) while it plays. */
@@ -312,6 +412,25 @@ public class MediaWatch extends NotificationListenerService {
         else metaOf.remove(m.getSessionToken());
         if (st != null) stateOf.put(m.getSessionToken(), st);
         else stateOf.remove(m.getSessionToken());
+        started(m.getSessionToken(), st);
+    }
+
+    /** Notes the moment a player starts playing. */
+    private static void started(MediaSession.Token t, PlaybackState st) {
+        if (!playing(st)) playingNow.remove(t);
+        else if (playingNow.add(t)) playingSince.put(t, bindAt > 0 ? bindAt : SystemClock.elapsedRealtime());
+    }
+
+    private static boolean playing(PlaybackState st) {
+        int s = st != null ? st.getState() : PlaybackState.STATE_NONE;
+        return s == PlaybackState.STATE_PLAYING || s == PlaybackState.STATE_BUFFERING;
+    }
+
+    /** A player with something to show: playing, or paused or stopped where it was. */
+    private static boolean showable(PlaybackState st) {
+        int s = st != null ? st.getState() : PlaybackState.STATE_NONE;
+        return s == PlaybackState.STATE_PLAYING || s == PlaybackState.STATE_BUFFERING
+                || s == PlaybackState.STATE_PAUSED || s == PlaybackState.STATE_STOPPED;
     }
 
     /** The same, from what the player reported: nothing is asked of it again. */
@@ -420,14 +539,30 @@ public class MediaWatch extends NotificationListenerService {
 
     /** Told (on the main thread) when what's playing changes: the home screen's card, Control Center's tile. */
     static Runnable onChange;
+    /** Players on screen that follow the one the remote's Play key would reach (Now Playing, the music strip). */
+    private static final List<Runnable> followers = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** {@code r} is told, on the main thread, whenever {@link #changed} is; until it's let go with {@code on} false. */
+    static void follow(Runnable r, boolean on) {
+        if (!on) followers.remove(r);
+        else if (!followers.contains(r)) followers.add(r);
+    }
 
     private static void changed() {
         final Runnable r = onChange;
-        if (r != null) main.post(() -> {
+        if (r == null && followers.isEmpty()) return;
+        main.post(() -> {
             try {
-                r.run();
+                if (r != null) r.run();
             } catch (RuntimeException e) {
                 Trouble.caught("now playing", e);
+            }
+            for (Runnable f : followers) {
+                try {
+                    f.run();
+                } catch (RuntimeException e) {
+                    Trouble.caught("now playing", e);
+                }
             }
         });
     }
@@ -571,23 +706,27 @@ public class MediaWatch extends NotificationListenerService {
         return false;
     }
 
-    /** The most relevant live media session (playing first, else paused), or null. Main thread is fine: no I/O. */
+    /**
+     * The player the remote's Play key would reach, or null when none has anything to show: on
+     * Android 13 and later the one Android names, before that the one that most recently started
+     * playing (Android sends media keys to the last app that played). With nothing to tell them
+     * apart, the one playing, else the first paused. Main thread is fine: no I/O (on 13+, with
+     * several players, one quick question to Android).
+     */
     static Playing now(Context c) {
         ensureWatching(c != null ? c.getApplicationContext() : null);
+        List<MediaController> live = new ArrayList<>();
+        List<PlaybackState> states = new ArrayList<>();
         if (listening) {
             // the players are watched: what they last reported is known, with nothing asked of them
-            MediaController best = null;
             for (MediaController m : watched) {
                 if (c != null && !HomeKeys.allowed(c, m.getPackageName())) continue;
                 PlaybackState st = stateOf.get(m.getSessionToken());
-                if (metaOf.get(m.getSessionToken()) == null || st == null) continue;
-                int s = st.getState();
-                if (s == PlaybackState.STATE_PLAYING || s == PlaybackState.STATE_BUFFERING) {
-                    best = m;
-                    break;
-                }
-                if (best == null && (s == PlaybackState.STATE_PAUSED || s == PlaybackState.STATE_STOPPED)) best = m;
+                if (metaOf.get(m.getSessionToken()) == null || !showable(st)) continue;
+                live.add(m);
+                states.add(st);
             }
+            MediaController best = pick(c, live, states);
             if (best == null) return null;
             MediaMetadata md = metaOf.get(best.getSessionToken());
             PlaybackState st = stateOf.get(best.getSessionToken());
@@ -618,19 +757,70 @@ public class MediaWatch extends NotificationListenerService {
         } catch (SecurityException e) {
             return null; // not approved as a listener
         }
-        MediaController best = null;
         for (MediaController m : list) {
             if (c != null && !HomeKeys.allowed(c, m.getPackageName())) continue;
             PlaybackState st = m.getPlaybackState();
-            if (m.getMetadata() == null || st == null) continue;
-            int s = st.getState();
-            if (s == PlaybackState.STATE_PLAYING || s == PlaybackState.STATE_BUFFERING) {
-                best = m;
-                break;
-            }
-            if (best == null && (s == PlaybackState.STATE_PAUSED || s == PlaybackState.STATE_STOPPED)) best = m;
+            if (m.getMetadata() == null || !showable(st)) continue;
+            live.add(m);
+            states.add(st);
         }
+        MediaController best = pick(c, live, states);
         return best != null ? record(c, best) : null;
+    }
+
+    /** Of the players with something to show (each with its state), the one the remote's Play key would reach. */
+    private static MediaController pick(Context c, List<MediaController> live, List<PlaybackState> states) {
+        if (live.isEmpty()) return null;
+        if (live.size() > 1) {
+            MediaController b = buttonSession(c, live);
+            if (b != null) return b;
+        }
+        // nothing tells them apart: the one playing, else the first paused (Android's order, latest first)
+        for (int i = 0; i < live.size(); i++) if (playing(states.get(i))) return live.get(i);
+        return live.get(0);
+    }
+
+    /**
+     * Of {@code live}, the player Android would send Play and Pause to: on Android 13 and later the
+     * one it names (the listener's approval lets Aura ask), before that the one that most recently
+     * started playing. Null when that can't be told.
+     */
+    static MediaController buttonSession(Context c, List<MediaController> live) {
+        if (Build.VERSION.SDK_INT >= 33 && c != null) {
+            MediaSessionManager msm = Compat.svc(c, MediaSessionManager.class);
+            try {
+                MediaSession.Token t = msm != null ? msm.getMediaKeyEventSession() : null;
+                if (t != null) for (MediaController m : live) if (t.equals(m.getSessionToken())) return m;
+            } catch (RuntimeException e) {
+                // the listener's approval taken away (a SecurityException), or Android not answering
+            }
+        }
+        MediaController best = null;
+        long bestAt = -1;
+        for (MediaController m : live) {
+            Long at = playingSince.get(m.getSessionToken());
+            if (at != null && at > bestAt) {
+                best = m;
+                bestAt = at;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * A media key with no player in hand: Android delivers it where the remote's own would go, to
+     * the player Play would reach (whose media button can start it again).
+     */
+    static void dispatchKey(Context c, int code) {
+        AudioManager am = c != null ? Compat.svc(c, AudioManager.class) : null;
+        if (am == null) return;
+        long t = SystemClock.uptimeMillis();
+        try {
+            am.dispatchMediaKeyEvent(new KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0));
+            am.dispatchMediaKeyEvent(new KeyEvent(t, t, KeyEvent.ACTION_UP, code, 0));
+        } catch (RuntimeException ignored) {
+            // a TV's own tuner holding the keys (a global-priority session), or no media service
+        }
     }
 
     /** The live session if one is active, else the most recently played track/video (within 6 hours). */

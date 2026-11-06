@@ -71,6 +71,12 @@ public class HomeKeys extends AccessibilityService {
     static volatile String lastApp;
     static volatile long lastAppAt;
     private static HomeKeys running;
+
+    /** Google TV's own panel, which needs a system permission to open directly: asked of Android as its notifications action. */
+    static boolean systemPanel() {
+        HomeKeys s = running;
+        return s != null && s.performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS);
+    }
     /** How often {@link #heal} has switched the service off and on in this process, and when it last tried. */
     private static int heals;
     private static long healAt;

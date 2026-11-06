@@ -288,6 +288,7 @@ final class Trouble {
         } catch (RuntimeException ignored) {
         }
         line(b, "Native heap", (Debug.getNativeHeapAllocatedSize() >> 20) + " MB in use by Aura");
+        line(b, "Tile pictures", (Card.heldBytes() >> 10) + " KB in " + Card.heldCount() + " cards");
         line(b, "Cores", String.valueOf(Runtime.getRuntime().availableProcessors()));
         DisplayMetrics dm = c.getResources().getDisplayMetrics();
         line(b, "Screen", dm.widthPixels + "×" + dm.heightPixels + " at " + dm.densityDpi + " dpi");

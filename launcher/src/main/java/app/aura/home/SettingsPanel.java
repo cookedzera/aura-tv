@@ -49,16 +49,18 @@ final class SettingsPanel {
     }
 
     final FrameLayout panel;
-    private final Activity act;
+    final Activity act;
     /** The request code for the beat glow's sound permission, answered in HomeActivity. */
     static final int BEAT_ASK = 42;
-    private final Host host;
+    final Host host;
     private final LinearLayout head, rows;
     private final ScrollView scroll;
     private final TextView title, note, help;
     private final EditText city;
+    /** Privacy, Permissions, Accessibility, Network debugging and About, under Aura. */
+    final TrustPages trust;
     /** The page on show: "" for the main list, else "apps", "widgets", "wallpaper", "drop" or "updates". */
-    private String page = "";
+    String page = "";
     private boolean confirmClear;
     /** The photo whose removal waits for a second OK. */
     private String confirmPhoto;
@@ -78,7 +80,8 @@ final class SettingsPanel {
     private String updateState = "", updateNote = "";
     // set up on this TV: the last connection's result, and how far setup got
     private String adbState = "", setupNote = "";
-    private boolean setupRunning, confirmAdbOff;
+    private boolean setupRunning;
+    boolean confirmAdbOff;
     // remote buttons: waiting for a press; the button pressed, waiting for its app; a removal waiting for a second OK
     private boolean teachingKey;
     private int[] newKey;
@@ -88,7 +91,18 @@ final class SettingsPanel {
     private TextView dropTitle, dropSub;
     private HomeActivity.Meter dropMeter;
     private LinearLayout dropThumbs;
-    private final java.util.Map<String, android.graphics.Bitmap> thumbs = new java.util.HashMap<>();
+    /** The Photos page's thumbnails while it's open, the forty last shown: one let go leaves its row's picture too. */
+    private final java.util.LinkedHashMap<String, android.graphics.Bitmap> thumbs = new java.util.LinkedHashMap<String, android.graphics.Bitmap>(64, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(java.util.Map.Entry<String, android.graphics.Bitmap> eldest) {
+            if (size() <= THUMBS_KEPT) return false;
+            View row = SettingsPanel.this.rows.findViewWithTag("p:" + eldest.getKey());
+            View iv = row != null ? row.findViewWithTag("thumb") : null;
+            if (iv instanceof android.widget.ImageView) ((android.widget.ImageView) iv).setImageDrawable(null);
+            return true;
+        }
+    };
+    private static final int THUMBS_KEPT = 40;
 
     SettingsPanel(Activity a, Host h) {
         act = a;
@@ -178,6 +192,7 @@ final class SettingsPanel {
             protected void onScrollChanged(int l, int t, int oldl, int oldt) {
                 super.onScrollChanged(l, t, oldl, oldt);
                 fadeEdges();
+                wantThumbs();
             }
         };
         scroll.setVerticalScrollBarEnabled(false);
@@ -194,15 +209,19 @@ final class SettingsPanel {
         };
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setClipChildren(false);
-        rows.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> fadeEdges());
+        rows.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            fadeEdges();
+            wantThumbs();
+        });
         scroll.addView(rows, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         right.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-        // tall enough that the whole main list fits without scrolling: no row is ever cut at an edge
-        // 13 rows of 35 dp with 4 dp between, and room to grow, inside a 540 dp-tall TV screen
+        // the screen's full height: eleven 40 dp rows with 6 dp between, and room to grow, inside a
+        // 540 dp-tall TV screen; longer pages scroll under the faded edges
         FrameLayout.LayoutParams rl = new FrameLayout.LayoutParams(Ui.dp(424), Ui.dp(532), Gravity.END | Gravity.CENTER_VERTICAL);
         rl.rightMargin = Ui.dp(78);
         panel.addView(right, rl);
         panel.setVisibility(View.GONE);
+        trust = new TrustPages(this);
     }
 
     /** Fills and submits the panel's text field if it's currently open. */
@@ -232,21 +251,23 @@ final class SettingsPanel {
         scroll.scrollTo(0, 0);
         panel.animate().cancel();
         build();
+        // the list comes in 24 dp from the right as the title slides in; LOW does it all in 200 ms
+        boolean low = Ui.light;
         panel.setVisibility(View.VISIBLE);
         panel.setAlpha(0f);
-        panel.animate().alpha(1f).setStartDelay(0).setDuration(260).setInterpolator(Ui.SOFT).start();
+        panel.animate().alpha(1f).setStartDelay(0).setDuration(low ? Ui.LOW_SHEET_IN : 260).setInterpolator(Ui.SOFT).start();
         head.setAlpha(0f);
         head.setTranslationX(-Ui.dp(20));
-        head.animate().alpha(1f).translationX(0f).setStartDelay(40).setDuration(460).setInterpolator(Ui.EMPHASIZED).start();
+        head.animate().alpha(1f).translationX(0f).setStartDelay(low ? 0 : 40).setDuration(low ? Ui.LOW_SHEET_IN : 460).setInterpolator(Ui.EMPHASIZED).start();
         rows.setAlpha(0f);
-        rows.setTranslationX(0f);
-        rows.setTranslationY(Ui.dp(14));
-        rows.animate().alpha(1f).translationY(0f).setStartDelay(40).setDuration(380).setInterpolator(Ui.EMPHASIZED).start();
+        rows.setTranslationX(Ui.dp(24));
+        rows.setTranslationY(0f);
+        rows.animate().alpha(1f).translationX(0f).setStartDelay(low ? 0 : 40).setDuration(low ? Ui.LOW_SHEET_IN : Ui.DUR_PANEL).setInterpolator(Ui.EMPHASIZED).start();
         focusFirst();
     }
 
     /** The first row that takes focus: section labels don't. */
-    private void focusFirst() {
+    void focusFirst() {
         for (int i = 0; i < rows.getChildCount(); i++) if (rows.getChildAt(i).isFocusable() && rows.getChildAt(i).requestFocus()) return;
     }
 
@@ -293,7 +314,7 @@ final class SettingsPanel {
             HomeKeys.stopTeaching();
         }
         hideKeyboard();
-        panel.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
+        panel.animate().alpha(0f).setStartDelay(0).setDuration(Ui.CLOSE).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     if (!open) panel.setVisibility(View.GONE);
                 }).start();
@@ -401,6 +422,7 @@ final class SettingsPanel {
     private void disarm() {
         confirmRetire = confirmRemove = confirmAdbOff = confirmSignOut = confirmClear = confirmClearTrouble = confirmCatDelete = false;
         confirmProfile = confirmPhoto = confirmKey = dbConfirm = null;
+        trust.disarm();
     }
 
     /** The keyboard for a field just shown, unless it was hidden again before this ran: on a TV it would take the remote. */
@@ -417,6 +439,7 @@ final class SettingsPanel {
         if (p.equals("tv")) tvHomeCache = null;
         if (p.equals("home") || p.equals("cats")) catsEmpty.clear();
         if (p.equals("apps")) inputNames.clear();
+        if (TrustPages.owns(p)) trust.entered(p);
         boolean back = p.isEmpty() || page.equals("photos") && p.equals("drop")
                 || (page.equals("widgets") || page.equals("keys") || page.equals("cats")) && p.equals("home")
                 || page.equals("cat") && p.equals("cats")
@@ -436,24 +459,26 @@ final class SettingsPanel {
 
     // ---- pages -------------------------------------------------------------------------------
 
+    /** A page pushed slides 24 dp in from the right, a page left from the left, in 200 ms on both tiers. */
     private void slidePage(boolean back) {
         if (!isOpen()) return;
         rows.setAlpha(0f);
         rows.setTranslationY(0f);
-        rows.setTranslationX(Ui.dp(back ? -18 : 18));
-        rows.animate().alpha(1f).translationX(0f).setStartDelay(0).setDuration(300).setInterpolator(Ui.EMPHASIZED).start();
+        rows.setTranslationX(Ui.dp(back ? -24 : 24));
+        rows.animate().alpha(1f).translationX(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.EMPHASIZED).start();
     }
 
     /** Hidden inputs' names, asked of the TV once a visit to Hidden apps: each is a call into Android. */
     private final java.util.Map<String, String> inputNames = new java.util.HashMap<>();
 
-    private void build() {
+    void build() {
         String keep = focusedTag();
         final int sy = scroll.getScrollY();
         final boolean samePage = page.equals(builtPage);
         builtPage = page;
         rows.removeAllViews();
-        note.setMaxLines(page.equals("updates") ? 18 : 4);
+        if (!page.equals("photos")) thumbs.clear();
+        note.setMaxLines(page.equals("updates") ? 18 : TrustPages.owns(page) ? 5 : 4);
         // the release notes have the whole column to themselves
         help.setVisibility(page.equals("updates") ? View.GONE : View.VISIBLE);
         help.setText("");
@@ -588,14 +613,8 @@ final class SettingsPanel {
             // switched by Aura where setup allowed it; elsewhere, Android's own Accessibility screen does it
             // how late the TV hands over remote releases while Aura watches the keys: some firmware adds a lot
             int lag = Prefs.device(act).getInt("keys_lag", 0);
-            add(act.getString(R.string.home_button_in_apps), HomeKeys.on(act) ? act.getString(R.string.homekeys_on) + (lag >= 150 ? " · " + act.getString(R.string.remote_ms_late, lag) : "") : act.getString(R.string.off), "homekeys", () -> {
-                if (!HomeKeys.set(act, !HomeKeys.on(act))) {
-                    host.open(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS), panel);
-                    return;
-                }
-                build();
-                focusTag("homekeys");
-            });
+            add(act.getString(R.string.home_button_in_apps), HomeKeys.on(act) ? act.getString(R.string.homekeys_on) + (lag >= 150 ? " · " + act.getString(R.string.remote_ms_late, lag) : "") : act.getString(R.string.off), "homekeys",
+                    () -> toggleHomeKeys("homekeys"));
             // where Android sends Home to another launcher, the service can send it to Aura instead
             if (HomeKeys.on(act) && !HomeRole.held(act)) {
                 add(act.getString(R.string.home_goes_to), HomeKeys.takeover(act) ? "Aura" : HomeRole.other(act), "takeover", () -> {
@@ -606,12 +625,8 @@ final class SettingsPanel {
             }
             // pictures need the service above, and Android 11
             if (android.os.Build.VERSION.SDK_INT >= 30 && HomeKeys.on(act)) {
-                add(act.getString(R.string.pictures_in_the_switcher), Previews.on(act) ? act.getString(R.string.apps_as_you_left_them) : act.getString(R.string.off), "previews", () -> {
-                    Previews.set(act, !Previews.on(act));
-                    host.hud(R.drawable.ic_check, Previews.on(act) ? act.getString(R.string.kept_only_on_this_tv) : act.getString(R.string.pictures_deleted));
-                    build();
-                    focusTag("previews");
-                });
+                add(act.getString(R.string.pictures_in_the_switcher), Previews.on(act) ? act.getString(R.string.apps_as_you_left_them) : act.getString(R.string.off), "previews",
+                        () -> togglePreviews("previews"));
             }
             if (HomeKeys.on(act)) {
                 int n = HomeKeys.keys(act).size();
@@ -653,7 +668,7 @@ final class SettingsPanel {
             });
             for (Profiles.Profile pr : Profiles.all(act)) {
                 if (Profiles.MAIN.equals(pr.id)) continue;
-                add(act.getString(R.string.remove_name, pr.name), ("pr:del:" + pr.id).equals(confirmProfile) ? act.getString(R.string.press_ok_again) : "", "pr:del:" + pr.id, () -> {
+                danger(act.getString(R.string.remove_name, pr.name), ("pr:del:" + pr.id).equals(confirmProfile) ? act.getString(R.string.press_ok_again) : "", "pr:del:" + pr.id, () -> {
                     String tag = "pr:del:" + pr.id;
                     if (!tag.equals(confirmProfile)) {
                         confirmProfile = tag;
@@ -917,7 +932,7 @@ final class SettingsPanel {
                 org.json.JSONObject o = list.optJSONObject(i);
                 final String id = o.optString("id");
                 add(o.optString("title") + (o.optBoolean("gif") ? "  ·  " + act.getString(R.string.gif) : ""), id.equals(confirmPhoto) ? act.getString(R.string.press_ok_again) : act.getString(R.string.remove),
-                        "p:" + id, photoThumb(id), () -> {
+                        "p:" + id, thumbs.get(id), () -> {
                             if (!id.equals(confirmPhoto)) {
                                 confirmPhoto = id;
                                 build();
@@ -932,7 +947,7 @@ final class SettingsPanel {
                             else if (act.getCurrentFocus() == null || act.getCurrentFocus().getParent() != rows) go("photos");
                         });
             }
-            if (list.length() > 1) add(act.getString(R.string.remove_all), confirmClear ? act.getString(R.string.press_ok_again) : act.getResources().getQuantityString(R.plurals.n_photos, list.length(), list.length()), "clear", () -> {
+            if (list.length() > 1) danger(act.getString(R.string.remove_all), confirmClear ? act.getString(R.string.press_ok_again) : act.getResources().getQuantityString(R.plurals.n_photos, list.length(), list.length()), "clear", () -> {
                 if (!confirmClear) {
                     confirmClear = true;
                     build();
@@ -975,7 +990,7 @@ final class SettingsPanel {
             Ui.fit(title, act.getString(R.string.problem_reports), Ui.dp(300), 52, 30);
             note.setText(act.getString(R.string.when_something_goes_wrong_aura));
             if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
-            if (Trouble.count(act) > 0) add(act.getString(R.string.clear_them), confirmClearTrouble ? act.getString(R.string.press_ok_again) : "", "trouble:clear", () -> {
+            if (Trouble.count(act) > 0) danger(act.getString(R.string.clear_them), confirmClearTrouble ? act.getString(R.string.press_ok_again) : "", "trouble:clear", () -> {
                 if (!confirmClearTrouble) {
                     confirmClearTrouble = true;
                     build();
@@ -1043,6 +1058,8 @@ final class SettingsPanel {
             buildTv();
         } else if (page.equals("keys")) {
             buildKeys();
+        } else if (TrustPages.owns(page)) {
+            trust.build(page);
         } else {
             Ui.fit(title, act.getString(R.string.settings), Ui.dp(300), 52, 30);
             Weather.Now w = Weather.now(act);
@@ -1103,13 +1120,13 @@ final class SettingsPanel {
             if (android.os.Build.VERSION.SDK_INT >= 28) add(act.getString(R.string.block_ads), Shield.on(act) ? act.getString(R.string.on_value, Shield.name(act)) : act.getString(R.string.off), "shield", () -> go("shield"));
             add(act.getString(R.string.animations), animLabel(), "anim", this::cycleAnim);
             add(act.getString(R.string.android_settings), "", "android", () -> host.open(new Intent(Settings.ACTION_SETTINGS), panel));
-            section("AURA");
+            section(act.getString(R.string.apps_and_data));
             add(act.getString(R.string.your_setup), act.getString(R.string.save_to_your_phone_or), "backup", this::openBackup);
             int problems = Trouble.count(act);
             add(act.getString(R.string.problem_reports), problems == 0 ? act.getString(R.string.none_lately) : act.getResources().getQuantityString(R.plurals.n_notes_read_on_your_phone, problems, problems),
                     "trouble", this::openTrouble);
             String waiting = Updater.pending(act);
-            add(act.getString(R.string.updates), waiting != null ? act.getString(R.string.aura_version_is_ready, waiting) : act.getString(R.string.version_name, Updater.installed(act)), "updates", () -> {
+            add(act.getString(R.string.updates), waiting != null ? act.getString(R.string.aura_version_is_ready, waiting) : act.getString(R.string.version_name, version()), "updates", () -> {
                 // opening it counts as seen: the red dots go
                 Updater.seen(act);
                 host.applied("update");
@@ -1123,7 +1140,14 @@ final class SettingsPanel {
                 dl.leftMargin = Ui.dp(5);
                 ((FrameLayout) rows.getChildAt(rows.getChildCount() - 1)).addView(dot, dl);
             }
-            add(act.getString(R.string.remove_aura), confirmRemove ? act.getString(R.string.press_ok_again) : act.getString(R.string.puts_the_tv_back_first), "remove", this::removeAura);
+            // what Aura sends and holds, shown in the product: each row's tag is its page, so Back lands here
+            section("AURA");
+            add(act.getString(R.string.privacy), "", TrustPages.PRIVACY, () -> go(TrustPages.PRIVACY));
+            add(act.getString(R.string.permissions), "", TrustPages.PERMS, () -> go(TrustPages.PERMS));
+            add(act.getString(R.string.accessibility), act.getString(HomeKeys.on(act) ? R.string.on : R.string.off), TrustPages.A11Y, () -> go(TrustPages.A11Y));
+            add(act.getString(R.string.network_debugging), TrustPages.link(act), TrustPages.DEBUGGING, () -> go(TrustPages.DEBUGGING));
+            add(act.getString(R.string.about_aura), "MIT", TrustPages.ABOUT, () -> go(TrustPages.ABOUT));
+            danger(act.getString(R.string.remove_aura), confirmRemove ? act.getString(R.string.press_ok_again) : act.getString(R.string.puts_the_tv_back_first), "remove", this::removeAura);
         }
         if (keep != null) {
             boolean kept = false;
@@ -1889,7 +1913,7 @@ final class SettingsPanel {
             focusTag("c:down");
         });
         if (!Categories.builtIn(k)) {
-            add(act.getString(R.string.delete_category), confirmCatDelete ? act.getString(R.string.press_ok_again) : "", "c:del", () -> {
+            danger(act.getString(R.string.delete_category), confirmCatDelete ? act.getString(R.string.press_ok_again) : "", "c:del", () -> {
                 if (!confirmCatDelete) {
                     confirmCatDelete = true;
                     build();
@@ -1914,8 +1938,39 @@ final class SettingsPanel {
         });
     }
 
-    private void focusTag(String tag) {
+    void focusTag(String tag) {
         for (int i = 0; i < rows.getChildCount(); i++) if (tag.equals(rows.getChildAt(i).getTag())) rows.getChildAt(i).requestFocus();
+    }
+
+    /** A page's title and the sentence under it. */
+    void head(String t, String n) {
+        Ui.fit(title, t, Ui.dp(300), 52, 30);
+        note.setText(n);
+    }
+
+    private String version;
+
+    /** Aura's version, asked of Android once: each redraw of the main list asked again. */
+    String version() {
+        if (version == null) version = Updater.installed(act);
+        return version;
+    }
+
+    /** The Home button service on or off, or Android's Accessibility settings where Aura may not switch it. */
+    void toggleHomeKeys(String tag) {
+        if (!HomeKeys.set(act, !HomeKeys.on(act))) {
+            host.open(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS), panel);
+            return;
+        }
+        build();
+        focusTag(tag);
+    }
+
+    void togglePreviews(String tag) {
+        Previews.set(act, !Previews.on(act));
+        host.hud(R.drawable.ic_check, Previews.on(act) ? act.getString(R.string.kept_only_on_this_tv) : act.getString(R.string.pictures_deleted));
+        build();
+        focusTag(tag);
     }
 
     // ---- from your phone ---------------------------------------------------------------------
@@ -2089,7 +2144,7 @@ final class SettingsPanel {
     }
 
     /** Debugging off for the whole TV: nothing on the Wi-Fi gets in, Aura's own link included. */
-    private void adbOff() {
+    void adbOff() {
         if (!confirmAdbOff) {
             confirmAdbOff = true;
             build();
@@ -2545,7 +2600,7 @@ final class SettingsPanel {
 
     /** The newest arrivals, three at most, newest on the left. */
     private void thumb(String id) {
-        android.graphics.Bitmap b = android.graphics.BitmapFactory.decodeFile(Mine.thumb(act, id).getPath());
+        android.graphics.Bitmap b = Mine.smallThumb(act, id);
         if (b == null) return;
         android.widget.ImageView iv = new android.widget.ImageView(act);
         iv.setTag(id);
@@ -2614,16 +2669,29 @@ final class SettingsPanel {
     }
 
     private String focusedTag() {
-        View f = act.getCurrentFocus();
-        return f != null && f.getParent() == rows ? (String) f.getTag() : null;
+        View f = rows.getFocusedChild();
+        return f != null && f.isFocused() ? (String) f.getTag() : null;
     }
 
     /** One choice: its name on the left, its value on the right; OK changes it. */
-    private void add(String label, String value, String tag, Runnable run) {
-        add(label, value, tag, null, run);
+    void add(String label, String value, String tag, Runnable run) {
+        row(label, value, tag, null, run, false);
+    }
+
+    private void add(String label, String value, String tag, android.graphics.Bitmap thumb, Runnable run) {
+        row(label, value, tag, thumb, run, false);
+    }
+
+    /** The same with its name in red: a row whose second OK removes something for good. */
+    void danger(String label, String value, String tag, Runnable run) {
+        row(label, value, tag, null, run, true);
     }
 
     private static final int EDGE = 36;
+    /** Settings rows: 40 dp capsules, 6 dp apart. */
+    private static final int ROW_H = 40, ROW_GAP = 6;
+    /** A destructive row's name: coral on the glass, a deeper red on the white of focus. */
+    static final int DANGER = 0xFFFF6B61, DANGER_LIT = 0xFFD70015;
 
     /**
      * Rows near the list's top or bottom edge fade with how far they still are inside it, and are gone
@@ -2697,87 +2765,108 @@ final class SettingsPanel {
     }
 
     /**
-     * A photo's thumbnail, led by a small picture: the one already read, or a blank that fills in a
-     * moment later, read behind the screen (sixty of them decoded as the page was drawn held it).
+     * The Photos page reads thumbnails only for the rows on screen and half a screen either side, one
+     * at a time behind the screen; a row further off keeps its blank until it comes near. Decoding
+     * every photo as the page was drawn held sixty full-size thumbnails, and as many threads.
      */
-    private android.graphics.Bitmap photoThumb(String id) {
-        android.graphics.Bitmap b = thumbs.get(id);
-        if (b != null || !thumbsReading.add(id)) return b;
-        final String path = Mine.thumb(act, id).getPath();
-        new SafeThread(() -> {
-            final android.graphics.Bitmap read = android.graphics.BitmapFactory.decodeFile(path);
-            act.runOnUiThread(() -> {
-                thumbsReading.remove(id);
-                if (read == null || !isOpen()) return;
-                thumbs.put(id, read);
-                View row = rows.findViewWithTag("p:" + id);
-                View iv = row != null ? row.findViewWithTag("thumb") : null;
-                if (iv instanceof android.widget.ImageView) ((android.widget.ImageView) iv).setImageBitmap(read);
-            });
-        }, "photo-thumb").start();
-        return null;
+    private void wantThumbs() {
+        if (scroll == null || rows == null || !page.equals("photos") || !isOpen()) return;
+        for (int i = 0; i < rows.getChildCount(); i++) {
+            View r = rows.getChildAt(i);
+            Object tag = r.getTag();
+            if (!(tag instanceof String) || !((String) tag).startsWith("p:") || !near(r)) continue;
+            String id = ((String) tag).substring(2);
+            if (thumbs.get(id) == null) readThumb(id);
+        }
+    }
+
+    private boolean near(View row) {
+        int h = scroll.getHeight(), y = scroll.getScrollY() - rows.getTop();
+        return row.getBottom() >= y - h / 2 && row.getTop() <= y + h + h / 2;
     }
 
     private final java.util.Set<String> thumbsReading = new java.util.HashSet<>();
+    private java.util.concurrent.ExecutorService thumbReader;
 
-    private void add(String label, String value, String tag, android.graphics.Bitmap thumb, Runnable run) {
-        Pad p = new Pad(act, null, 16, 0f);
+    private void readThumb(String id) {
+        if (!thumbsReading.add(id)) return;
+        if (thumbReader == null) thumbReader = Compat.background("photo-thumbs", android.os.Process.THREAD_PRIORITY_BACKGROUND);
+        final android.content.Context app = act.getApplicationContext();
+        thumbReader.execute(() -> {
+            final android.graphics.Bitmap read = Mine.smallThumb(app, id);
+            act.runOnUiThread(() -> {
+                thumbsReading.remove(id);
+                View row = rows.findViewWithTag("p:" + id);
+                // scrolled far past while it was read: kept, it would push out a picture on screen
+                if (read == null || !isOpen() || !page.equals("photos") || row == null || !near(row)) return;
+                thumbs.put(id, read);
+                View iv = row.findViewWithTag("thumb");
+                if (iv instanceof android.widget.ImageView) ((android.widget.ImageView) iv).setImageBitmap(read);
+            });
+        });
+    }
+
+    private void row(String label, String value, String tag, android.graphics.Bitmap thumb, Runnable run, boolean danger) {
+        Pad p = new Pad(act, null, ROW_H / 2f, 0f);
         p.row = true;
         p.plainColor = 0x1AFFFFFF;
         p.edgeLight = false;
-        p.focusScale = 1.03f;
         p.setTag(tag);
         LinearLayout r = new LinearLayout(act);
         r.setGravity(Gravity.CENTER_VERTICAL);
         boolean picture = thumb != null || tag.startsWith("p:");
-        r.setPadding(Ui.dp(picture ? 6 : 16), 0, Ui.dp(16), 0);
+        r.setPadding(Ui.dp(picture ? 6 : 18), 0, Ui.dp(18), 0);
         if (picture) {
             android.widget.ImageView iv = new android.widget.ImageView(act);
             iv.setTag("thumb");
             if (thumb != null) iv.setImageBitmap(thumb);
-            else iv.setBackgroundColor(0x14FFFFFF);
+            iv.setBackgroundColor(0x14FFFFFF);
             iv.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
             iv.setClipToOutline(true);
+            // concentric with the capsule: its radius less the 6 dp inset
             iv.setOutlineProvider(new android.view.ViewOutlineProvider() {
                 @Override
                 public void getOutline(View v, android.graphics.Outline o) {
-                    o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(7));
+                    o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), v.getHeight() / 2f);
                 }
             });
-            LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(Ui.dp(50), Ui.dp(28));
+            LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(Ui.dp(50), Ui.dp(ROW_H - 12));
             tl.rightMargin = Ui.dp(12);
             r.addView(iv, tl);
         }
-        TextView name = p.tint(Ui.text(act, 13.5f, Ui.semibold, 0xFFFFFFFF), 1f);
+        TextView name = Ui.text(act, Ui.CALLOUT, Ui.medium, danger ? DANGER : 0xFFFFFFFF);
+        if (danger) p.fillListener = f -> name.setTextColor(Ui.mix(DANGER, DANGER_LIT, f));
+        else p.tint(name, 1f);
         name.setText(label);
         Ui.shrinkToWidth(name, 11f);
         r.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         if (!value.isEmpty()) {
-            TextView v = p.tint(Ui.text(act, 12, Ui.medium, 0xFFFFFFFF), 0.7f);
+            TextView v = p.tint(Ui.text(act, 14, Ui.medium, 0xFFFFFFFF), 0.7f);
             v.setText(value);
             v.setEllipsize(TextUtils.TruncateAt.END);
             v.setMaxWidth(Ui.dp(170));
             Ui.shrinkToWidth(v, 10f);
-            r.addView(v);
+            LinearLayout.LayoutParams vl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            vl.leftMargin = Ui.dp(10);
+            r.addView(v, vl);
         }
         p.addView(r, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         p.onClick = run;
         p.setOnFocusChangeListener((v, has) -> {
             if (has) explain(tag);
         });
-        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(35));
-        l.topMargin = Ui.dp(4);
+        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ROW_H));
+        l.topMargin = Ui.dp(ROW_GAP);
         rows.addView(p, l);
     }
 
     /** A quiet label over a group of rows; never focused, so the remote moves straight past it. */
-    private void section(String name) {
-        TextView t = Ui.caps(act, 7.5f, 0x8CFFFFFF, 0.3f);
+    void section(String name) {
+        TextView t = Ui.caps(act, Ui.FLOOR, 0x99FFFFFF, 0.12f);
         t.setText(name);
-        t.setPadding(Ui.dp(16), 0, 0, 0);
+        t.setPadding(Ui.dp(18), 0, 0, 0);
         LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        l.topMargin = Ui.dp(rows.getChildCount() == 0 ? 2 : 16);
-        l.bottomMargin = Ui.dp(2);
+        l.topMargin = Ui.dp(rows.getChildCount() == 0 ? 4 : 20);
         rows.addView(t, l);
     }
 
@@ -2788,6 +2877,12 @@ final class SettingsPanel {
         if (text.contentEquals(help.getText())) return;
         final String next = text;
         help.animate().cancel();
+        // LOW swaps the sentence at once: a fade on every step of a held Down costs frames there
+        if (Ui.light) {
+            help.setAlpha(1f);
+            help.setText(next);
+            return;
+        }
         help.animate().alpha(0f).setDuration(90).setStartDelay(0).withEndAction(() -> {
             help.setText(next);
             help.animate().alpha(1f).setDuration(180).setStartDelay(0).setInterpolator(Ui.SOFT).start();
@@ -2795,8 +2890,8 @@ final class SettingsPanel {
     }
 
     private static final java.util.Map<String, Integer> HELP = new java.util.HashMap<>();
-    /** Sentences for rows made on the fly (each app on Free up memory), by tag. */
-    private final java.util.Map<String, String> rowHelp = new java.util.HashMap<>();
+    /** Sentences for rows made on the fly (each app on Free up memory, each trust page's row), by tag. */
+    final java.util.Map<String, String> rowHelp = new java.util.HashMap<>();
 
     static {
         // Settings
@@ -2819,6 +2914,11 @@ final class SettingsPanel {
         HELP.put("trouble", R.string.help_trouble);
         HELP.put("backup", R.string.help_backup);
         HELP.put("updates", R.string.help_updates);
+        HELP.put(TrustPages.PRIVACY, R.string.privacy_note);
+        HELP.put(TrustPages.PERMS, R.string.permissions_note);
+        HELP.put(TrustPages.A11Y, R.string.home_keys_about);
+        HELP.put(TrustPages.DEBUGGING, R.string.debugging_note);
+        HELP.put(TrustPages.ABOUT, R.string.about_note);
         HELP.put("remove", R.string.help_remove);
         // Home screen
         HELP.put("layout", R.string.help_layout);

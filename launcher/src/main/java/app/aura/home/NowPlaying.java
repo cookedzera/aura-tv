@@ -82,6 +82,7 @@ final class NowPlaying extends FrameLayout {
 
     /** Nothing pressed for a while: only the cover and the song stay. */
     private final Runnable rest = this::rest;
+    private final Runnable follow = this::follow;
 
     private void rest() {
         if (!isOpen()) return;
@@ -225,12 +226,41 @@ final class NowPlaying extends FrameLayout {
         poke();
         handler.removeCallbacks(tick);
         handler.post(tick);
+        MediaWatch.follow(follow, true);
         return true;
+    }
+
+    /**
+     * Another player started playing and the remote's Play key would now reach it: the screen moves
+     * to that one in place, its words and colours fading in as for a new song.
+     */
+    private void follow() {
+        if (!open || controller == null) return;
+        MediaWatch.Playing p = MediaWatch.now(act);
+        if (p == null || !p.playing || p.controller == null || p.controller.getSessionToken().equals(controller.getSessionToken())) return;
+        try {
+            p.controller.registerCallback(watch, handler);
+        } catch (RuntimeException e) {
+            return;
+        }
+        try {
+            controller.unregisterCallback(watch);
+        } catch (RuntimeException ignored) {
+        }
+        controller = p.controller;
+        show();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        MediaWatch.follow(follow, false);
+        super.onDetachedFromWindow();
     }
 
     void close() {
         if (!open) return;
         open = false;
+        MediaWatch.follow(follow, false);
         handler.removeCallbacks(tick);
         handler.removeCallbacks(rest);
         if (controller != null) {
@@ -270,6 +300,9 @@ final class NowPlaying extends FrameLayout {
                     PlaybackState st = MediaWatch.state(controller);
                     if (st != null && st.getState() == PlaybackState.STATE_PLAYING) t.pause();
                     else t.play();
+                } else {
+                    // the player let go of it: the key goes where the remote's own would
+                    MediaWatch.dispatchKey(act, code);
                 }
                 return true;
             case android.view.KeyEvent.KEYCODE_MEDIA_NEXT:

@@ -93,6 +93,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private final ExecutorService recentWorker = Compat.pool("recents", 1);
     /** Top Shelf's cards, found as focus settles on an app: never queued behind the rest of home's work. */
     private final ExecutorService shelfWorker = Compat.background("shelf", android.os.Process.THREAD_PRIORITY_DEFAULT);
+    /** The tiles' pictures, painted one at a time, nearest first: just below the screen's priority, as the logos are. */
+    private final ExecutorService tilePainter = Compat.background("tiles", android.os.Process.THREAD_PRIORITY_DEFAULT + 4);
     private final int[] loc = new int[2];
 
     private SharedPreferences prefs;
@@ -102,6 +104,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private Scrim scrim;
     private Splash splash;
     private GlassFrame sidebar, status, tip, hud;
+    private Banner banner;
     private Widget skyW, fyW, tdW;
     /** The tvOS style: apps alone on a frosted dock low on the screen; the sidebar hidden, or sliding in when wanted. */
     private boolean dock, sideHidden, sideIn = true;
@@ -416,6 +419,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     protected void onStart() {
         super.onStart();
         roomMade = false;
+        // what was let go behind the app comes back behind the screen: Top Shelf's cards and the
+        // tiles on screen at once, the rows and columns past them once the remote rests
+        started = true;
+        filledAt = SystemClock.uptimeMillis();
+        paintNext();
         watchVpn(true);
         IntentFilter f = new IntentFilter(Intent.ACTION_TIME_TICK);
         f.addAction(Intent.ACTION_TIME_CHANGED);
@@ -645,6 +653,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     protected void onPause() {
         super.onPause();
         resumed = false;
+        if (banner != null) banner.clear();
+        if (allApps != null) allApps.pause();
         handler.removeCallbacks(focusCheck);
         handler.removeCallbacks(focusBack);
         focusBack.run();
@@ -678,6 +688,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     @Override
     protected void onStop() {
         super.onStop();
+        started = false;
+        handler.removeCallbacks(paintNext);
+        handler.removeCallbacks(tidyTiles);
+        if (Perf.light(this)) shed();
         // out of sight: full size again, so home never comes back with a snap
         comeForward(false);
         keepFocus();
@@ -751,6 +765,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         worker.shutdown();
         recentWorker.shutdown();
         shelfWorker.shutdown();
+        tilePainter.shutdown();
         super.onDestroy();
     }
 
@@ -777,6 +792,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 backdrop.trim(TRIM_MEMORY_MODERATE);
                 Previews.dropFresh();
                 Continue.trim();
+                shed();
+                if (allApps != null) allApps.trim();
             }
             return;
         }
@@ -905,10 +922,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (switcher.isOpen()) closeSwitcher();
             if (ccOpen) closeCc(false);
             if (settings.isOpen()) closeSettings();
+            boolean was = allApps != null && allApps.isOpen();
             closeOverlays();
             if (editing) stopEdit();
             wake();
-            focusGrid(0);
+            if (!was) openAllApps();
             return;
         }
         // see the first-run welcome again: am start -n app.aura.home/.HomeActivity --ez aura_welcome true
@@ -1029,12 +1047,29 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         home.addView(pageDots, frame(Ui.dp(WIDGET_ROW), Ui.dp(10), Gravity.BOTTOM | Gravity.START, Ui.dp(PAGE_X), 0, 0, Ui.dp(4)));
         buildSidebar();
         buildStatus();
+        // a notification's banner: above home, below every panel, and only while nothing covers home
+        banner = new Banner(this, backdrop, new Banner.Host() {
+            @Override
+            public boolean bannerRoom() {
+                return resumed && splash == null && welcome == null && !introPending && !photo && !quietScreen
+                        && !ccOpen && !editing && !overlayOpen();
+            }
+
+            @Override
+            public void bannerShown(boolean shown) {
+                boolean rest = dock ? topIn : greetingShown;
+                status.animate().alpha(shown || !rest ? 0f : 1f).setDuration(Ui.CLOSE).setStartDelay(0)
+                        .setInterpolator(Ui.EASE_STANDARD).start();
+            }
+        });
+        root.addView(banner, root.indexOfChild(home) + 1, Banner.place());
 
         // photo mode: the photograph's story and the time, as in the screensaver
         story = new Story(this, backdrop);
         story.setAlpha(0f);
         root.addView(story, match());
         cc = new ControlCenter(this, this);
+        cc.systemPanel = HomeKeys::systemPanel;
         root.addView(cc.panel, match());
         buildTopCc();
         applyLayout();
@@ -1073,6 +1108,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     findPanel.type(text);
                     return true;
                 }
+                if (allApps != null && allApps.type(text)) return true;
                 if (settings.isOpen()) closeSettings();
                 if (ccOpen) closeCc(false);
                 if (switcher.isOpen()) closeSwitcher();
@@ -1624,8 +1660,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             tdArt.setImageBitmap(p.art);
             tdArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
             tdArt.setPadding(0, 0, 0, 0);
-        } else if (owner != null && owner.icon != null) {
-            tdArt.setImageDrawable(owner.icon);
+        } else if (owner != null && owner.icon() != null) {
+            tdArt.setImageDrawable(owner.icon());
             tdArt.setScaleType(ImageView.ScaleType.FIT_CENTER);
             tdArt.setPadding(Ui.dp(8), Ui.dp(8), Ui.dp(8), Ui.dp(8));
         } else {
@@ -2204,7 +2240,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         col.setPadding(0, Ui.dp(8), 0, Ui.dp(8));
         col.setClipChildren(false);
         col.setClipToPadding(false);
-        addSide(col, R.drawable.ic_apps, getString(R.string.apps), () -> focusGrid(0), true);
+        addSide(col, R.drawable.ic_apps, getString(R.string.apps), this::openAllApps, true);
         addSide(col, R.drawable.ic_search, getString(R.string.find_an_app), () -> openFind(""), false);
         addSide(col, R.drawable.ic_hdmi, getString(R.string.inputs_2), () -> openCc(true), false);
         addSide(col, R.drawable.ic_photo, getString(R.string.photo_mode), () -> setPhoto(true), false);
@@ -2458,7 +2494,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         for (int i = 0; i < real.size(); i++) {
             AppRepo.App a = real.get(i), b = saved.get(i);
             if (!a.pkg.equals(b.pkg) || !a.label.equals(b.label) || !String.valueOf(a.cls).equals(b.cls)
-                    || !String.valueOf(a.src).equals(b.src) || (a.banner != null) != (b.banner != null)
+                    || !String.valueOf(a.src).equals(b.src) || a.hasBanner() != b.hasBanner()
                     || (a.art != null) != (b.art != null)) return false;
         }
         return true;
@@ -2571,6 +2607,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         View had = getWindow().getCurrentFocus();
         stopPreview();
+        // the tiles on screen are painted at once; the rest wait for the first frames and a quiet remote
+        filledAt = SystemClock.uptimeMillis();
         Map<String, Cell> old = new java.util.HashMap<>();
         for (Cell c : cells) old.put(c.key(), c);
         // a new app size: every tile is painted again at its new size, none kept
@@ -2610,6 +2648,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             cell.card.setGrowRoom(GAP / 2f);
             cell.sig = sig;
             cell.card.glass = backdrop;
+            behindScreen(old, "input:" + id, cell);
             cell.card.tvos = tvosTiles;
             cell.setNameMode(nameMode, false);
             cell.card.sway = !calm;
@@ -2721,6 +2760,18 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
         }
         refreshWidgets(true);
+        windowMoved();
+        if (allApps != null) allApps.refresh();
+    }
+
+    /**
+     * A new tile's picture is painted behind the screen ({@link #paintNext}); until it lands it shows
+     * the picture of the tile it replaces under {@code key}, if there was one, so nothing goes blank.
+     */
+    private static void behindScreen(Map<String, Cell> old, String key, Cell cell) {
+        cell.card.deferred = true;
+        Cell was = old.get(key);
+        if (was != null) cell.card.standIn(was.card.art());
     }
 
     /** A folder's tile; {@code row} its category row, or null on the grid. */
@@ -2730,12 +2781,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         List<AppRepo.App> inside = folderApps(f);
         StringBuilder sig = new StringBuilder("folder|").append(style).append('|').append(dock).append('|').append(f.name);
         for (AppRepo.App a : inside) sig.append('|').append(System.identityHashCode(a));
-        Cell cell = reuse(old, row == null ? f.tag() : row + "|" + f.tag(), sig.toString());
+        String key = row == null ? f.tag() : row + "|" + f.tag();
+        Cell cell = reuse(old, key, sig.toString());
         if (cell == null) {
             cell = new Cell(this, Tiles.folder(inside, !glassTiles), 0xFF9AA6BA, f.name, f.tag(), TILE_W, TILE_H);
             cell.card.setGrowRoom(GAP / 2f);
             cell.sig = sig.toString();
             if (glassTiles) cell.card.glass = backdrop;
+            // a pane under the icons: nothing transparent
+            cell.card.opaque = !glassTiles;
+            behindScreen(old, key, cell);
             cell.card.tvos = style.equals("tvos") || dock;
         }
         cell.row = row;
@@ -2752,12 +2807,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // glass panes tinted in the app's colour, its colour vivid, midnight, or the original
         // banners; your own picture for it in any of them
         String sig = "app|" + style + "|" + dock + "|" + System.identityHashCode(a) + "|" + a.label;
-        Cell cell = reuse(old, row == null ? a.pkg : row + "|" + a.pkg, sig);
+        String key = row == null ? a.pkg : row + "|" + a.pkg;
+        Cell cell = reuse(old, key, sig);
         if (cell == null) {
             cell = new Cell(this, artFor(a), a.color, a.label, a.pkg, TILE_W, TILE_H);
             cell.card.setGrowRoom(GAP / 2f);
             cell.sig = sig;
             if (style.equals("glass") && a.art == null) cell.card.glass = backdrop;
+            // every look but glass covers the tile (tvOS, original, vivid, midnight), as does your own picture
+            cell.card.opaque = cell.card.glass == null && (a.art == null || !a.art.hasAlpha());
+            behindScreen(old, key, cell);
             cell.card.tvos = style.equals("tvos") || dock;
         }
         cell.row = row;
@@ -2769,6 +2828,194 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         cell.card.onClick = () -> launch(a.launch, card, a.label);
         cell.card.onLongClick = this::openMenu;
         return cell;
+    }
+
+    // ---- tile pictures: painted behind the screen, nearest first, kept near what's on screen ----
+
+    /** Home in sight, onStart to onStop: nothing is painted behind a video. Read on the painter thread too. */
+    private volatile boolean started;
+    /** The painter thread is at work: one picture at a time, so each next pick follows focus. */
+    private boolean painterBusy;
+    /** When home was last filled or came back: what isn't on screen waits 300 ms past this and past the last key. */
+    private long filledAt;
+    /** Apps before this in {@code apps} have had their pictures read back since home last went behind an app. */
+    private int readBackFrom;
+    private final Runnable paintNext = this::paintNext;
+    private final Runnable tidyTiles = this::tidyTiles;
+
+    /** What's on screen moved (a row, the page or its pages): tiles coming into view are painted now, far ones let go once the remote rests. */
+    private void windowMoved() {
+        paintNext();
+        handler.removeCallbacks(tidyTiles);
+        handler.postDelayed(tidyTiles, 300);
+    }
+
+    /**
+     * Hands the painter thread the next picture wanted, nearest first: Top Shelf's cards and the
+     * tiles on screen at once; the rows and columns just past them (one on LOW, two on HIGH) after the
+     * first frames, once the remote has rested for 300 ms; then the banners and icons let go behind a
+     * video, so Find, folders and the switcher don't read them back on the main thread.
+     */
+    private void paintNext() {
+        handler.removeCallbacks(paintNext);
+        if (painterBusy || !started || isDestroyed()) return;
+        Card next = null;
+        int best = Integer.MAX_VALUE;
+        for (Card c : shelf.cards) {
+            if (c.wantsArt()) {
+                next = c;
+                best = 0;
+                break;
+            }
+        }
+        int keep = Ui.light ? 1 : 2;
+        for (int i = 0; best > 0 && i < cells.size(); i++) {
+            Card c = cells.get(i).card;
+            if (!c.wantsArt()) continue;
+            int dr = rowsAway(i), dc = colsAway(i);
+            // the nearest row first, then the nearest column; the first on screen ends the search
+            if (dr > keep || dc > keep || dr * 8 + dc >= best) continue;
+            best = dr * 8 + dc;
+            next = c;
+        }
+        int back = -1;
+        for (int j = readBackFrom; next == null && j < apps.size(); j++) {
+            if (apps.get(j).gone()) {
+                back = j;
+                break;
+            }
+        }
+        if (next == null && back < 0) return;
+        long wait = Math.max(keyAt, filledAt) + 300 - SystemClock.uptimeMillis();
+        if (best > 0 && wait > 0) {
+            handler.postDelayed(paintNext, wait);
+            return;
+        }
+        if (next != null) paint(next);
+        else readBack(back);
+    }
+
+    /** {@code card}'s picture painted on the painter thread at the size it has (or will have), then handed over here. */
+    private void paint(final Card card) {
+        int[] size = card.size();
+        if (size == null) return;
+        final Tiles.Painter p = card.painter();
+        final int w = size[0], h = size[1];
+        final float res = card.res;
+        final boolean opaque = card.opaque;
+        painterBusy = true;
+        tilePainter.execute(() -> {
+            android.graphics.Bitmap b = null;
+            try {
+                b = Card.paintBehind(p, w, h, res, opaque);
+            } catch (RuntimeException e) {
+                Trouble.caught("painting a tile", e);
+            } finally {
+                final android.graphics.Bitmap out = b;
+                handler.post(() -> {
+                    painterBusy = false;
+                    // home went behind an app meanwhile: what it keeps there was decided without this one
+                    if (isDestroyed() || !started) return;
+                    if (card.painter() == p && card.wantsArt()) {
+                        if (out != null) card.take(out);
+                        else card.starve();
+                    }
+                    paintNext();
+                });
+            }
+        });
+    }
+
+    /** The banner and icon of {@code apps[at]}, let go behind a video, read back on the painter thread. */
+    private void readBack(int at) {
+        final AppRepo.App a = apps.get(at);
+        readBackFrom = at + 1;
+        painterBusy = true;
+        tilePainter.execute(() -> {
+            try {
+                a.banner();
+                a.icon();
+            } finally {
+                handler.post(() -> {
+                    painterBusy = false;
+                    paintNext();
+                });
+            }
+        });
+    }
+
+    /**
+     * Pictures kept only near what's on screen: tiles more than a row or column past it (two on HIGH;
+     * pages on the paged grid) let theirs go, and are painted again on the way back. Once the remote rests.
+     */
+    private void tidyTiles() {
+        if (!started) return;
+        int keep = Ui.light ? 1 : 2;
+        View f = getCurrentFocus();
+        for (int i = 0; i < cells.size(); i++) {
+            Card c = cells.get(i).card;
+            if (c != f && (rowsAway(i) > keep || colsAway(i) > keep)) c.release();
+        }
+        paintNext();
+    }
+
+    /**
+     * Light mode, home behind an app (a video, most often): the tiles keep only what home's first screen
+     * shows, the rows and columns on screen where it was left, and Top Shelf's cards let theirs go. After
+     * the picture the painter may be at, banners and icons go too where Aura's saved copy can bring them
+     * back (the switcher's apps keep their icons), and the lifted logos come down to 16. Home's return
+     * paints what's missing behind the screen, nearest first.
+     */
+    private void shed() {
+        handler.removeCallbacks(paintNext);
+        handler.removeCallbacks(tidyTiles);
+        for (int i = 0; i < cells.size(); i++) {
+            if (rowsAway(i) > 0 || colsAway(i) > 0) cells.get(i).card.release();
+        }
+        shelf.release();
+        Tiles.cap(16);
+        final Set<String> icons = new HashSet<>();
+        if (recentCache != null) icons.addAll(recentCache.keySet());
+        String last = HomeKeys.lastApp;
+        if (last != null) icons.add(last);
+        final List<AppRepo.App> all = new ArrayList<>(apps);
+        readBackFrom = 0;
+        tilePainter.execute(() -> {
+            for (AppRepo.App a : all) {
+                if (started) return;
+                a.letGo(icons.contains(a.pkg));
+            }
+        });
+        handler.removeCallbacks(collect);
+        handler.postDelayed(collect, 1000);
+    }
+
+    /**
+     * What home let go behind an app given back for real: with its services bound, Aura idles there at
+     * a priority Android doesn't collect for, so nothing else would.
+     */
+    private final Runnable collect = () -> {
+        if (!started) worker.execute(() -> Runtime.getRuntime().gc());
+    };
+
+    /** Rows between tile {@code i}'s and the nearest row on screen, where the page is heading: 0 when its row shows. */
+    private int rowsAway(int i) {
+        // a page of the paged grid shows both its rows
+        if (paged) return 0;
+        float screen = root.getHeight() > 0 ? root.getHeight() / Ui.density : 540f;
+        float pitch = rowH(), top = gridY() + rowOf(i) * pitch - scrollTarget;
+        if (top + TILE_H <= 0) return (int) ((-TILE_H - top) / pitch) + 1;
+        if (top >= screen) return (int) ((top - screen) / pitch) + 1;
+        return 0;
+    }
+
+    /** How far tile {@code i} lies outside what's shown across: columns along its row, pages on the paged grid; 0 on screen. */
+    private int colsAway(int i) {
+        if (rows && i < rowIdx.length && i < colIdx.length && rowIdx[i] < rowInfo.size()) {
+            int first = rowInfo.get(rowIdx[i]).first, col = colIdx[i];
+            return col < first ? first - col : Math.max(0, col - (first + COLS - 1));
+        }
+        return paged ? Math.abs(pageOf(i) - gridPage) : 0;
     }
 
     // ---- category rows ------------------------------------------------------------------------
@@ -3213,15 +3460,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (rows && i < rowIdx.length) {
             revealInRow(i);
             scrollTo(scrollFor(rowIdx[i]));
-            return;
-        }
-        if (!paged) {
+        } else if (!paged) {
             scrollTo(scrollFor(rowOf(i)));
-            return;
+        } else {
+            // the tvOS style's dock sits low: its second row lifts the page just enough to be seen whole
+            scrollTo(dock && rowOf(i) > 0 ? Math.max(0, gridY() + ROW_H + TILE_H + 44 - 540) : 0);
+            slideTo(pageOf(i));
         }
-        // the tvOS style's dock sits low: its second row lifts the page just enough to be seen whole
-        scrollTo(dock && rowOf(i) > 0 ? Math.max(0, gridY() + ROW_H + TILE_H + 44 - 540) : 0);
-        slideTo(pageOf(i));
+        windowMoved();
     }
 
     /** Slides the dock to page {@code p}: every page moves together, the glass following the photo. */
@@ -3728,7 +3974,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.dwellMs = watching ? 9_000 : 7_000;
             if (owner != null) {
                 s.color = owner.color;
-                s.icon = owner.icon;
+                s.icon = owner.icon();
                 if (s.art == null) s.mark = Tiles.glass(owner);
             }
             // a new episode of something you're already watching goes first
@@ -3775,7 +4021,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.sub = f.episode.isEmpty() ? getString(R.string.out_now_on, owner.label) : f.episode;
             s.art = x.art.get(i);
             s.color = owner.color;
-            s.icon = owner.icon;
+            s.icon = owner.icon();
             s.fresh = true;
             s.intent = owner.launch;
             s.label = owner.label;
@@ -3935,7 +4181,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         s.sub = sub;
         s.mark = Tiles.glass(a);
         s.color = a.color;
-        s.icon = a.icon;
+        s.icon = a.icon();
         s.intent = a.launch;
         s.label = a.label;
         s.dwellMs = 6_000;
@@ -3970,6 +4216,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     private void focusGrid(int i) {
+        if (allApps != null && allApps.isOpen()) {
+            allApps.regain();
+            return;
+        }
         if (cells.isEmpty() || ccOpen) return;
         gridAt = Math.max(0, Math.min(cells.size() - 1, i));
         reveal(gridAt);
@@ -4097,6 +4347,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             dashboard = shown;
             for (View v : new View[]{skyW, fyW, tdW}) sink(v, shown);
         }
+        windowMoved();
     }
 
     /**
@@ -4224,6 +4475,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private void onFocusMoved(View n) {
         if (n == null || ccOpen) return;
+        if (allApps != null && allApps.isOpen()) return;
         // waiting on the page while tiles are rebuilt: as far as home goes, nothing has moved
         if (n == parking) return;
         if (parking.isFocusable()) unpark();
@@ -4439,7 +4691,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return welcome != null || settings != null && settings.isOpen() || folderPanel != null && folderPanel.isOpen()
                 || switcher != null && switcher.isOpen() || nowPlaying != null && nowPlaying.isOpen()
                 || menu != null && menu.isOpen() || ask != null && ask.isOpen() || findPanel != null && findPanel.isOpen()
-                || weatherSheet != null && weatherSheet.isOpen() || who != null && who.isOpen();
+                || weatherSheet != null && weatherSheet.isOpen() || who != null && who.isOpen()
+                || allApps != null && allApps.isOpen();
     }
 
     private void setRacked(boolean on) {
@@ -4461,6 +4714,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         photo = on;
         backdrop.setPhotoMode(on);
         if (on) {
+            banner.clear();
             stopPreview();
             racked = true;
             backdrop.setDefocus(0f, 2000);
@@ -4534,7 +4788,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                         } else {
                             p.controller.getTransportControls().skipToPrevious();
                         }
-                    }
+                    } else MediaWatch.dispatchKey(this, code);
                 }
                 return true;
             }
@@ -4588,6 +4842,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             return super.dispatchKeyEvent(e);
         }
         if (!down) {
+            if (allApps != null && allApps.isOpen() && isArrow(code)) allApps.released();
             if (held && isArrow(code)) settle();
             if (code == swallowUp) {
                 swallowUp = -1;
@@ -4610,7 +4865,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     } else {
                         p.controller.getTransportControls().skipToPrevious();
                     }
-                }
+                } else MediaWatch.dispatchKey(this, code);
             }
             return swallow(code);
         }
@@ -4673,6 +4928,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 return swallow(code);
             }
             return super.dispatchKeyEvent(e);
+        }
+        if (allApps != null && allApps.isOpen() && !ccOpen && !settings.isOpen()) {
+            int handled = allApps.key(e);
+            if (handled == AllApps.DONE) return swallow(code);
+            if (handled == AllApps.VIEW) return super.dispatchKeyEvent(e);
         }
         // Menu over Settings closes Settings, rather than stacking Control Center on top of it
         if (first && settings.isOpen() && (code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS || code == KeyEvent.KEYCODE_INFO)) {
@@ -4913,6 +5173,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 else if (aim < first && x < first) first = (int) Math.floor(x + 0.01f);
                 r.first = Math.max(Math.max(0, col - COLS + 1), Math.min(Math.min(col, Math.max(0, r.count - COLS)), first));
                 slideRow(r, r.first);
+                windowMoved();
             }
         }
         View f = getCurrentFocus();
@@ -5703,6 +5964,109 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         focusTag(tag);
     }
 
+    /** All apps: made the first time it's opened (the sidebar's Apps, the remote's Apps key). */
+    private AllApps allApps;
+    private View beforeApps;
+
+    private void openAllApps() {
+        if (welcome != null || ccOpen) return;
+        if (allApps == null) {
+            allApps = new AllApps(this, new AllApps.Host() {
+                @Override
+                public List<AppRepo.App> apps() {
+                    return apps;
+                }
+
+                @Override
+                public boolean ready() {
+                    return appsReady;
+                }
+
+                @Override
+                public Tiles.Painter art(AppRepo.App a) {
+                    return artFor(a);
+                }
+
+                @Override
+                public Backdrop backdrop() {
+                    return backdrop;
+                }
+
+                @Override
+                public void launch(AppRepo.App a, View from) {
+                    HomeActivity.this.launch(a.launch, from, a.label);
+                }
+
+                @Override
+                public void open(Intent intent, View from) {
+                    HomeActivity.this.open(intent, from);
+                }
+
+                @Override
+                public void changed() {
+                    populate();
+                }
+
+                @Override
+                public void hud(int icon, String text) {
+                    HomeActivity.this.hud(icon, text);
+                }
+
+                @Override
+                public void find(String typed) {
+                    openFind(typed);
+                }
+
+                @Override
+                public void controlCenter() {
+                    openCc(false);
+                }
+
+                @Override
+                public void hiddenApps() {
+                    openSettings("apps");
+                }
+
+                @Override
+                public void closed() {
+                    afterAllApps();
+                }
+            });
+            // under Control Center, Settings, Find and the menus, which open over it
+            root.addView(allApps, root.indexOfChild(cc.panel), match());
+        }
+        if (allApps.isOpen()) return;
+        if (settings.isOpen()) closeSettings();
+        closeOverlays();
+        if (editing) stopEdit();
+        banner.clear();
+        stopPreview();
+        hideShelf();
+        handler.removeCallbacks(rack);
+        handler.removeCallbacks(goPhoto);
+        View f = getCurrentFocus();
+        beforeApps = f != null && home.findFocus() == f ? f : null;
+        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        stack.hold(true);
+        allApps.open();
+        handler.postDelayed(() -> {
+            if (allApps.isOpen() && !ccOpen) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
+        }, 400);
+    }
+
+    /** The page has closed: home draws again and takes the focus back where it was left. */
+    private void afterAllApps() {
+        // under an opaque Control Center they stay hidden: closing it brings them back
+        if (!ccOpen) for (View v : behindCc()) v.setVisibility(View.VISIBLE);
+        home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        stack.hold(false);
+        View back = beforeApps;
+        beforeApps = null;
+        if (ccOpen || overlayOpen()) return;
+        if (back == null || !back.isShown() || !back.requestFocus()) focusGrid(gridAt);
+        wake();
+    }
+
     private Find findPanel;
     private View beforeFind;
 
@@ -5763,6 +6127,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (findPanel.isOpen()) closeFind();
         if (ask.isOpen()) closeAsk();
         if (who.isOpen()) closeWho(true);
+        if (allApps != null && allApps.isOpen()) allApps.close();
     }
 
     /** Back on the name card: the name stays as it was. */
@@ -5993,6 +6358,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         beforeCc = getCurrentFocus();
         hideTip();
         ccOpen = true;
+        banner.clear();
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
@@ -6055,6 +6421,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     public void closeCc(boolean animate) {
         if (!ccOpen) return;
         ccOpen = false;
+        banner.clear();
         ccOver = null;
         if (ccShot != null) {
             ccShot.setImageDrawable(null);
@@ -6103,6 +6470,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (quietScreen) return;
         if (ccOpen) closeCc(false);
         quietScreen = true;
+        banner.clear();
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
         backdrop.stop();
@@ -6565,7 +6933,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             splash.setProgress(0.52f, getString(R.string.developing_the_photographs));
         } else {
             splash.setProgress(0.8f, getString(R.string.polishing_the_glass));
-            // after the next layout every tile has its artwork; only then reveal
+            // after the next layout, while the tiles on screen are painted behind it; then reveal
             page.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
                 @Override
                 public boolean onPreDraw() {

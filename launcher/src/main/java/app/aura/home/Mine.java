@@ -154,6 +154,21 @@ final class Mine {
         return new File(dir(c), safe(id) + "_t.jpg");
     }
 
+    /**
+     * A thumbnail at the size Settings shows it (a 50×28 dp row picture): half the stored size, in
+     * 16-bit colour, an eighth of the memory. Null when it can't be read.
+     */
+    static Bitmap smallThumb(Context c, String id) {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inSampleSize = 2;
+        o.inPreferredConfig = Bitmap.Config.RGB_565;
+        try {
+            return BitmapFactory.decodeFile(thumb(c, id).getPath(), o);
+        } catch (OutOfMemoryError e) {
+            return null;
+        }
+    }
+
     /** Where an upload is written while it arrives. */
     static File part(Context c) {
         File d = dir(c);

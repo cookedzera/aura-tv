@@ -61,6 +61,17 @@ final class Tiles {
         }
     }
 
+    /** Keeps the {@code n} logos used last and lets the rest go (Light mode, behind a video). */
+    static void cap(int n) {
+        synchronized (LOGOS) {
+            java.util.Iterator<String> it = LOGOS.keySet().iterator();
+            for (int drop = LOGOS.size() - n; drop > 0 && it.hasNext(); drop--) {
+                it.next();
+                it.remove();
+            }
+        }
+    }
+
     /**
      * Paints {@code p}, on the main thread; false when a logo it needs isn't lifted yet. That logo is
      * left out and lifted behind the screen, and {@code then} runs on the main thread once it's there.
@@ -81,7 +92,7 @@ final class Tiles {
     static Painter picture(Bitmap b) {
         // made once, not on every redraw of a tile that grows and glints as focus passes
         final android.graphics.Matrix m = new android.graphics.Matrix();
-        final Paint p = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
+        final Paint p = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
         return (c, w, h) -> {
             float k = Math.max(w / (float) b.getWidth(), h / (float) b.getHeight());
             m.setScale(k, k);
@@ -98,14 +109,17 @@ final class Tiles {
     }
 
     static Painter app(AppRepo.App a) {
-        if (a.banner != null) return (c, w, h) -> banner(c, a.banner, w, h);
-        return (c, w, h) -> icon(c, a.icon, a.color, w, h);
+        return (c, w, h) -> {
+            Drawable b = a.banner();
+            if (b != null) banner(c, b, w, h);
+            else icon(c, a.icon(), a.color, w, h);
+        };
     }
 
     /** The "All apps" card: warm charcoal, a fine grid glyph and the app count in tracked capitals. */
     static Painter index(Context ctx, int count) {
         return (c, w, h) -> {
-            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
             p.setShader(new LinearGradient(0, 0, w, h, 0xFF34302B, 0xFF151412, Shader.TileMode.CLAMP));
             c.drawRect(0, 0, w, h, p);
             p.setShader(new RadialGradient(w * 0.25f, -h * 0.3f, w, 0x26FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
@@ -144,8 +158,9 @@ final class Tiles {
     static Painter tvos(AppRepo.App a) {
         return (c, w, h) -> {
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG | Paint.FILTER_BITMAP_FLAG);
-            if (a.banner != null) {
-                banner(c, a.banner, w, h);
+            Drawable bn = a.banner();
+            if (bn != null) {
+                banner(c, bn, w, h);
                 p.setShader(new RadialGradient(w * 0.30f, -h * 0.35f, w * 0.90f, 0x24FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
                 c.drawRect(0, 0, w, h, p);
                 p.setShader(new LinearGradient(0, h * 0.65f, 0, h, 0x00000000, 0x22000000, Shader.TileMode.CLAMP));
@@ -159,8 +174,9 @@ final class Tiles {
             p.setShader(new RadialGradient(w * 0.28f, -h * 0.35f, w * 0.90f, 0x2EFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
             c.drawRect(0, 0, w, h, p);
             p.setShader(null);
-            if (a.icon == null) return;
-            Drawable d = a.icon.getConstantState() != null ? a.icon.getConstantState().newDrawable().mutate() : a.icon;
+            Drawable ic = a.icon();
+            if (ic == null) return;
+            Drawable d = ic.getConstantState() != null ? ic.getConstantState().newDrawable().mutate() : ic;
             int s = Math.round(h * 0.60f);
             float x = (w - s) / 2f, y = (h - s) / 2f, rad = s * 0.225f;
             Paint sh = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -252,7 +268,8 @@ final class Tiles {
             int glow = saturate(a.color, 1.15f, 0.75f);
             p.setShader(new RadialGradient(w * 0.5f, h * 1.15f, w * 0.7f, Ui.withAlpha(glow, 0x5C), Ui.withAlpha(glow, 0), Shader.TileMode.CLAMP));
             c.drawRect(0, 0, w, h, p);
-            if (a.icon == null) return;
+            Drawable ic = a.icon();
+            if (ic == null) return;
             int s = Math.round(h * 0.3f);
             float l = (w - s) / 2f, t = (h - s) / 2f;
             c.save();
@@ -260,7 +277,7 @@ final class Tiles {
             round.addRoundRect(new RectF(l, t, l + s, t + s), s * 0.22f, s * 0.22f, Path.Direction.CW);
             c.clipPath(round);
             // a copy: the icon's own bounds belong to the views already showing it
-            Drawable d = a.icon.getConstantState() != null ? a.icon.getConstantState().newDrawable().mutate() : a.icon;
+            Drawable d = ic.getConstantState() != null ? ic.getConstantState().newDrawable().mutate() : ic;
             d.setBounds(Math.round(l), Math.round(t), Math.round(l) + s, Math.round(t) + s);
             d.draw(c);
             c.restore();
@@ -285,7 +302,7 @@ final class Tiles {
      */
     static Painter folder(java.util.List<AppRepo.App> apps, boolean pane) {
         return (c, w, h) -> {
-            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
             if (pane) {
                 p.setShader(new LinearGradient(0, 0, w * 0.6f, h, 0xFF2A2E36, 0xFF121419, Shader.TileMode.CLAMP));
                 c.drawRect(0, 0, w, h, p);
@@ -295,12 +312,12 @@ final class Tiles {
             float x0 = (w - 2 * s - gap) / 2f, y0 = (h - 2 * s - gap) / 2f;
             for (int i = 0; i < 4; i++) {
                 float x = x0 + (i % 2) * (s + gap), y = y0 + (i / 2) * (s + gap);
-                if (i >= apps.size() || apps.get(i).icon == null) {
+                Drawable d = i < apps.size() ? apps.get(i).icon() : null;
+                if (d == null) {
                     p.setColor(0x1FFFFFFF);
                     c.drawRoundRect(x, y, x + s, y + s, s * 0.24f, s * 0.24f, p);
                     continue;
                 }
-                android.graphics.drawable.Drawable d = apps.get(i).icon;
                 d = d.getConstantState() != null ? d.getConstantState().newDrawable().mutate() : d;
                 Bitmap ib = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
                 d.setBounds(0, 0, s, s);
@@ -370,9 +387,12 @@ final class Tiles {
                 c.drawBitmap(logo, (lw - logo.getWidth()) / 2f, (lh - logo.getHeight()) / 2f, new Paint(Paint.FILTER_BITMAP_FLAG));
             }
             c.restore();
-        } else if (a.icon != null) {
+            return;
+        }
+        Drawable ic = a.icon();
+        if (ic != null) {
             // nothing clean to lift (a photograph, a pale badge with dark detail): the icon as it is
-            Drawable icon = a.icon.getConstantState() != null ? a.icon.getConstantState().newDrawable().mutate() : a.icon;
+            Drawable icon = ic.getConstantState() != null ? ic.getConstantState().newDrawable().mutate() : ic;
             int s = Math.round(h * 0.60f);
             Bitmap ib = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
             icon.setBounds(0, 0, s, s);
@@ -423,8 +443,12 @@ final class Tiles {
 
     /** The app's mark at {@code w}x{@code h} over its shadow: off its banner, else off its icon; null when neither has one. */
     private static Bitmap lifted(AppRepo.App a, int w, int h) {
-        Bitmap lifted = a.banner != null ? lift(a.banner, w, h) : null;
-        if (lifted == null && a.icon != null) lifted = liftIcon(a.icon, h);
+        Drawable banner = a.banner();
+        Bitmap lifted = banner != null ? lift(banner, w, h) : null;
+        if (lifted == null) {
+            Drawable icon = a.icon();
+            if (icon != null) lifted = liftIcon(icon, h);
+        }
         return lifted != null ? withShadow(lifted) : null;
     }
 
@@ -674,7 +698,7 @@ final class Tiles {
     }
 
     private static void icon(Canvas c, Drawable icon, int color, int w, int h) {
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
         p.setShader(new LinearGradient(0, 0, w * 0.6f, h, Ui.mix(color, 0xFF000000, 0.35f), Ui.mix(color, 0xFF000000, 0.8f),
                 Shader.TileMode.CLAMP));
         c.drawRect(0, 0, w, h, p);

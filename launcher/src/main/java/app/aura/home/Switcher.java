@@ -266,7 +266,7 @@ final class Switcher extends FrameLayout {
      */
     private void dress(AppRepo.App a, Bitmap shot) {
         zoomBg.setColors(new int[]{Ui.mix(a.color, 0xFF000000, 0.35f), Ui.mix(a.color, 0xFF000000, 0.78f)});
-        zoomIcon.setImageDrawable(a.icon);
+        zoomIcon.setImageDrawable(a.icon());
         zoomName.setText(a.label);
         zoomIcon.setScaleX(1f);
         zoomIcon.setScaleY(1f);
@@ -820,7 +820,7 @@ final class Switcher extends FrameLayout {
         cg.setCornerRadius(Ui.dpf(11));
         chip.setBackground(cg);
         ImageView icon = new ImageView(act);
-        icon.setImageDrawable(a.icon);
+        icon.setImageDrawable(a.icon());
         GradientDrawable clip = new GradientDrawable();
         clip.setCornerRadius(Ui.dpf(6));
         icon.setClipToOutline(true);
