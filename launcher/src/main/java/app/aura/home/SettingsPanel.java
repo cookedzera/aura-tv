@@ -1692,16 +1692,15 @@ final class SettingsPanel {
             go("debloat");
         });
         if (Adb.on(act)) add(act.getString(R.string.switch_everything_on), setupNote.isEmpty() ? act.getResources().getQuantityString(R.plurals.n_extras, Adb.setup(act).length, Adb.setup(act).length) : setupNote, "adb:setup", this::adbSetup);
-        // the TV's own home screen, switched off (or back on): Google TV's in its own words, any other by its name
+        // the TV's own home screen, switched off (never Google TV's or Xiaomi's), or back on: Google TV's
+        // in its own words, any other by its name
         Object[] home = tvHomeInfo();
         String tvHome = Adb.on(act) ? (String) home[0] : null;
         if (tvHome != null) {
             boolean gtv = tvHome.equals(Safety.GOOGLE_TV_HOME);
             String name = (String) home[1];
             if ((Boolean) home[2]) {
-                add(gtv ? act.getString(R.string.retire_google_tv_home) : act.getString(R.string.retire_tv_home_row, name),
-                        confirmRetire ? act.getString(gtv ? R.string.press_ok_again_voice_search : R.string.press_ok_again)
-                                : act.getString(gtv ? R.string.voice_search_side_panel_accounts : R.string.retire_tv_home_sub),
+                add(act.getString(R.string.retire_tv_home_row, name), act.getString(confirmRetire ? R.string.press_ok_again : R.string.retire_tv_home_sub),
                         "adb:gtv", () -> retireGoogleHome(true));
             } else {
                 add(gtv ? act.getString(R.string.bring_back_google_tv_home) : act.getString(R.string.bring_back_tv_home_row, name),
@@ -1960,7 +1959,7 @@ final class SettingsPanel {
 
     private boolean confirmRetire;
 
-    /** Switches Google TV's own launcher (and its setup recovery home) off or back on over ADB. */
+    /** Switches the TV's own home screen off, or back on, over ADB. */
     private void retireGoogleHome(boolean retire) {
         if (retire && !confirmRetire) {
             confirmRetire = true;
@@ -1980,7 +1979,7 @@ final class SettingsPanel {
                 } else if (!took) {
                     host.hud(R.drawable.ic_info, act.getString(R.string.android_didnt_allow_that_change));
                 } else if (retire) {
-                    host.hud(R.drawable.ic_check, gtv ? act.getString(R.string.google_tv_home_retired_bring) : act.getString(R.string.tv_home_retired, name));
+                    host.hud(R.drawable.ic_check, act.getString(R.string.tv_home_retired, name));
                 } else {
                     host.hud(R.drawable.ic_check, gtv ? act.getString(R.string.google_tv_home_is_back) : act.getString(R.string.tv_home_back, name));
                 }
@@ -2009,11 +2008,7 @@ final class SettingsPanel {
     }
 
     private String adbNote() {
-        if (confirmRetire) {
-            Object[] home = tvHomeInfo();
-            return Safety.GOOGLE_TV_HOME.equals(home[0]) ? act.getString(R.string.voice_search_google_assistant_in)
-                    : act.getString(R.string.retire_tv_home_confirm, (String) home[1]);
-        }
+        if (confirmRetire) return act.getString(R.string.retire_tv_home_confirm, (String) tvHomeInfo()[1]);
         String s = adbState.isEmpty() && Adb.on(act) ? Adb.unguarded(act) ? Adb.OPEN_DOOR : Adb.OK : adbState;
         switch (s) {
             case "asking":

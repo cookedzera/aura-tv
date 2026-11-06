@@ -563,9 +563,6 @@
     <string name="waiting_for_you">Warte auf dich…</string>
     <string name="connect">Verbinden</string>
     <string name="switch_everything_on">Alles einschalten</string>
-    <string name="voice_search_side_panel_accounts">Sprachsuche, Seitenleiste &amp; Konten hören auf</string>
-    <string name="press_ok_again_voice_search">Nochmal OK · Sprachsuche &amp; Seitenleiste hören auf</string>
-    <string name="retire_google_tv_home">Google TV Home abschalten</string>
     <string name="restores_voice_search_side_panel">Bringt Sprachsuche, Seitenleiste &amp; Konten zurück</string>
     <string name="bring_back_google_tv_home">Google TV Home zurückholen</string>
     <string name="pair_with_a_code">Mit einem Code koppeln</string>
@@ -586,9 +583,7 @@
     <string name="everything_moves_twice_as_fast">Alles bewegt sich doppelt so schnell</string>
     <string name="couldnt_reach_the_tvs_debugging">Debugging-Dienst des TVs nicht erreichbar · zuerst verbinden</string>
     <string name="android_didnt_allow_that_change">Android hat das nicht erlaubt</string>
-    <string name="google_tv_home_retired_bring">Google TV Home abgeschaltet · Google TV Home zurückholen bringt Sprachsuche &amp; Konten zurück</string>
     <string name="google_tv_home_is_back">Google TV Home ist zurück · Sprachsuche wieder da</string>
-    <string name="voice_search_google_assistant_in">Sprachsuche (Google Assistant in YouTube &amp; Apps), die Seitenleiste von Google TV, Profile und manche Kontoseiten funktionieren nicht, solange Google TV Home abgeschaltet ist. Drück nochmal OK zum Abschalten, oder hol es hier jederzeit zurück.</string>
     <string name="if_android_asks_on_the">Fragt Android auf dem Bildschirm, wähle Von diesem Computer immer zulassen, dann OK.</string>
     <string name="aura_is_connected_to_this">Aura ist mit diesem TV verbunden. Alles einschalten gibt, was die PC-Einrichtung gibt, und das Schließen einer App im App-Wechsler beendet sie jetzt ganz.</string>
     <string name="careful_this_tv_let_aura">Vorsicht: Dieser TV hat Aura ohne Nachfrage hereingelassen. Alles in deinem WLAN kann ihn genauso steuern. Schalte alles ein, dann Netzwerk-Debugging aus.</string>
@@ -908,13 +903,10 @@
     <string name="home_couldnt_be_handed_over">Home ließ sich nicht übergeben. Einstellungen, Auf diesem TV einrichten kann es nochmal versuchen.</string>
     <string name="done_home_now_opens_aura_2">Fertig. Home öffnet jetzt Aura, und jedes Extra ist an.</string>
     <string name="try_again">Nochmal versuchen</string>
-    <string name="google_tv_home">GOOGLE TV HOME</string>
-    <string name="switch_off_google_tvs_home">Den Startbildschirm von Google TV abschalten?</string>
     <string name="nothing_is_deleted_settings_set">Nichts wird gelöscht. Einstellungen, Auf diesem TV einrichten holt ihn jederzeit zurück.</string>
     <string name="yes_switch_it_off">Ja, abschalten</string>
     <string name="no_keep_it">Nein, behalten</string>
     <string name="switching_it_off">Wird abgeschaltet…</string>
-    <string name="google_tvs_home_is_off">Der Startbildschirm von Google TV ist aus · Einstellungen, Auf diesem TV einrichten holt ihn zurück</string>
     <string name="aura_lost_the_connection_to">Aura hat die Verbindung zum Debugging verloren. Einstellungen, Auf diesem TV einrichten kann das später machen.</string>
     <string name="android_didnt_allow_it_on">Android hat es auf diesem TV nicht erlaubt. Aura öffnet trotzdem mit Home.</string>
     <string name="wireless_debugging_2">KABELLOSES DEBUGGING</string>
@@ -948,7 +940,6 @@
     <string name="switching_everything_on">Alles wird eingeschaltet</string>
     <string name="about_a_minute">etwa eine Minute</string>
     <string name="done_not_switched_on">Fertig. Home öffnet jetzt Aura. Nicht eingeschaltet: %1$s.</string>
-    <string name="retire_body">Aura ist jetzt dein Startbildschirm, aber der von Google TV läuft noch dahinter: die Profil- und Mitteilungstasten der Fernbedienung öffnen seine Bildschirme, und er hält etwa 150 MB Speicher belegt. Abgeschaltet öffnen diese Tasten stattdessen die von Aura. Google Assistant Sprachsuche, die Seitenleiste von Google und Google-Profile hören damit auf.</string>
     <string name="style_aura_about">Der Himmel draußen, was als Nächstes läuft und der Tag auf einen Blick, eine gläserne Seitenleiste, dann deine Apps.</string>
     <string name="style_tvos_about">Nur deine Apps in einem Milchglas-Dock unter dem Foto, ihre Serien darüber.</string>
     <string name="name_style">Stil %1$s</string>

@@ -18,8 +18,8 @@ import static org.junit.Assert.*;
 import static org.robolectric.Shadows.shadowOf;
 
 /**
- * Which of the TV's own home screens Aura offers to switch off: Google TV's, any other system home
- * (stock Android TV's, a maker's), and never Fire TV's, whose home is also where its settings live.
+ * Which of the TV's own home screens Aura offers to switch off: stock Android TV's and a maker's;
+ * never Google TV's (black screens and reboot loops) nor Fire TV's, whose home holds its settings.
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 30, application = AuraApp.class)
@@ -52,9 +52,9 @@ public class TvHomeTest {
     }
 
     @Test
-    public void googleTvHomeIsOfferedFirst() {
+    public void googleTvHomeIsNeverOffered() {
         Context c = systemHome("com.google.android.apps.tv.launcherx", "com.google.android.apps.tv.launcherx.home.HomeActivity");
-        assertEquals(Safety.GOOGLE_TV_HOME, Safety.tvHome(c));
+        assertNull("switching it off can leave a Google TV in a reboot loop", Safety.tvHome(c));
     }
 
     @Test

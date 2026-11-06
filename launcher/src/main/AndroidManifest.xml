@@ -57,12 +57,17 @@
             android:stateNotNeeded="true"
             android:clearTaskOnLaunch="true"
             android:excludeFromRecents="true"
+            android:resumeWhilePausing="true"
             android:windowSoftInputMode="adjustNothing"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale|layoutDirection|locale">
+            <!-- CVTE boards send Home (and boot) as COMMON_HOME; OPPO's TV firmware only promotes a
+                 home that declares MODERN_HOME. Never LAUNCHER here: the .Open alias gives that -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.COMMON_HOME" />
+                <category android:name="com.heytap.tv.launcher.category.MODERN_HOME" />
             </intent-filter>
         </activity>
 

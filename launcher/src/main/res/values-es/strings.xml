@@ -563,9 +563,6 @@
     <string name="waiting_for_you">Esperándote…</string>
     <string name="connect">Conectar</string>
     <string name="switch_everything_on">Activarlo todo</string>
-    <string name="voice_search_side_panel_accounts">Dejan de funcionar la búsqueda por voz, el panel lateral y las cuentas</string>
-    <string name="press_ok_again_voice_search">Pulsa OK otra vez · la búsqueda por voz y el panel lateral se detienen</string>
-    <string name="retire_google_tv_home">Retirar Google TV Home</string>
     <string name="restores_voice_search_side_panel">Recupera la búsqueda por voz, el panel lateral y las cuentas</string>
     <string name="bring_back_google_tv_home">Recuperar Google TV Home</string>
     <string name="pair_with_a_code">Vincular con un código</string>
@@ -586,9 +583,7 @@
     <string name="everything_moves_twice_as_fast">Todo se mueve el doble de rápido</string>
     <string name="couldnt_reach_the_tvs_debugging">No se pudo contactar con la depuración de la TV · conecta primero</string>
     <string name="android_didnt_allow_that_change">Android no permitió ese cambio</string>
-    <string name="google_tv_home_retired_bring">Google TV Home retirado · Recuperar Google TV Home devuelve la búsqueda por voz y las cuentas</string>
     <string name="google_tv_home_is_back">Google TV Home ha vuelto · búsqueda por voz recuperada</string>
-    <string name="voice_search_google_assistant_in">La búsqueda por voz (Google Assistant en YouTube y apps), el panel lateral de Google TV, los perfiles y algunas pantallas de cuenta dejan de funcionar mientras Google TV Home esté retirado. Pulsa OK otra vez para retirarlo, o recupéralo aquí cuando quieras.</string>
     <string name="if_android_asks_on_the">Si Android pregunta en pantalla, elige Permitir siempre desde este ordenador y luego OK.</string>
     <string name="aura_is_connected_to_this">Aura está conectado a esta TV. Activarlo todo concede lo mismo que la configuración desde PC, y cerrar una app en el selector ahora la detiene del todo.</string>
     <string name="careful_this_tv_let_aura">Cuidado: esta TV dejó entrar a Aura sin preguntar. Cualquier cosa en tu Wi-Fi puede controlarla igual. Actívalo todo y luego desactiva la depuración de red.</string>
@@ -908,13 +903,10 @@
     <string name="home_couldnt_be_handed_over">No se pudo pasar el botón Inicio. Ajustes, Configurar en esta TV puede intentarlo de nuevo.</string>
     <string name="done_home_now_opens_aura_2">Listo. Inicio ahora abre Aura, y todos los extras están activados.</string>
     <string name="try_again">Reintentar</string>
-    <string name="google_tv_home">GOOGLE TV HOME</string>
-    <string name="switch_off_google_tvs_home">¿Desactivar el inicio de Google TV?</string>
     <string name="nothing_is_deleted_settings_set">No se borra nada. Ajustes, Configurar en esta TV lo recupera cuando quieras.</string>
     <string name="yes_switch_it_off">Sí, desactivarlo</string>
     <string name="no_keep_it">No, mantenerlo</string>
     <string name="switching_it_off">Desactivando…</string>
-    <string name="google_tvs_home_is_off">El inicio de Google TV está desactivado · Ajustes, Configurar en esta TV lo recupera</string>
     <string name="aura_lost_the_connection_to">Aura perdió la conexión con la depuración. Ajustes, Configurar en esta TV puede hacerlo más tarde.</string>
     <string name="android_didnt_allow_it_on">Android no lo permitió en esta TV. Aura sigue abriéndose con Inicio.</string>
     <string name="wireless_debugging_2">DEPURACIÓN INALÁMBRICA</string>
@@ -948,7 +940,6 @@
     <string name="switching_everything_on">Activándolo todo</string>
     <string name="about_a_minute">cerca de un minuto</string>
     <string name="done_not_switched_on">Listo. Inicio ahora abre Aura. Sin activar: %1$s.</string>
-    <string name="retire_body">Aura ya es tu inicio, pero el de Google TV sigue funcionando detrás: los botones de perfil y notificaciones del mando abren sus pantallas, y ocupa unos 150 MB de memoria. Si lo desactivas, esos botones abren las de Aura. La búsqueda por voz de Google Assistant, el panel lateral de Google y los perfiles de Google se detienen con él.</string>
     <string name="style_aura_about">El cielo de fuera, qué ver después y el día de un vistazo, una barra lateral de cristal y luego tus apps.</string>
     <string name="style_tvos_about">Solo tus apps en un dock esmerilado bajo la foto, con sus series encima.</string>
     <string name="name_style">Estilo %1$s</string>

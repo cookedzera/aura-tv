@@ -139,6 +139,17 @@ public class HomeSafetyFixesTest {
     }
 
     @Test
+    public void xiaomisStopEverythingInStandbyStillBringsItBack() {
+        shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(android.Manifest.permission.WRITE_SECURE_SETTINGS);
+        Settings.Secure.putString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, "com.example.reader/.Reader");
+        Assert.assertTrue(HomeKeys.set(c, true));
+        // every app force-stopped: Android drops every app's services, Aura's and the reader's
+        Settings.Secure.putString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, "");
+        HomeKeys.relist(c);
+        Assert.assertTrue(HomeKeys.on(c));
+    }
+
+    @Test
     public void anEditByHandToTheListStands() {
         shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(android.Manifest.permission.WRITE_SECURE_SETTINGS);
         Settings.Secure.putString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, "com.example.reader/.Reader");

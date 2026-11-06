@@ -1,25 +1,45 @@
 package app.aura.home;
 
+import android.app.job.JobInfo;
 import android.app.job.JobParameters;
 import android.app.job.JobScheduler;
 import android.app.job.JobService;
+import android.content.ComponentName;
+import android.os.Handler;
+import android.os.Looper;
 
 import java.io.File;
 
 /**
  * Runs the background imports off the main thread whenever the system grants the job: a few new
- * photographs for the wall, then (weekly) the pool of Tonight's picks.
+ * photographs for the wall, then (weekly) the pool of Tonight's picks. On Android 11+ it also looks
+ * at the Home button service every quarter of an hour (see {@link #healing}).
  */
 public class DailyJob extends JobService {
     /** The space station flyovers' download job, from before the screensaver kept only photographs and quotes. */
     private static final int OLD_FLYOVER_JOB = 43;
+    static final int HEAL_JOB = 44;
     private static final java.util.concurrent.atomic.AtomicBoolean busy = new java.util.concurrent.atomic.AtomicBoolean();
+    private final Handler main = new Handler(Looper.getMainLooper());
     private Thread worker;
+    private Runnable heal;
 
     @Override
     public boolean onStartJob(JobParameters params) {
         if (params.getJobId() == OLD_FLYOVER_JOB) return false;
         final android.content.Context c = getApplicationContext();
+        if (params.getJobId() == HEAL_JOB) {
+            // without the secure-settings permission a heal can't switch anything: no use waking Aura for it
+            if (!HomeKeys.wanted(c) || !Compat.granted(c, android.Manifest.permission.WRITE_SECURE_SETTINGS)) {
+                healing(c, false);
+                return false;
+            }
+            if (HomeKeys.live) return false;
+            // after AuraApp's own look, 6 s into a process this job may just have started
+            heal = () -> HomeKeys.heal(c, () -> jobFinished(params, false));
+            main.postDelayed(heal, 6_500);
+            return true;
+        }
         // on a small TV (light mode) the downloads and photo resizing wait while something is
         // playing: the two cores and the little memory are the video's; Android tries again later
         if (Perf.light(c)) {
@@ -119,7 +139,31 @@ public class DailyJob extends JobService {
 
     @Override
     public boolean onStopJob(JobParameters params) {
+        if (params.getJobId() == HEAL_JOB) {
+            if (heal != null) main.removeCallbacks(heal);
+            return false;
+        }
         if (worker != null) worker.interrupt();
         return true;
+    }
+
+    /**
+     * On Android 11+ a Home button service whose process died stays dead until it's switched off and
+     * on, and nothing of Aura may run to see it: while the service is wanted ({@code on}), this job
+     * starts Aura every quarter of an hour, the shortest period Android allows, to heal it.
+     */
+    static void healing(android.content.Context c, boolean on) {
+        if (android.os.Build.VERSION.SDK_INT < 30) return;
+        JobScheduler js = Compat.svc(c, JobScheduler.class);
+        if (js == null) return;
+        try {
+            if (!on || !Compat.granted(c, android.Manifest.permission.WRITE_SECURE_SETTINGS)) js.cancel(HEAL_JOB);
+            else if (!Compat.pending(js, HEAL_JOB)) js.schedule(new JobInfo.Builder(HEAL_JOB, new ComponentName(c, DailyJob.class))
+                    .setPeriodic(15 * 60_000L)
+                    .setPersisted(true)
+                    .build());
+        } catch (RuntimeException ignored) {
+            // called from the Home button service as it connects, which mustn't go down with it
+        }
     }
 }

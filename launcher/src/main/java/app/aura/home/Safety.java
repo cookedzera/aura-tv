@@ -255,37 +255,20 @@ final class Safety {
     }
 
     /**
-     * Switches Google TV's own home screen (and its setup app's recovery Home, which would take the
-     * Home button otherwise) off, or back on, over ADB; Home goes to Aura either way. Off the main
-     * thread. Null when debugging couldn't be reached, else whether Android took the change. Nothing
-     * is uninstalled: {@link #restoreHome} switches it back on should Aura be removed or keep crashing.
+     * Switches Google TV's own home screen back on over ADB, and its setup app's recovery Home with
+     * it; Home stays Aura's. Off the main thread. Null when debugging couldn't be reached, else
+     * whether Android took the change. Never switched off ({@link #tvHome}).
      */
-    static Boolean retireGoogleHome(Context c, boolean retire) {
-        String me = c.getPackageName() + "/" + HomeActivity.class.getName();
-        // the setup app also pairs remotes, adds accounts and resets the TV: only its recovery home
-        // screens go, and only on Android 8 and earlier, where the shell may switch off a single
-        // screen. From Android 9 the shell may only switch whole apps, so every such command fails
-        // there (it used to, quietly, and the change was reported as taken anyway): the setup app
-        // is left as it is, and Home stays Aura's through set-home-activity and the Home button service
-        List<String> setupOff = new ArrayList<>(), setupOn = new ArrayList<>();
-        if (android.os.Build.VERSION.SDK_INT < 28) {
-            for (String comp : setupHomes(c)) {
-                setupOff.add("pm disable --user 0 " + comp);
-                setupOn.add("pm enable --user 0 " + comp);
-            }
-            if (setupOff.isEmpty()) setupOff.add("pm disable-user --user 0 " + GOOGLE_TV_SETUP);
-            setupOn.add("pm enable " + GOOGLE_TV_SETUP);
-        }
+    private static Boolean bringBackGoogleHome(Context c) {
         List<String> cmds = new ArrayList<>();
-        if (retire) {
-            cmds.add("am force-stop " + GOOGLE_TV_HOME);
-            cmds.add("pm disable-user --user 0 " + GOOGLE_TV_HOME);
-            cmds.addAll(setupOff);
-        } else {
-            cmds.add("pm enable " + GOOGLE_TV_HOME);
-            cmds.addAll(setupOn);
+        cmds.add("pm enable " + GOOGLE_TV_HOME);
+        // the setup app's recovery home screens (or the whole app, where it has none) went off with it
+        // only on Android 8 and earlier, where the shell may switch a single screen
+        if (android.os.Build.VERSION.SDK_INT < 28) {
+            for (String comp : setupHomes(c)) cmds.add("pm enable --user 0 " + comp);
+            cmds.add("pm enable " + GOOGLE_TV_SETUP);
         }
-        cmds.add("cmd package set-home-activity " + me);
+        cmds.add("cmd package set-home-activity " + c.getPackageName() + "/" + HomeActivity.class.getName());
         List<String> out = Adb.run(c, cmds.toArray(new String[0]));
         if (out == null || out.isEmpty()) return null;
         boolean ok = true;
@@ -305,29 +288,40 @@ final class Safety {
                 || !Prefs.device(c).getStringSet(Debloat.MINE, new java.util.HashSet<>()).isEmpty();
     }
 
+    private static final String XIAOMI_HOME = "com.mitv.tvhome";
+
     /**
-     * The package of the TV's own home screen that can be switched off, or null. Google TV's, else
-     * whatever system home the TV came with (Android TV's, a maker's). Never Fire TV's: Amazon's
-     * home is also where its settings live.
+     * The package of the TV's own home screen that can be switched off (or back on), or null.
+     * Google TV's, else whatever system home the TV came with (Android TV's, a maker's). Never Fire
+     * TV's: Amazon's home is also where its settings live. Google TV's and Xiaomi's only once they're
+     * off, to bring back: switched off, they have left TVs black, restarting, or needing a factory reset.
      */
     static String tvHome(Context c) {
         if (Trouble.fireTv(c)) return null;
-        if (hasGoogleTvHome(c)) return GOOGLE_TV_HOME;
-        String retired = Prefs.device(c).getString(RETIRED, null);
-        if (retired != null) return retired;
-        String home = original(c);
-        return home == null ? null : home.substring(0, home.indexOf('/'));
+        String pkg = hasGoogleTvHome(c) ? GOOGLE_TV_HOME : Prefs.device(c).getString(RETIRED, null);
+        if (pkg == null) {
+            String home = original(c);
+            if (home != null) pkg = home.substring(0, home.indexOf('/'));
+        }
+        return pkg != null && neverOff(pkg) && enabled(c, pkg) ? null : pkg;
     }
 
-    /** That home is there and switched on. */
-    static boolean tvHomeOn(Context c) {
-        String pkg = tvHome(c);
-        if (pkg == null) return false;
+    private static boolean neverOff(String pkg) {
+        return pkg.equals(GOOGLE_TV_HOME) || pkg.equals(XIAOMI_HOME);
+    }
+
+    private static boolean enabled(Context c, String pkg) {
         try {
             return c.getPackageManager().getApplicationInfo(pkg, 0).enabled;
         } catch (PackageManager.NameNotFoundException e) {
             return false;
         }
+    }
+
+    /** That home is there and switched on. */
+    static boolean tvHomeOn(Context c) {
+        String pkg = tvHome(c);
+        return pkg != null && enabled(c, pkg);
     }
 
     /** Its name, as the TV calls it ("Android TV Home"). */
@@ -347,12 +341,13 @@ final class Safety {
      * and the memory it held comes back. Disabled where the TV allows it; where it refuses (some
      * makers protect their launcher), taken off for this user only, the app staying on the TV, so
      * Bring back (or {@link #restoreHome}, should Aura leave) puts it back exactly. Off the main
-     * thread. Null when debugging couldn't be reached, else whether it took.
+     * thread. Null when debugging couldn't be reached, else whether it took; Google TV's and Xiaomi's
+     * are only ever brought back.
      */
     static Boolean retireTvHome(Context c, boolean retire) {
         String pkg = tvHome(c);
-        if (pkg == null || !pkg.matches("[A-Za-z0-9_.]+")) return false;
-        if (pkg.equals(GOOGLE_TV_HOME)) return retireGoogleHome(c, retire);
+        if (pkg == null || !pkg.matches("[A-Za-z0-9_.]+") || (retire && neverOff(pkg))) return false;
+        if (pkg.equals(GOOGLE_TV_HOME)) return bringBackGoogleHome(c);
         String me = c.getPackageName() + "/" + HomeActivity.class.getName();
         if (!retire) {
             List<String> out = Adb.run(c, "pm install-existing " + pkg, "pm enable " + pkg);

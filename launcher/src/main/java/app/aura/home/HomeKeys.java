@@ -2,12 +2,15 @@ package app.aura.home;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.hardware.input.InputManager;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.TextUtils;
@@ -35,7 +38,7 @@ import java.util.Map;
  * Seeing keys first has a price on some TVs: Android waits for this service's answer to every key
  * (up to half a second), and some firmware then delays releases or drops a held key's repeats. So
  * keys pass through here only while another app is in front, never on Aura's own screens, and not
- * at all while a game controller is connected.
+ * at all while a game controller or a mouse is connected, or the TV is in standby.
  *
  * Google TV and Fire TV keep Home for their own launcher even after Aura is chosen. There this
  * service is what makes Aura home: Home opens Aura instead (on Aura's own screens too, so those
@@ -46,6 +49,8 @@ public class HomeKeys extends AccessibilityService {
     private static final long TWICE_MS = 150, LATE_TWICE_MS = 340, HOLD_MS = 550, TEACH_MS = 30_000;
     /** How long the window in front must have stayed put before the key filter changes (see {@link #settleLeft}). */
     private static final long SETTLE_MS = 700;
+    /** How long after the screen comes on the filter is looked at again. */
+    private static final long WAKE_MS = 800;
     /** A picture of the app in front is refreshed on a press once the last is this old. */
     private static final long REFRESH_MS = 30_000;
     /** Remote buttons given an app: "k<keycode>" (or "s<scancode>" for keys with no code) to a package. */
@@ -80,7 +85,7 @@ public class HomeKeys extends AccessibilityService {
      */
     private boolean waiting, released, taken, holding, own;
     /** Whether keys come here at all (the XML asks for it; changed as apps come and go). */
-    private boolean filtering = true, pad;
+    private boolean filtering = true, pad, mouse;
     /** A volume button held down (its key code), and since when; 0 when none. */
     private int volumeHeld;
     private long volumeSince;
@@ -283,6 +288,8 @@ public class HomeKeys extends AccessibilityService {
     /** How late D-pad releases arrive, smoothed: the firmware's own delay, for Settings to show. */
     private long lag, lagN;
     private InputManager.InputDeviceListener devices;
+    /** The screen going off and coming on, heard while the service is connected. */
+    private BroadcastReceiver screen;
     /** Whether a package is an app you open (it has a launcher entry), cached: overlays and dialogs aren't. */
     private final HashMap<String, Boolean> openable = new HashMap<>();
     /** Whether a window's "package/class" is an activity, cached: an app's pop-ups and panels aren't. */
@@ -502,9 +509,28 @@ public class HomeKeys extends AccessibilityService {
             im.registerInputDeviceListener(devices, handler);
         }
         pad = padConnected();
+        mouse = mouseConnected();
+        // standby and waking: heard once, however often Android connects the service
+        if (screen == null) {
+            screen = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context c, Intent i) {
+                    if (Intent.ACTION_SCREEN_OFF.equals(i.getAction())) {
+                        asleep();
+                    } else {
+                        handler.removeCallbacks(refilter);
+                        handler.postDelayed(refilter, WAKE_MS);
+                    }
+                }
+            };
+            IntentFilter f = new IntentFilter(Intent.ACTION_SCREEN_OFF);
+            f.addAction(Intent.ACTION_SCREEN_ON);
+            registerReceiver(screen, f);
+        }
         if (front == null) front = lastForeground();
         refilter();
         ProfileButton.start(this);
+        DailyJob.healing(this, true);
     }
 
     /**
@@ -630,7 +656,8 @@ public class HomeKeys extends AccessibilityService {
     /**
      * On while another app is in front (or a button is being taught), off on Aura's own screens and
      * with a controller in. On Aura's own screens too where another launcher keeps Home, or once a
-     * button has an app: some buttons (Apps, Recents) never reach Aura's window.
+     * button has an app: some buttons (Apps, Recents) never reach Aura's window. Never with a mouse
+     * in that can't send Home (see {@link #mouseConnected}), teaching or not, nor in standby.
      */
     private void refilter() {
         // never between a press and its release: Android would see only half of it
@@ -640,8 +667,7 @@ public class HomeKeys extends AccessibilityService {
             return;
         }
         firstFront = null;
-        boolean want = teaching != null || !pad && (front == null ? takeover()
-                : !front.equals(getPackageName()) || !keys(this).isEmpty() || takeover());
+        boolean want = wish();
         if (want == filtering) return;
         long settle = settleLeft(SystemClock.uptimeMillis(), windowAt);
         if (settle > 0) {
@@ -668,6 +694,17 @@ public class HomeKeys extends AccessibilityService {
         filtering = want;
     }
 
+    /**
+     * Whether keys should come here now (see {@link #refilter}). The screen is asked about afresh
+     * each time: a wake whose broadcast never came can't leave the filter off.
+     */
+    boolean wish() {
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        return !mouse && (teaching != null || !pad && (front == null ? takeover()
+                : !front.equals(getPackageName()) || !keys(this).isEmpty() || takeover()))
+                && (pm == null || pm.isInteractive());
+    }
+
     private void refilterLater() {
         handler.removeCallbacks(refilter);
         handler.postDelayed(refilter, 220);
@@ -689,11 +726,15 @@ public class HomeKeys extends AccessibilityService {
         handler.post(refilter);
     }
 
-    /** A game controller plugged in or paired: games get its buttons as its own, not re-sent through here. */
+    /**
+     * A game controller or a mouse plugged in or paired: games get a controller's buttons as its
+     * own, not re-sent through here (and see {@link #mouseConnected}).
+     */
     private void padChanged() {
-        boolean now = padConnected();
-        if (now == pad) return;
-        pad = now;
+        boolean p = padConnected(), m = mouseConnected();
+        if (p == pad && m == mouse) return;
+        pad = p;
+        mouse = m;
         refilter();
     }
 
@@ -703,6 +744,59 @@ public class HomeKeys extends AccessibilityService {
             if (d == null || d.isVirtual()) continue;
             int s = d.getSources();
             if ((s & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD && (s & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK) return true;
+        }
+        return false;
+    }
+
+    /**
+     * A mouse plugged in or paired, or an air-mouse remote that can't send Home. With the filter on,
+     * Android sends every pointer movement through it too, re-sent from system_server, and two
+     * Android 11 firmwares couldn't take that: a Xiaomi froze and restarted, a TCL's system crashed
+     * at the first movement. Only from Android 10, where a device can say it's external: TCL's
+     * built-in pointer on Android 9 is always there. While one is in, Home twice, Home held, Apps,
+     * Recents and buttons given an app don't work inside apps.
+     */
+    @android.annotation.TargetApi(29)
+    private static boolean mouseConnected() {
+        if (android.os.Build.VERSION.SDK_INT < 29) return false;
+        java.util.List<Device> all = new java.util.ArrayList<>();
+        for (int id : InputDevice.getDeviceIds()) {
+            InputDevice d = InputDevice.getDevice(id);
+            if (d != null) all.add(new Device(d.isExternal(), d.isVirtual(), d.getSources(),
+                    d.hasKeys(KeyEvent.KEYCODE_HOME)[0], d.getVendorId(), d.getProductId()));
+        }
+        return mouseIn(all.toArray(new Device[0]));
+    }
+
+    /** An input device as {@link #mouseIn} weighs it. */
+    static final class Device {
+        final boolean external, virtual, home;
+        final int sources, vendor, product;
+
+        Device(boolean external, boolean virtual, int sources, boolean home, int vendor, int product) {
+            this.external = external;
+            this.virtual = virtual;
+            this.sources = sources;
+            this.home = home;
+            this.vendor = vendor;
+            this.product = product;
+        }
+    }
+
+    /**
+     * Whether one of these is a mouse that can't send Home: external (not a pointer the TV builds
+     * in), not virtual, and neither it nor a device with its vendor and product id (an air-mouse
+     * dongle's keyboard half) has a Home key. Ids 0 and 1 are what built-in receivers report: two
+     * devices sharing them needn't be one.
+     */
+    static boolean mouseIn(Device... all) {
+        for (Device d : all) {
+            if (!d.external || d.virtual || d.home || (d.sources & InputDevice.SOURCE_MOUSE) != InputDevice.SOURCE_MOUSE) continue;
+            boolean home = false;
+            if (d.vendor > 1 && d.product > 1) {
+                for (Device o : all) home |= o.home && o.vendor == d.vendor && o.product == d.product;
+            }
+            if (!home) return true;
         }
         return false;
     }
@@ -722,6 +816,9 @@ public class HomeKeys extends AccessibilityService {
 
     private boolean handleKey(KeyEvent e) {
         int key = e.getKeyCode();
+        // standby and waking are Android's: never held back, taught or given an app here
+        if (key == KeyEvent.KEYCODE_POWER || key == KeyEvent.KEYCODE_SLEEP || key == KeyEvent.KEYCODE_SOFT_SLEEP
+                || key == KeyEvent.KEYCODE_WAKEUP || key == KeyEvent.KEYCODE_TV_POWER) return false;
         boolean up = e.getAction() == KeyEvent.ACTION_UP;
         lastKeyAt = SystemClock.uptimeMillis();
         if (up && e.getRepeatCount() == 0 && key >= KeyEvent.KEYCODE_DPAD_UP && key <= KeyEvent.KEYCODE_DPAD_RIGHT) measure(e);
@@ -934,6 +1031,16 @@ public class HomeKeys extends AccessibilityService {
         }
     }
 
+    /**
+     * The TV going to standby: a press under way ends as at an interruption, but without going home
+     * in the dark, and the filter is let go until the screen comes on again (see {@link #wish}).
+     */
+    private void asleep() {
+        waiting = released = false;
+        firstFront = null;
+        onInterrupt();
+    }
+
     /** Switched off or updated mid-press: a press held back still goes home. */
     @Override
     public boolean onUnbind(Intent intent) {
@@ -955,6 +1062,10 @@ public class HomeKeys extends AccessibilityService {
         if (!on(this)) Prefs.device(this).edit().putBoolean("keys_wanted", false).apply();
         InputManager im = (InputManager) getSystemService(Context.INPUT_SERVICE);
         if (im != null && devices != null) im.unregisterInputDeviceListener(devices);
+        if (screen != null) {
+            unregisterReceiver(screen);
+            screen = null;
+        }
         return super.onUnbind(intent);
     }
 
@@ -1030,7 +1141,9 @@ public class HomeKeys extends AccessibilityService {
             case KeyEvent.KEYCODE_VOLUME_MUTE:
             case KeyEvent.KEYCODE_POWER:
             case KeyEvent.KEYCODE_SLEEP:
+            case KeyEvent.KEYCODE_SOFT_SLEEP:
             case KeyEvent.KEYCODE_WAKEUP:
+            case KeyEvent.KEYCODE_TV_POWER:
                 return false;
             default:
                 // numbers stay for channels, play and pause for the app playing
@@ -1219,16 +1332,24 @@ public class HomeKeys extends AccessibilityService {
     }
 
     /**
-     * Wanted, yet not listed. Back on when only Aura is gone and the other services are as Aura
-     * last saw them: its own switch-off with the switch back on cut short, or Android dropping it
-     * because Aura was force-stopped (firmware does that in standby) or the list was reset at a
-     * restart. Any other edit to the list was made by hand in Android's settings: that stands.
+     * Wanted, yet not listed. Back on when entries only went missing: Aura's own switch-off with the
+     * switch back on cut short, Android dropping the services of force-stopped apps (Xiaomi stops
+     * every app in standby, others' services with Aura's), or a list reset at a restart. A service
+     * added meanwhile means someone edited the list by hand in Android's settings: that stands.
      */
     static void relist(Context c) {
         if (!wanted(c) || on(c)) return;
         String was = Prefs.device(c).getString(LIST, null);
-        if (was == null || others(c, was).equals(others(c, list(c)))) set(c, true);
+        if (was == null || others(c, was).containsAll(others(c, list(c)))) set(c, true);
         else Prefs.device(c).edit().putBoolean("keys_wanted", false).apply();
+    }
+
+    /**
+     * Aura's process is back after a force-stop (Xiaomi's firmware stops every app so in standby),
+     * which took the service off the list: on again, where Aura may switch it (see {@link #relist}).
+     */
+    static void revive(Context c) {
+        if (!live && wanted(c) && takeover(c) && Compat.granted(c, android.Manifest.permission.WRITE_SECURE_SETTINGS)) relist(c);
     }
 
     /** The other services in a list, as a set: Android writes the list back in its own order and form. */

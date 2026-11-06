@@ -43,7 +43,7 @@ Everything happens on the TV, with the remote. No computer, no account.
 3. **Allow and install.** Android asks once to let Downloader install apps: switch it on, press <kbd>Back</kbd>, then *Install*. If Play Protect warns, choose *Install anyway*.
 4. **Open Aura.** A short welcome lets you pick a look and your extras, then makes Aura your home.
 
-On **Google TV** and **Fire TV** the TV keeps the Home button for its own launcher, so the welcome adds one more step: **On this TV** walks you through switching on USB debugging, then Aura sets everything up by itself. It can also switch Google TV's own home screen off for you, if you like: nothing is deleted, and it comes back from Settings any time.
+On **Google TV** and **Fire TV** the TV keeps the Home button for its own launcher, so the welcome adds one more step: **On this TV** walks you through switching on USB debugging, then Aura sets everything up by itself. Home opens Aura from then on, with the TV's own home screen left on: on Google TV and Xiaomi TVs, switching it off has left TVs black or stuck restarting, so Aura doesn't offer it there. Switched off by an earlier Aura? *Settings → Set up on this TV* brings it back.
 
 Updates arrive in *Settings → Updates*. To leave, use *Settings → Remove Aura*: it hands everything back to the TV first, then Android uninstalls it.
 
@@ -146,7 +146,7 @@ Any accessibility service, Aura's included, makes a few apps keep their player c
 <summary><b>The Profile button opens Google's screen</b></summary>
 <br>
 
-Some TVs' own software takes the Profile button before any app sees it. Run *Settings → Set up on this TV → Switch everything on* once, then restart the TV: Aura's *Who's watching* takes over. Switching Google TV's own home off (from the same page) hides Google's screen completely.
+Some TVs' own software takes the Profile button before any app sees it. Run *Settings → Set up on this TV → Switch everything on* once, then restart the TV: Aura's *Who's watching* takes over.
 </details>
 
 <details>

@@ -75,6 +75,9 @@ public class MediaWatch extends NotificationListenerService {
         connected = this;
         ensureWatching(getApplicationContext());
         notesChanged();
+        // Android connects this listener again soon after firmware force-stops Aura (Xiaomi's does in
+        // standby), which starts Aura's process: the force-stop took the Home button service off the list
+        HomeKeys.revive(getApplicationContext());
     }
 
     @Override

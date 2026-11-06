@@ -563,9 +563,6 @@
     <string name="waiting_for_you">Waiting for you…</string>
     <string name="connect">Connect</string>
     <string name="switch_everything_on">Switch everything on</string>
-    <string name="voice_search_side_panel_accounts">Voice search, side panel &amp; accounts stop</string>
-    <string name="press_ok_again_voice_search">Press OK again · voice search &amp; side panel stop</string>
-    <string name="retire_google_tv_home">Retire Google TV Home</string>
     <string name="restores_voice_search_side_panel">Restores voice search, side panel &amp; accounts</string>
     <string name="bring_back_google_tv_home">Bring back Google TV Home</string>
     <string name="pair_with_a_code">Pair with a code</string>
@@ -586,9 +583,7 @@
     <string name="everything_moves_twice_as_fast">Everything moves twice as fast</string>
     <string name="couldnt_reach_the_tvs_debugging">Couldn\'t reach the TV\'s debugging service · Connect first</string>
     <string name="android_didnt_allow_that_change">Android didn\'t allow that change</string>
-    <string name="google_tv_home_retired_bring">Google TV Home retired · Bring back Google TV Home restores voice search &amp; accounts</string>
     <string name="google_tv_home_is_back">Google TV Home is back · Voice search restored</string>
-    <string name="voice_search_google_assistant_in">Voice search (Google Assistant in YouTube &amp; apps), Google TV\'s side panel, profiles and some account screens stop working while Google TV Home is retired. Press OK again to retire it, or bring it back here any time.</string>
     <string name="if_android_asks_on_the">If Android asks on the screen, choose Always allow from this computer, then OK.</string>
     <string name="aura_is_connected_to_this">Aura is connected to this TV. Switch everything on grants what the PC setup grants, and closing an app in the switcher now stops it fully.</string>
     <string name="careful_this_tv_let_aura">Careful: this TV let Aura in without asking. Anything on your Wi-Fi can control it the same way. Switch everything on, then turn network debugging off.</string>
@@ -908,13 +903,10 @@
     <string name="home_couldnt_be_handed_over">Home couldn\'t be handed over. Settings, Set up on this TV can try again.</string>
     <string name="done_home_now_opens_aura_2">Done. Home now opens Aura, and every extra is on.</string>
     <string name="try_again">Try again</string>
-    <string name="google_tv_home">GOOGLE TV HOME</string>
-    <string name="switch_off_google_tvs_home">Switch off Google TV\'s home?</string>
     <string name="nothing_is_deleted_settings_set">Nothing is deleted. Settings, Set up on this TV brings it back any time.</string>
     <string name="yes_switch_it_off">Yes, switch it off</string>
     <string name="no_keep_it">No, keep it</string>
     <string name="switching_it_off">Switching it off…</string>
-    <string name="google_tvs_home_is_off">Google TV\'s home is off · Settings, Set up on this TV brings it back</string>
     <string name="aura_lost_the_connection_to">Aura lost the connection to debugging. Settings, Set up on this TV can do this later.</string>
     <string name="android_didnt_allow_it_on">Android didn\'t allow it on this TV. Aura still opens on Home.</string>
     <string name="wireless_debugging_2">WIRELESS DEBUGGING</string>
@@ -948,7 +940,6 @@
     <string name="switching_everything_on">Switching everything on</string>
     <string name="about_a_minute">about a minute</string>
     <string name="done_not_switched_on">Done. Home now opens Aura. Not switched on: %1$s.</string>
-    <string name="retire_body">Aura is your home now, but Google TV\'s still runs behind it: the remote\'s profile and notification buttons open its screens, and it keeps about 150 MB of memory busy. Switched off, those buttons open Aura\'s instead. Google Assistant voice search, Google\'s side panel and Google profiles stop with it.</string>
     <string name="style_aura_about">The sky outside, what to watch next and today at a glance, a glass sidebar, then your apps.</string>
     <string name="style_tvos_about">Just your apps on a frosted dock under the photograph, their shows rising above.</string>
     <string name="name_style">%1$s style</string>

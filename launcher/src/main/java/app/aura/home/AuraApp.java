@@ -20,10 +20,13 @@ public class AuraApp extends Application {
         // the process is back (a job, a cast, a remote command) after Android ended it for memory:
         // on Android 11+ that put the Home button service on a "crashed" list, where only a switch
         // off and on brings it back, and waiting for someone to open Aura's home screen could mean
-        // a Home button that does nothing for hours
-        if (android.os.Build.VERSION.SDK_INT >= 30 && HomeKeys.wanted(this)) {
+        // a Home button that does nothing for hours. A force-stop (firmware does that in standby)
+        // takes the service off the list instead
+        if (HomeKeys.wanted(this)) {
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                if (!HomeKeys.live && HomeKeys.on(this) && HomeKeys.takeover(this)) HomeKeys.heal(this);
+                if (!HomeKeys.on(this)) HomeKeys.revive(this);
+                else if (android.os.Build.VERSION.SDK_INT >= 30 && !HomeKeys.live && HomeKeys.takeover(this)) HomeKeys.heal(this);
+                DailyJob.healing(this, HomeKeys.wanted(this));
             }, 6000);
         }
     }

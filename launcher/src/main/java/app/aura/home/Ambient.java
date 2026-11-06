@@ -40,6 +40,19 @@ public class Ambient extends DreamService implements Backdrop.Listener {
             story.tick(Calendar.getInstance());
         }
     };
+    /**
+     * The TV going to standby: the video lets go of the decoder there and then, nothing new starts,
+     * and the screensaver ends. A TCL set whose screensaver (another app's) still held the decoder
+     * in standby couldn't be woken again.
+     */
+    private final BroadcastReceiver off = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            dreaming = false;
+            if (aerial != null) aerial.release();
+            finish();
+        }
+    };
     private final Runnable rotate = new Runnable() {
         @Override
         public void run() {
@@ -252,6 +265,7 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         startScene();
         if (!ticking) {
             registerReceiver(tick, new IntentFilter(Intent.ACTION_TIME_TICK));
+            registerReceiver(off, new IntentFilter(Intent.ACTION_SCREEN_OFF));
             ticking = true;
         }
         story.weather(Weather.now(this));
@@ -285,6 +299,7 @@ public class Ambient extends DreamService implements Backdrop.Listener {
         if (back != null) back.run();
         if (ticking) {
             unregisterReceiver(tick);
+            unregisterReceiver(off);
             ticking = false;
         }
         super.onDreamingStopped();
