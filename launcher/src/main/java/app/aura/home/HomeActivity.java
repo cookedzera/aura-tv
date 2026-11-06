@@ -33,6 +33,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
+import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -463,6 +464,47 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private final Runnable homeCheck = this::checkHome;
 
+    /** How often home has asked again for focus since it last came up, and whether its window is stepped out of focus right now. */
+    private int focusAsks;
+    private boolean focusStepped;
+    private final Runnable focusBack = () -> {
+        if (!focusStepped) return;
+        focusStepped = false;
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
+    };
+
+    /**
+     * From Android 11 a window is told it has focus by a message queued with the remote's keys, and
+     * Android empties that queue whenever an accessibility service changes its key filter. Lost, the
+     * message never comes again: home stays on screen and drops every press. So home in front
+     * without focus steps its window out of focus for a moment and back, and Android sends it again.
+     */
+    private final Runnable focusCheck = new Runnable() {
+        @Override
+        public void run() {
+            if (!resumed || isFinishing()) return;
+            if (hasWindowFocus()) {
+                if (focusAsks > 0) Trouble.note("FOCUS", "home was on screen without the remote; it answered again once asked");
+                focusAsks = 0;
+                return;
+            }
+            // twice at most: a system panel over home has the focus by right, and keeps it
+            if (focusAsks >= 2) return;
+            focusAsks++;
+            focusStepped = true;
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
+            // a frame apart, or Android sees no change and sends nothing
+            handler.postDelayed(focusBack, 150);
+            handler.postDelayed(this, 2500);
+        }
+    };
+
+    private void checkFocusSoon(long delay) {
+        handler.removeCallbacks(focusCheck);
+        focusAsks = 0;
+        handler.postDelayed(focusCheck, delay);
+    }
+
     /** Back from Android's Accessibility page: whether the Home button service came on there. */
     private void checkHome() {
         if (!HomeRole.waiting || !resumed) return;
@@ -515,6 +557,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // Home button in apps switched on but not running (Aura crashed since): bring it back
         handler.removeCallbacks(healKeys);
         handler.postDelayed(healKeys, 4000);
+        // after the Home button service has let its key filter go (it waits for home to settle)
+        checkFocusSoon(1500);
         if (Prefs.on(this, Prefs.STACK_AUTO) && fyW.getVisibility() == View.VISIBLE) stack.start();
         askForListings();
         showUpdate();
@@ -564,6 +608,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     protected void onPause() {
         super.onPause();
         resumed = false;
+        handler.removeCallbacks(focusCheck);
+        handler.removeCallbacks(focusBack);
+        focusBack.run();
         if (quietScreen) wakeQuietScreen();
         Trouble.watchMain(false);
         if (!shownThisVisit.isEmpty()) {
@@ -682,6 +729,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        // Home pressed on home: a remote that seemed dead gets its answer here
+        if (resumed) checkFocusSoon(600);
         if (quietScreen) {
             wakeQuietScreen();
             return;

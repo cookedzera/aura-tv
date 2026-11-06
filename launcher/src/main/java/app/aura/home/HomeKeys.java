@@ -44,6 +44,8 @@ import java.util.Map;
  */
 public class HomeKeys extends AccessibilityService {
     private static final long TWICE_MS = 150, LATE_TWICE_MS = 340, HOLD_MS = 550, TEACH_MS = 30_000;
+    /** How long the window in front must have stayed put before the key filter changes (see {@link #settleLeft}). */
+    private static final long SETTLE_MS = 700;
     /** A picture of the app in front is refreshed on a press once the last is this old. */
     private static final long REFRESH_MS = 30_000;
     /** Remote buttons given an app: "k<keycode>" (or "s<scancode>" for keys with no code) to a package. */
@@ -63,7 +65,7 @@ public class HomeKeys extends AccessibilityService {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private String front, firstFront;
-    private long firstUpAt;
+    private long firstUpAt, windowAt;
     /**
      * waiting: a first press is held back; released: it has let go; taken: this press's down was
      * kept from Android; holding: this press became a hold, and its release only needs swallowing;
@@ -561,6 +563,7 @@ public class HomeKeys extends AccessibilityService {
 
     private void handleEvent(AccessibilityEvent e) {
         if (e.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || e.getPackageName() == null) return;
+        windowAt = SystemClock.uptimeMillis();
         String pkg = e.getPackageName().toString();
         String cls = e.getClassName() != null ? e.getClassName().toString() : null;
         // Aura's home is up: whatever covered the wait for it goes (the cover's own window doesn't count)
@@ -632,6 +635,12 @@ public class HomeKeys extends AccessibilityService {
         boolean want = teaching != null || !pad && (front == null ? takeover()
                 : !front.equals(getPackageName()) || !keys(this).isEmpty() || takeover());
         if (want == filtering) return;
+        long settle = settleLeft(SystemClock.uptimeMillis(), windowAt);
+        if (settle > 0) {
+            handler.removeCallbacks(refilter);
+            handler.postDelayed(refilter, settle);
+            return;
+        }
         // changing the flag makes Android drop whatever key is held right now (and its repeats):
         // letting the filter go waits until the remote has been quiet for a moment
         if (!want && SystemClock.uptimeMillis() - lastKeyAt < 300) {
@@ -654,6 +663,17 @@ public class HomeKeys extends AccessibilityService {
     private void refilterLater() {
         handler.removeCallbacks(refilter);
         handler.postDelayed(refilter, 220);
+    }
+
+    /**
+     * How much longer the filter must wait after the window in front last changed. From Android 11
+     * a window is told it has focus by a message queued with the remote's keys, and Android empties
+     * that queue whenever the filter changes: changed just as a window comes up, the message is
+     * lost, and that window (Aura's home, or the app just opened) drops every key that follows.
+     */
+    static long settleLeft(long now, long windowAt) {
+        if (android.os.Build.VERSION.SDK_INT < 30 || windowAt <= 0) return 0;
+        return Math.max(0, windowAt + SETTLE_MS - now);
     }
 
     private void refilterSoon() {
@@ -794,7 +814,7 @@ public class HomeKeys extends AccessibilityService {
             handler.removeCallbacks(held);
             if (own) {
                 own = false;
-                if (!e.isCanceled()) openHome();
+                if (!e.isCanceled()) home();
                 refilterSoon();
                 return true;
             }
@@ -896,7 +916,14 @@ public class HomeKeys extends AccessibilityService {
         handler.removeCallbacks(refilter);
         handler.removeCallbacks(held);
         handler.removeCallbacks(goHome);
-        if (waiting) goHome.run();
+        // a press cut short may never send its release, and the filter mustn't keep waiting for one
+        holding = own = false;
+        if (waiting) {
+            goHome.run();
+        } else {
+            taken = false;
+            refilterSoon();
+        }
     }
 
     /** Switched off or updated mid-press: a press held back still goes home. */

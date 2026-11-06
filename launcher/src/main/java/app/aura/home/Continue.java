@@ -111,28 +111,26 @@ final class Continue {
     private static List<Item> read(Context c, int max) {
         List<Item> out = new ArrayList<>();
         List<String> pictures = new ArrayList<>();
-        java.util.Set<String> titles = new java.util.HashSet<>();
         // the Watch Next list arrived with Android 8
         if (android.os.Build.VERSION.SDK_INT < 26 || !Compat.granted(c, "android.permission.READ_TV_LISTINGS")) return out;
+        List<Row> rows = new ArrayList<>();
         try (Cursor cur = c.getContentResolver().query(TvContract.WatchNextPrograms.CONTENT_URI, COLUMNS, null, null,
                 TvContract.WatchNextPrograms.COLUMN_LAST_ENGAGEMENT_TIME_UTC_MILLIS + " DESC")) {
             if (cur == null) return out;
             long now = System.currentTimeMillis();
-            while (cur.moveToNext() && out.size() < max) {
+            while (cur.moveToNext()) {
                 String intentUri = cur.getString(8);
                 if (intentUri == null) continue;
                 // a watchlist entry (saved for later, never started) isn't something to continue; nor
                 // is a title the app last touched two months ago
                 if (cur.getInt(11) == TvContract.WatchNextPrograms.WATCH_NEXT_TYPE_WATCHLIST) continue;
-                long touched = cur.isNull(12) ? 0 : cur.getLong(12);
+                long touched = cur.isNull(12) ? 0 : engagedAt(cur.getLong(12));
                 if (touched > 0 && now - touched > STALE_MS) continue;
                 Item it = new Item();
                 it.title = cur.getString(0);
                 it.pkg = cur.getString(9);
                 // a kids' profile doesn't see what it hides, not even its half-watched shows
                 if (!HomeKeys.allowed(c, it.pkg)) continue;
-                // an app listing the same show twice (to continue, and its next episode): the newer one
-                if (!titles.add(it.pkg + "/" + key(it.title))) continue;
                 try {
                     it.intent = Intent.parseUri(intentUri, Intent.URI_INTENT_SCHEME);
                 } catch (java.net.URISyntaxException e) {
@@ -158,14 +156,45 @@ final class Continue {
                     parts.add(cur.getString(1));
                 }
                 it.sub = TextUtils.join("  ·  ", parts);
-                out.add(it);
-                pictures.add(cur.getString(5) != null ? cur.getString(5) : cur.getString(4));
+                rows.add(new Row(it, cur.getString(5) != null ? cur.getString(5) : cur.getString(4), touched));
             }
         } catch (Exception ignored) {
             // a provider that misbehaves never takes For You down with it
         }
+        // newest first by when each was really watched: the listing's own order puts a time written
+        // in seconds behind every other
+        Collections.sort(rows, (a, b) -> Long.compare(b.touched, a.touched));
+        java.util.Set<String> titles = new java.util.HashSet<>();
+        for (Row r : rows) {
+            if (out.size() >= max) break;
+            // an app listing the same show twice (to continue, and its next episode): the newer one
+            if (!titles.add(r.item.pkg + "/" + key(r.item.title))) continue;
+            out.add(r.item);
+            pictures.add(r.picture);
+        }
         loadAll(c, out, pictures);
         return out;
+    }
+
+    /** A row of the listing, kept until the whole list is read and put in order. */
+    private static final class Row {
+        final Item item;
+        final String picture;
+        final long touched;
+
+        Row(Item item, String picture, long touched) {
+            this.item = item;
+            this.picture = picture;
+            this.touched = touched;
+        }
+    }
+
+    /**
+     * When an app last touched a row, in milliseconds. A few apps write seconds into that column,
+     * which would read as a day in 1970 and drop the row as long forgotten.
+     */
+    static long engagedAt(long raw) {
+        return raw > 0 && raw < 10_000_000_000L ? raw * 1000 : raw;
     }
 
     /**

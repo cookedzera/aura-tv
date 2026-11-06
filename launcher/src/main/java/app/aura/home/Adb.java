@@ -1,7 +1,10 @@
 package app.aura.home;
 
+import android.content.ComponentName;
 import android.content.Context;
 import android.os.Build;
+import android.provider.Settings;
+import android.text.TextUtils;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -29,7 +32,9 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.RSAKeyGenParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import javax.crypto.Cipher;
 
@@ -587,14 +592,35 @@ final class Adb {
         return run(c, sb.toString()) != null;
     }
 
-    /** Stops one or more apps outright over a single connection, as Android's own Force stop does. False when Aura can't. */
+    /**
+     * Stops one or more apps outright over a single connection, as Android's own Force stop does,
+     * except an app with an accessibility service switched on. False when Aura can't.
+     */
     static boolean forceStop(Context c, String... pkgs) {
+        String services = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        List<String> cmds = stopCommands(c.getPackageName(), services, pkgs);
+        return !cmds.isEmpty() && run(c, cmds.toArray(new String[0])) != null;
+    }
+
+    /** The shell lines {@link #forceStop} sends, given the TV's list of switched-on accessibility services. */
+    static List<String> stopCommands(String self, String services, String... pkgs) {
+        // Android takes a force-stopped app's accessibility services off the switched-on list for
+        // good (a remote-button mapper would stay off until someone found the setting again), so
+        // such an app only loses what it runs in the background
+        Set<String> keepOn = new HashSet<>();
+        if (services != null) {
+            for (String s : TextUtils.split(services, ":")) {
+                ComponentName cn = ComponentName.unflattenFromString(s);
+                if (cn != null) keepOn.add(cn.getPackageName());
+            }
+        }
         List<String> cmds = new ArrayList<>();
         // a package name, and nothing a shell would read as more; never Aura itself, which would
         // end the very screen asking
         for (String pkg : pkgs) {
-            if (pkg != null && !pkg.equals(c.getPackageName()) && pkg.matches("[A-Za-z0-9_.]+")) cmds.add("am force-stop " + pkg);
+            if (pkg == null || pkg.equals(self) || !pkg.matches("[A-Za-z0-9_.]+")) continue;
+            cmds.add((keepOn.contains(pkg) ? "am kill " : "am force-stop ") + pkg);
         }
-        return !cmds.isEmpty() && run(c, cmds.toArray(new String[0])) != null;
+        return cmds;
     }
 }
