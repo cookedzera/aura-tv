@@ -1029,4 +1029,33 @@
     <string name="layout_category_rows_recommended">Linhas por categoria (recomendado)</string>
     <string name="layout_one_grid_folders">Uma grade, com pastas</string>
     <string name="rows_new_hint">Novidade: seus apps estão em linhas por categoria. Configurações, Tela inicial, Disposição traz a grade de volta.</string>
+    <string name="free_up_memory">Liberar memória</string>
+    <string name="free_up_memory_sub">Desligar apps que vieram com a TV</string>
+    <string name="debloat_note">Apps que vieram com a TV e ocupam memória com coisas de que o Aura não precisa. São desligados, não apagados: OK liga qualquer um de novo.</string>
+    <string name="debloat_nothing">Nada para desligar: nenhum dos apps que o Aura sabe desligar com segurança está nesta TV.</string>
+    <string name="switch_off_recommended">Desligar todos os recomendados</string>
+    <string name="apps_it_came_with">Apps que vieram com a TV</string>
+    <string name="turn_all_back_on">Ligar todos de novo</string>
+    <string name="n_mb">%1$d MB</string>
+    <string name="switching_off">Desligando…</string>
+    <string name="switching_on">Ligando de novo…</string>
+    <string name="db_autoinstall">Instala sozinho apps promovidos depois das atualizações.</string>
+    <string name="db_partnersetup">Configura as promoções do fabricante.</string>
+    <string name="db_feedback">Envia relatórios de falhas e de uso ao Google.</string>
+    <string name="db_screensaver">O protetor de tela do Google. O Aura tem o seu.</string>
+    <string name="db_print">Impressão, algo que uma TV não faz.</string>
+    <string name="db_calendar">Sincroniza uma agenda. Nada na TV a mostra.</string>
+    <string name="db_games">Google Play Games, o login e as conquistas.</string>
+    <string name="db_store">A loja do Google para alugar e comprar filmes, e suas promoções.</string>
+    <string name="db_demo">O modo de demonstração para lojas.</string>
+    <string name="db_vewd">A loja de apps Vewd (Opera TV) e seus anúncios.</string>
+    <string name="db_cast">Chromecast integrado: por ele celulares e computadores transmitem para a TV.</string>
+    <string name="db_cast_lose">Desligado, celulares e computadores não transmitem para esta TV (a reprodução pelo celular do próprio Aura continua).</string>
+    <string name="db_remote">Permite usar o app Google TV do celular como controle.</string>
+    <string name="db_remote_lose">Desligado, o app Google TV do seu celular não controla esta TV.</string>
+    <plurals name="n_apps"><item quantity="one">%1$d app</item><item quantity="other">%1$d apps</item></plurals>
+    <plurals name="n_apps_off"><item quantity="one">%1$d app desligado</item><item quantity="other">%1$d apps desligados</item></plurals>
+    <plurals name="n_apps_on"><item quantity="one">%1$d app ligado de novo</item><item quantity="other">%1$d apps ligados de novo</item></plurals>
+    <string name="db_acr">Reconhece o que passa na tela para direcionar anúncios (ACR).</string>
+    <string name="db_partnerrows">Coloca linhas patrocinadas do fabricante na tela inicial própria da TV.</string>
 </resources>

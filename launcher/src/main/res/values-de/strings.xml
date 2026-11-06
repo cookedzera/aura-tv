@@ -1029,4 +1029,33 @@
     <string name="layout_category_rows_recommended">Kategoriereihen (empfohlen)</string>
     <string name="layout_one_grid_folders">Ein Raster, mit Ordnern</string>
     <string name="rows_new_hint">Neu: Deine Apps stehen in Kategoriereihen. Einstellungen, Startbildschirm, Aufbau bringt das Raster zurück.</string>
+    <string name="free_up_memory">Speicher freigeben</string>
+    <string name="free_up_memory_sub">Mitgelieferte Apps ausschalten</string>
+    <string name="debloat_note">Mitgelieferte Apps, die für Dinge im Speicher sitzen, die Aura nicht braucht. Ausgeschaltet, nicht gelöscht: OK schaltet jede wieder ein.</string>
+    <string name="debloat_nothing">Hier gibt es nichts auszuschalten: Keine der Apps, die Aura sicher ausschalten kann, ist auf diesem Fernseher.</string>
+    <string name="switch_off_recommended">Alle empfohlenen ausschalten</string>
+    <string name="apps_it_came_with">Mitgelieferte Apps</string>
+    <string name="turn_all_back_on">Alle wieder einschalten</string>
+    <string name="n_mb">%1$d MB</string>
+    <string name="switching_off">Wird ausgeschaltet…</string>
+    <string name="switching_on">Wird wieder eingeschaltet…</string>
+    <string name="db_autoinstall">Installiert nach Updates von selbst beworbene Apps.</string>
+    <string name="db_partnersetup">Richtet die Werbung des Herstellers ein.</string>
+    <string name="db_feedback">Sendet Absturz- und Nutzungsberichte an Google.</string>
+    <string name="db_screensaver">Googles Bildschirmschoner. Aura hat einen eigenen.</string>
+    <string name="db_print">Drucken, was ein Fernseher nicht kann.</string>
+    <string name="db_calendar">Hält einen Kalender synchron. Auf dem Fernseher zeigt ihn nichts.</string>
+    <string name="db_games">Google Play Spiele, Anmeldung und Erfolge.</string>
+    <string name="db_store">Googles Shop zum Leihen und Kaufen von Filmen, und seine Werbung.</string>
+    <string name="db_demo">Der Vorführmodus für Geschäfte.</string>
+    <string name="db_vewd">Vewd (Opera TV) App-Store und seine Werbung.</string>
+    <string name="db_cast">Chromecast built-in: Darüber streamen Handys und Computer auf den Fernseher.</string>
+    <string name="db_cast_lose">Ausgeschaltet können Handys und Computer nicht mehr auf diesen Fernseher streamen (Auras eigenes Abspielen vom Handy geht weiter).</string>
+    <string name="db_remote">Lässt die Google TV-App auf dem Handy als Fernbedienung arbeiten.</string>
+    <string name="db_remote_lose">Ausgeschaltet kann die Google TV-App auf deinem Handy diesen Fernseher nicht steuern.</string>
+    <plurals name="n_apps"><item quantity="one">%1$d App</item><item quantity="other">%1$d Apps</item></plurals>
+    <plurals name="n_apps_off"><item quantity="one">%1$d App ausgeschaltet</item><item quantity="other">%1$d Apps ausgeschaltet</item></plurals>
+    <plurals name="n_apps_on"><item quantity="one">%1$d App wieder an</item><item quantity="other">%1$d Apps wieder an</item></plurals>
+    <string name="db_acr">Erkennt, was auf dem Bildschirm läuft, um Werbung auszurichten (ACR).</string>
+    <string name="db_partnerrows">Setzt gesponserte Reihen des Herstellers auf den eigenen Startbildschirm des Fernsehers.</string>
 </resources>

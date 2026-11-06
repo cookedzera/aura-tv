@@ -300,6 +300,12 @@ final class SettingsPanel {
             focusTag("cats");
             return true;
         }
+        if (page.equals("debloat")) {
+            dbConfirm = null;
+            go("tv");
+            focusTag("debloat");
+            return true;
+        }
         if (page.equals("cat")) {
             go("cats");
             focusTag("cat:" + catId);
@@ -366,6 +372,7 @@ final class SettingsPanel {
         boolean back = p.isEmpty() || page.equals("photos") && p.equals("drop")
                 || (page.equals("widgets") || page.equals("keys") || page.equals("cats")) && p.equals("home")
                 || page.equals("cat") && p.equals("cats")
+                || page.equals("debloat") && p.equals("tv")
                 || page.equals("pair") && p.equals("tv")
                 || (page.equals("genres") || page.equals("tmdbphone") || page.equals("tmdbauth")) && p.equals("picks");
         page = p;
@@ -948,6 +955,8 @@ final class SettingsPanel {
             }
         } else if (page.equals("cat")) {
             buildCategory();
+        } else if (page.equals("debloat")) {
+            buildDebloat();
         } else if (page.equals("tv")) {
             buildTv();
         } else if (page.equals("keys")) {
@@ -1573,6 +1582,10 @@ final class SettingsPanel {
         note.setText(adbNote());
         add(act.getString(R.string.connect), adbState.equals("asking") ? act.getString(R.string.waiting_for_you) : Adb.on(act) ? act.getString(R.string.connected) : act.getString(R.string.not_connected_2), "adb:connect", this::adbConnect);
         if (setupNote.isEmpty()) setupNote = Prefs.device(act).getString("setup_note", "");
+        if (Adb.on(act)) add(act.getString(R.string.free_up_memory), act.getString(R.string.free_up_memory_sub), "debloat", () -> {
+            dbMem = null;
+            go("debloat");
+        });
         if (Adb.on(act)) add(act.getString(R.string.switch_everything_on), setupNote.isEmpty() ? act.getResources().getQuantityString(R.plurals.n_extras, Adb.setup(act).length, Adb.setup(act).length) : setupNote, "adb:setup", this::adbSetup);
         if (Adb.on(act) && Safety.hasGoogleTvHome(act)) {
             if (Safety.googleTvHomeOn(act)) {
@@ -1604,6 +1617,99 @@ final class SettingsPanel {
             add(act.getString(R.string.system_xray), act.getString(R.string.cpu_memory_and_network_overlay), "adb:xray",
                     () -> host.open(xray.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), panel));
         }
+    }
+
+    /** Free up memory: what each app uses now (read once a visit), the app asking for a second OK, a change under way. */
+    private java.util.Map<String, Integer> dbMem;
+    private String dbConfirm;
+    private boolean dbBusy, dbReading;
+
+    private void buildDebloat() {
+        Ui.fit(title, act.getString(R.string.free_up_memory), Ui.dp(300), 52, 30);
+        note.setText(act.getString(R.string.debloat_note));
+        if (dbMem == null && !dbReading) {
+            dbReading = true;
+            new SafeThread(() -> {
+                java.util.Map<String, Integer> m = Debloat.memory();
+                act.runOnUiThread(() -> {
+                    dbMem = m;
+                    dbReading = false;
+                    if (page.equals("debloat")) {
+                        // the sizes arrive: the list redrawn, focus kept on its row
+                        View f = act.getCurrentFocus();
+                        Object t = f != null ? f.getTag() : null;
+                        build();
+                        if (t instanceof String) focusTag((String) t);
+                    }
+                });
+            }, "debloat-mem").start();
+        }
+        List<Debloat.Found> found = Debloat.present(act);
+        if (found.isEmpty()) {
+            note.setText(act.getString(R.string.debloat_nothing));
+            return;
+        }
+        final List<String> offer = new java.util.ArrayList<>(), off = new java.util.ArrayList<>();
+        for (Debloat.Found f : found) {
+            if (f.on && f.item.recommended) offer.add(f.pkg);
+            if (!f.on) off.add(f.pkg);
+        }
+        if (!offer.isEmpty()) {
+            add(act.getString(R.string.switch_off_recommended), act.getResources().getQuantityString(R.plurals.n_apps, offer.size(), offer.size()),
+                    "db:all", () -> runDebloat(offer, true, "db:all"));
+        }
+        section(act.getString(R.string.apps_it_came_with));
+        for (final Debloat.Found f : found) {
+            String tag = "db:" + f.pkg;
+            Integer mb = dbMem != null ? dbMem.get(f.pkg) : null;
+            String value = f.pkg.equals(dbConfirm) ? act.getString(R.string.press_ok_again)
+                    : f.on ? act.getString(R.string.on) + (mb != null && mb > 0 ? " · " + act.getString(R.string.n_mb, mb) : "") : act.getString(R.string.off);
+            rowHelp.put(tag, act.getString(f.item.what) + (f.item.lose != 0 ? "\n\n" + act.getString(f.item.lose) : ""));
+            add(f.label, value, tag, () -> {
+                // what you'd notice going is said first, and asked twice
+                if (f.on && f.item.lose != 0 && !f.pkg.equals(dbConfirm)) {
+                    dbConfirm = f.pkg;
+                    build();
+                    focusTag(tag);
+                    return;
+                }
+                dbConfirm = null;
+                runDebloat(java.util.Collections.singletonList(f.pkg), f.on, tag);
+            });
+        }
+        if (!off.isEmpty()) add(act.getString(R.string.turn_all_back_on), "", "db:on", () -> runDebloat(off, false, "db:on"));
+    }
+
+    /** Switches these apps off (or on) one by one over debugging, then says how it went. */
+    private void runDebloat(List<String> pkgs, boolean switchOff, String focus) {
+        if (dbBusy) return;
+        dbBusy = true;
+        host.hud(R.drawable.ic_info, act.getString(switchOff ? R.string.switching_off : R.string.switching_on));
+        final android.content.Context app = act.getApplicationContext();
+        new SafeThread(() -> {
+            int done = 0;
+            boolean reached = true;
+            for (String pkg : pkgs) {
+                Boolean ok = Debloat.set(app, pkg, switchOff);
+                if (ok == null) {
+                    reached = false;
+                    break;
+                }
+                if (ok) done++;
+            }
+            final int n = done;
+            final boolean r = reached;
+            act.runOnUiThread(() -> {
+                dbBusy = false;
+                dbMem = null;
+                host.hud(r ? R.drawable.ic_check : R.drawable.ic_info, !r ? act.getString(R.string.couldnt_reach_the_tvs_debugging)
+                        : act.getResources().getQuantityString(switchOff ? R.plurals.n_apps_off : R.plurals.n_apps_on, n, n));
+                if (page.equals("debloat")) {
+                    build();
+                    focusTag(focus);
+                }
+            });
+        }, "debloat").start();
     }
 
     /** The category row open in Settings, and Delete pressed once. */
@@ -2407,7 +2513,7 @@ final class SettingsPanel {
     /** The focused row's sentence beside the list, faded across; rows that need none leave it empty. */
     private void explain(String tag) {
         Integer id = HELP.get(tag);
-        String text = id == null ? "" : act.getString(id);
+        String text = rowHelp.containsKey(tag) ? rowHelp.get(tag) : id == null ? "" : act.getString(id);
         if (text.contentEquals(help.getText())) return;
         final String next = text;
         help.animate().cancel();
@@ -2418,6 +2524,8 @@ final class SettingsPanel {
     }
 
     private static final java.util.Map<String, Integer> HELP = new java.util.HashMap<>();
+    /** Sentences for rows made on the fly (each app on Free up memory), by tag. */
+    private final java.util.Map<String, String> rowHelp = new java.util.HashMap<>();
 
     static {
         // Settings

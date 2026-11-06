@@ -2540,6 +2540,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private int[] rowIdx = new int[0], colIdx = new int[0];
     private final List<RowInfo> rowInfo = new ArrayList<>();
     private final List<TextView> rowLabels = new ArrayList<>();
+    private boolean labelsTvos;
     private static final int ROW_LABEL = 28;
 
     private static final class RowInfo {
@@ -2629,8 +2630,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     /** A label above each row, where the grid's "Your apps" sits for the first. */
     private void placeRowLabels() {
         int n = rows ? rowInfo.size() : 0;
+        // the tvOS style titles its rows as Apple TV does (a plain name, semibold, no count); the Aura
+        // style in its small capitals, as "Your apps"
+        if (labelsTvos != dock) {
+            for (TextView t : rowLabels) page.removeView(t);
+            rowLabels.clear();
+            labelsTvos = dock;
+        }
         while (rowLabels.size() < n) {
-            TextView t = Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.26f);
+            TextView t = dock ? Ui.text(this, 14, Ui.semibold, 0xE6FFFFFF) : Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.26f);
+            if (dock) Ui.lift(t, 8);
             page.addView(t, frame(WRAP, WRAP, Gravity.TOP | Gravity.START, 0, 0, 0, 0));
             rowLabels.add(t);
         }
@@ -2643,9 +2652,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             RowInfo r = rowInfo.get(i);
             // the tvOS dock wears no label, as on Apple TV
             t.setVisibility(dock && i == 0 ? View.GONE : View.VISIBLE);
-            t.setText(r.id.equals(Categories.ALL) ? getString(R.string.your_apps_n, r.count) : r.title + "  ·  " + r.count);
+            if (dock) t.setText(r.title);
+            else t.setText(r.id.equals(Categories.ALL) ? getString(R.string.your_apps_n, r.count) : r.title + "  ·  " + r.count);
             t.setTranslationX(Ui.dpf(pageX()));
-            t.setTranslationY(Ui.dpf(gridY() + i * rowH() - 24));
+            t.setTranslationY(Ui.dpf(gridY() + i * rowH() - (dock ? 28 : 24)));
         }
         dimRows(zone == GRID && gridAt < rowIdx.length ? rowIdx[gridAt] : -1);
     }
@@ -6030,23 +6040,25 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         boolean quiet = quietIntro();
         for (int i = 0; i < cells.size(); i++) {
             Cell c = cells.get(i);
+            // on category rows, tiles slid out of sight stay out of sight
+            float to = rows && i < colIdx.length ? rowAlpha(i) : 1f;
             // tiles below the screen (or all of them, after a restart) are simply there: animating
             // what can't be seen, or two dozen glass tiles on a busy TV, only costs frames
             if (quiet || cellY(i) > screen) {
                 c.animate().cancel();
-                c.setAlpha(1f);
+                c.setAlpha(to);
                 c.setScaleX(1f);
                 c.setScaleY(1f);
                 if (quiet) {
                     c.setAlpha(0f);
-                    c.animate().alpha(1f).setStartDelay(500).setDuration(600).setInterpolator(Ui.SOFT).start();
+                    c.animate().alpha(to).setStartDelay(500).setDuration(600).setInterpolator(Ui.SOFT).start();
                 }
                 continue;
             }
             c.setAlpha(0f);
             c.setScaleX(0.9f);
             c.setScaleY(0.9f);
-            c.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(1350 + Math.min(i, 14) * 40L).setDuration(720)
+            c.animate().alpha(to).scaleX(1f).scaleY(1f).setStartDelay(1350 + Math.min(i, 14) * 40L).setDuration(720)
                     .setInterpolator(Ui.EMPHASIZED).start();
         }
     }

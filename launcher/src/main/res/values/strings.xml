@@ -1031,4 +1031,33 @@
     <string name="layout_category_rows_recommended">Category rows (recommended)</string>
     <string name="layout_one_grid_folders">One grid, with folders</string>
     <string name="rows_new_hint">New: your apps sit in category rows. Settings, Home screen, Layout brings back one grid.</string>
+    <string name="free_up_memory">Free up memory</string>
+    <string name="free_up_memory_sub">Switch off apps the TV came with</string>
+    <string name="debloat_note">Apps the TV came with that sit in memory for things Aura doesn\'t need. Switched off, not deleted: OK turns any of them back on.</string>
+    <string name="debloat_nothing">Nothing to switch off on this TV: none of the apps Aura knows to be safe to switch off are here.</string>
+    <string name="switch_off_recommended">Switch off all recommended</string>
+    <string name="apps_it_came_with">Apps it came with</string>
+    <string name="turn_all_back_on">Turn all back on</string>
+    <string name="n_mb">%1$d MB</string>
+    <string name="switching_off">Switching off…</string>
+    <string name="switching_on">Switching back on…</string>
+    <string name="db_autoinstall">Installs promoted apps by itself after updates.</string>
+    <string name="db_partnersetup">Sets up the TV maker\'s promotions.</string>
+    <string name="db_feedback">Sends crash and usage reports to Google.</string>
+    <string name="db_screensaver">Google\'s screensaver. Aura has its own.</string>
+    <string name="db_print">Printing, which a TV can\'t do.</string>
+    <string name="db_calendar">Keeps a calendar in sync. Nothing on a TV shows it.</string>
+    <string name="db_games">Google Play Games, its sign-in and achievements.</string>
+    <string name="db_store">Google\'s store for renting and buying films, and its promotions.</string>
+    <string name="db_demo">The shop demo mode.</string>
+    <string name="db_vewd">Vewd (Opera TV) app store and its ads.</string>
+    <string name="db_cast">Chromecast built-in: phones and computers cast to the TV through it.</string>
+    <string name="db_cast_lose">Off, phones and computers can\'t cast to this TV (Aura\'s own Play on TV from phones still works).</string>
+    <string name="db_remote">Lets the Google TV app on a phone work as a remote.</string>
+    <string name="db_remote_lose">Off, the Google TV app on your phone can\'t control this TV.</string>
+    <plurals name="n_apps"><item quantity="one">%1$d app</item><item quantity="other">%1$d apps</item></plurals>
+    <plurals name="n_apps_off"><item quantity="one">%1$d app switched off</item><item quantity="other">%1$d apps switched off</item></plurals>
+    <plurals name="n_apps_on"><item quantity="one">%1$d app back on</item><item quantity="other">%1$d apps back on</item></plurals>
+    <string name="db_acr">Watches what is on screen to target ads (ACR).</string>
+    <string name="db_partnerrows">Puts the TV maker\'s sponsored rows on the TV\'s own home screen.</string>
 </resources>

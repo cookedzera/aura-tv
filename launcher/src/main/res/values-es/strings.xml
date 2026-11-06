@@ -1029,4 +1029,33 @@
     <string name="layout_category_rows_recommended">Filas por categoría (recomendado)</string>
     <string name="layout_one_grid_folders">Una cuadrícula, con carpetas</string>
     <string name="rows_new_hint">Novedad: tus apps están en filas por categoría. Ajustes, Inicio, Disposición recupera la cuadrícula.</string>
+    <string name="free_up_memory">Liberar memoria</string>
+    <string name="free_up_memory_sub">Desactivar apps que trae la TV</string>
+    <string name="debloat_note">Apps que trae la TV y que ocupan memoria para cosas que Aura no necesita. Se desactivan, no se borran: OK vuelve a activar cualquiera.</string>
+    <string name="debloat_nothing">No hay nada que desactivar: ninguna de las apps que Aura sabe desactivar con seguridad está en esta TV.</string>
+    <string name="switch_off_recommended">Desactivar todas las recomendadas</string>
+    <string name="apps_it_came_with">Apps que trae</string>
+    <string name="turn_all_back_on">Volver a activar todas</string>
+    <string name="n_mb">%1$d MB</string>
+    <string name="switching_off">Desactivando…</string>
+    <string name="switching_on">Volviendo a activar…</string>
+    <string name="db_autoinstall">Instala por sí sola apps promocionadas tras las actualizaciones.</string>
+    <string name="db_partnersetup">Configura las promociones del fabricante.</string>
+    <string name="db_feedback">Envía informes de fallos y de uso a Google.</string>
+    <string name="db_screensaver">El salvapantallas de Google. Aura tiene el suyo.</string>
+    <string name="db_print">Imprimir, algo que una TV no hace.</string>
+    <string name="db_calendar">Sincroniza un calendario. Nada en la TV lo muestra.</string>
+    <string name="db_games">Google Play Juegos, su inicio de sesión y logros.</string>
+    <string name="db_store">La tienda de Google para alquilar y comprar películas, y sus promociones.</string>
+    <string name="db_demo">El modo de demostración para tiendas.</string>
+    <string name="db_vewd">La tienda de apps Vewd (Opera TV) y sus anuncios.</string>
+    <string name="db_cast">Chromecast integrado: por él envían contenido los móviles y ordenadores a la TV.</string>
+    <string name="db_cast_lose">Desactivado, los móviles y ordenadores no pueden enviar contenido a esta TV (la reproducción desde el móvil de Aura sigue funcionando).</string>
+    <string name="db_remote">Permite usar la app Google TV del móvil como mando.</string>
+    <string name="db_remote_lose">Desactivado, la app Google TV del móvil no puede controlar esta TV.</string>
+    <plurals name="n_apps"><item quantity="one">%1$d app</item><item quantity="other">%1$d apps</item></plurals>
+    <plurals name="n_apps_off"><item quantity="one">%1$d app desactivada</item><item quantity="other">%1$d apps desactivadas</item></plurals>
+    <plurals name="n_apps_on"><item quantity="one">%1$d app activada de nuevo</item><item quantity="other">%1$d apps activadas de nuevo</item></plurals>
+    <string name="db_acr">Reconoce lo que se ve en pantalla para dirigir anuncios (ACR).</string>
+    <string name="db_partnerrows">Pone filas patrocinadas del fabricante en el inicio propio de la TV.</string>
 </resources>
