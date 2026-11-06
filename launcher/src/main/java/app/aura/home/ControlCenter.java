@@ -89,7 +89,7 @@ final class ControlCenter {
     private final FrameLayout board;
     private final WifiSheet wifiSheet;
     private final BtSheet btSheet;
-    private final List<View> modules = new ArrayList<>(), focusables = new ArrayList<>();
+    private final List<View> focusables = new ArrayList<>();
 
     /**
      * What's playing (null: nothing): a wide card with the cover takes Tonight's pick's place while
@@ -173,6 +173,7 @@ final class ControlCenter {
         audio = Compat.svc(a, AudioManager.class);
         panel = HomeActivity.flat(a);
         panel.setClipChildren(false);
+        panel.setContentDescription(a.getString(R.string.control_center_2));
         veil = new GlassFrame(a, h.backdrop(), 0, 0.5f);
         veil.edgeLight = false;
         panel.addView(veil, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -207,7 +208,7 @@ final class ControlCenter {
         // a VPN at a glance: on or off, and OK opens yours (hold OK picks which, with several)
         vpnPill = new Pad(a, null, 16, 0f);
         vpnPill.plainColor = MODULE;
-        vpnPill.focusScale = 1.05f;
+        vpnPill.row = true;
         LinearLayout vr = new LinearLayout(a);
         vr.setGravity(Gravity.CENTER_VERTICAL);
         vr.setPadding(Ui.dp(12), 0, Ui.dp(14), 0);
@@ -230,7 +231,7 @@ final class ControlCenter {
         // Tonight's pick: from TVmaze, or TMDB with your own key, to your taste; OK plays its trailer
         pick = new Pad(a, null, 18, 0f);
         pick.plainColor = MODULE;
-        pick.focusScale = 1.04f;
+        pick.row = true;
         LinearLayout pr = new LinearLayout(a);
         pr.setGravity(Gravity.CENTER_VERTICAL);
         pr.setPadding(Ui.dp(9), Ui.dp(9), Ui.dp(14), Ui.dp(9));
@@ -278,7 +279,7 @@ final class ControlCenter {
         // while music plays it takes Tonight's pick's place: a real cover, the song, how far in
         nowCard = new Pad(a, null, 18, 0f);
         nowCard.plainColor = MODULE;
-        nowCard.focusScale = 1.04f;
+        nowCard.row = true;
         LinearLayout nr = new LinearLayout(a);
         nr.setGravity(Gravity.CENTER_VERTICAL);
         nr.setPadding(Ui.dp(9), Ui.dp(9), Ui.dp(14), Ui.dp(9));
@@ -331,7 +332,7 @@ final class ControlCenter {
         notesOff = new Pad(a, null, 16, 0f);
         notesOff.plainColor = MODULE;
         notesOff.edgeLight = false;
-        notesOff.focusScale = 1.03f;
+        notesOff.row = true;
         notesOffText = notesOff.tint(Ui.text(a, 10.5f, Ui.medium, 0xFFFFFFFF), 0.8f);
         notesOffText.setSingleLine(false);
         notesOffText.setMaxLines(2);
@@ -349,7 +350,7 @@ final class ControlCenter {
             Pad row = new Pad(a, null, 20, 0f);
             row.plainColor = MODULE;
             row.edgeLight = false;
-            row.focusScale = 1.03f;
+            row.row = true;
             LinearLayout rr = new LinearLayout(a);
             rr.setGravity(Gravity.CENTER_VERTICAL);
             rr.setPadding(Ui.dp(14), 0, Ui.dp(16), 0);
@@ -405,7 +406,8 @@ final class ControlCenter {
         panel.addView(header, hl);
 
         int side = 4 * U + 3 * G;
-        board = new FrameLayout(a);
+        // its fades go straight onto each control's draws, never through an offscreen copy
+        board = HomeActivity.flat(a);
         board.setClipChildren(false);
         FrameLayout.LayoutParams bl = new FrameLayout.LayoutParams(Ui.dp(side), Ui.dp(side), Gravity.END | Gravity.CENTER_VERTICAL);
         bl.rightMargin = Ui.dp(96);
@@ -470,7 +472,7 @@ final class ControlCenter {
         btCap = caps[1];
         sleepCap = caps[2];
         screenOffCap = caps[3];
-        screenOffCap.setText(act.getString(R.string.screen_off));
+        label(screenOff, screenOffCap, act.getString(R.string.screen_off));
 
         // 1x2: volume
         volume = place(new Slider(a), 2, 0, 1, 2);
@@ -479,7 +481,6 @@ final class ControlCenter {
         // 1x2: the inputs, where the sky was. The source that's live, large; OK opens them all on a sheet
         inputs = place(new Pad(a, null, 26, 0f), 3, 0, 1, 2);
         inputs.plainColor = MODULE;
-        inputs.focusScale = 1.05f;
         LinearLayout ic2 = column(a, 13);
         TextView il = inputs.tint(Ui.caps(a, 7, 0xFFFFFFFF, 0.24f), 0.55f);
         il.setText(act.getString(R.string.inputs));
@@ -518,7 +519,6 @@ final class ControlCenter {
         // apps from a launcher is refused by Android 11 and later anyway)
         boost = place(new Pad(a, null, 26, 0f), 2, 2, 1, 1);
         boost.plainColor = MODULE;
-        boost.focusScale = 1.06f;
         LinearLayout bc = new LinearLayout(a);
         bc.setOrientation(LinearLayout.VERTICAL);
         bc.setGravity(Gravity.CENTER);
@@ -563,6 +563,9 @@ final class ControlCenter {
         standby.onLongClick = host::quietScreen;
         // what's holding memory is best seen, and closed, in recent apps
         boost.onClick = host::recents;
+        // the column and the board grow out of the corner they hang from; the column's height is known once laid out
+        header.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> anchor());
+        anchor();
         panel.setVisibility(View.GONE);
     }
 
@@ -598,6 +601,8 @@ final class ControlCenter {
     private static GlassFrame module(Context c) {
         GlassFrame m = new GlassFrame(c, null, 26, 0f);
         m.plainColor = MODULE;
+        // what it holds stays inside it, and it draws its own rounded shape: LOW spares the clip
+        if (Ui.light) m.setClipToOutline(false);
         return m;
     }
 
@@ -606,8 +611,6 @@ final class ControlCenter {
         p.leftMargin = Ui.dp(col * (U + G));
         p.topMargin = Ui.dp(row * (U + G));
         board.addView(v, p);
-        v.setTag(col + row);
-        modules.add(v);
         return v;
     }
 
@@ -922,7 +925,6 @@ final class ControlCenter {
     private static Pad button(Context c, int iconRes, String label) {
         Pad p = new Pad(c, null, 26, 0f);
         p.plainColor = MODULE;
-        p.focusScale = 1.06f;
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.VERTICAL);
         l.setGravity(Gravity.CENTER);
@@ -974,6 +976,20 @@ final class ControlCenter {
             l.rightMargin = Ui.dp(on ? 40 : 96);
             v.setLayoutParams(l);
         }
+        anchor();
+    }
+
+    /**
+     * Where the column and the board grow from as Control Center opens: the corner they hang from in
+     * the tvOS style (both at the top right), in the Aura style the board's right edge and the
+     * column's left one, each at its middle.
+     */
+    private void anchor() {
+        int side = Ui.dp(4 * U + 3 * G);
+        board.setPivotX(side);
+        board.setPivotY(top ? 0f : side / 2f);
+        header.setPivotX(top ? header.getWidth() : 0f);
+        header.setPivotY(top ? 0f : header.getHeight() / 2f);
     }
 
     // ---- open / close / keys -----------------------------------------------------------------
@@ -997,30 +1013,41 @@ final class ControlCenter {
         }
         tick(Calendar.getInstance());
         showPick();
-        board.animate().cancel();
         board.setVisibility(View.VISIBLE);
-        board.setAlpha(1f);
+        board.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
+        panel.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
         panel.animate().cancel();
         panel.setAlpha(1f);
         panel.setVisibility(View.VISIBLE);
+        // the frost is opaque by the time the home screen beneath stops drawing (FROST_MS)
         veil.setAlpha(0f);
         veil.animate().alpha(1f).setStartDelay(0).setDuration(FROST_MS).setInterpolator(Ui.SOFT).start();
-        header.setAlpha(0f);
-        header.setTranslationX(-Ui.dp(24));
-        header.animate().alpha(1f).translationX(0f).setStartDelay(80).setDuration(620).setInterpolator(Ui.EMPHASIZED).start();
-        // modules rise into place from the top-left corner of the board. They move rather than
-        // scale: scaling re-rasterises every glyph on every frame, which this GPU can't keep up with
-        for (View m : modules) {
-            int order = (Integer) m.getTag();
-            m.setAlpha(0f);
-            // from the top-right corner they drop down instead
-            m.setTranslationY(Ui.dp(top ? -16 : 16));
-            m.animate().alpha(1f).translationY(0f).setStartDelay(60 + order * 30L).setDuration(460)
-                    .setInterpolator(Ui.EMPHASIZED).start();
-        }
+        // every control together, as tvOS brings them, the column one frame ahead of the board
+        arrive(header, 0);
+        arrive(board, Ui.light ? 0 : 16);
+        panel.announceForAccessibility(panel.getContentDescription());
         wifi.requestFocus();
-        // the TV's own Inputs button: straight to the sheet of sources
-        if (inputs && !sources.isEmpty()) panel.postDelayed(delayedInputs, 300);
+        // the TV's own Inputs button: straight to the sheet of sources, once the board is there
+        if (inputs && !sources.isEmpty()) panel.postDelayed(delayedInputs, Ui.light ? Ui.LOW_CC_OPEN : Ui.CC_OPEN);
+    }
+
+    /**
+     * HIGH: alpha and ×0.90 to 1 about its anchor in {@link Ui#CC_OPEN} ms, decelerating, on a layer
+     * while it grows (scaled text would be drawn again every frame). LOW: alpha and an 8 dp drop in
+     * {@link Ui#LOW_CC_OPEN}, no layer, nothing scaled.
+     */
+    private static void arrive(View v, long delay) {
+        boolean low = Ui.light;
+        v.animate().cancel();
+        v.setAlpha(0f);
+        v.setScaleX(low ? 1f : 0.9f);
+        v.setScaleY(low ? 1f : 0.9f);
+        v.setTranslationX(0f);
+        v.setTranslationY(low ? -Ui.dpf(8) : 0f);
+        android.view.ViewPropertyAnimator a = v.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
+                .setStartDelay(delay).setDuration(low ? Ui.LOW_CC_OPEN : Ui.CC_OPEN).setInterpolator(Ui.EASE_DECEL);
+        if (!low) a.withLayer();
+        a.start();
     }
 
     void close(boolean animate, Runnable done) {
@@ -1029,11 +1056,22 @@ final class ControlCenter {
         panel.removeCallbacks(delayedBt);
         panel.removeCallbacks(delayedInputs);
         inputs.removeCallbacks(inputsRetry);
-        if (wifiSheet.isOpen()) hideWifi(false);
-        if (btSheet.isOpen()) hideBt(false);
-        // left open, it came back over the board next time, stale, with the focus underneath it
-        if (inputSheet.isOpen()) hideInputs(false);
-        panel.animate().alpha(0f).setStartDelay(0).setDuration(animate ? 240 : 0).setInterpolator(Ui.SOFT)
+        // the sheets go with the panel, and the next opening sets the board up again. The Inputs sheet
+        // left open came back over the board next time, stale, with the focus underneath it
+        if (wifiSheet.isOpen()) wifiSheet.close();
+        if (btSheet.isOpen()) btSheet.close();
+        if (inputSheet.isOpen()) inputSheet.close();
+        // fading out, nothing in it takes the focus: the arrows on the home screen can't land on it
+        panel.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        if (animate && !Ui.light) {
+            // HIGH goes back into the corner it came from as it fades
+            for (View v : new View[]{header, board}) {
+                v.animate().cancel();
+                v.animate().scaleX(0.9f).scaleY(0.9f).setStartDelay(0).setDuration(Ui.CLOSE)
+                        .setInterpolator(Ui.EASE_STANDARD).withLayer().start();
+            }
+        }
+        panel.animate().alpha(0f).setStartDelay(0).setDuration(animate ? Ui.CLOSE : 0).setInterpolator(Ui.EASE_STANDARD)
                 .withEndAction(() -> {
                     if (isOpen) return;
                     panel.setVisibility(View.GONE);
@@ -1042,7 +1080,7 @@ final class ControlCenter {
                 }).start();
     }
 
-    /** The Wi-Fi sheet slides over the board; the board stops taking focus until it closes. */
+    /** The Wi-Fi sheet grows over the board out of its button; the board stops taking focus until it closes. */
     private void showWifi() {
         if (!isOpen) return;
         if (!wifiSheet.present()) {
@@ -1051,21 +1089,46 @@ final class ControlCenter {
             return;
         }
         onlySheet(wifiSheet);
-        board.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
-                .withEndAction(() -> {
-                    if (wifiSheet.isOpen()) board.setVisibility(View.INVISIBLE);
-                }).start();
+        boardAway(wifiSheet, wifi);
         wifiSheet.open();
     }
 
-    private void hideWifi(boolean focusToggle) {
+    private void hideWifi() {
         wifiSheet.close();
         if (sheetOpen()) return;
-        board.animate().cancel();
-        board.setVisibility(View.VISIBLE);
-        board.setAlpha(1f);
+        boardBack();
         refresh();
-        if (focusToggle) wifi.requestFocus();
+        wifi.requestFocus();
+    }
+
+    /**
+     * A sheet is coming over the board: the board fades in the time of a close and takes no focus
+     * from now on (it would otherwise until it's hidden), and the sheet grows out of the control
+     * that opened it, its pivot on that control's centre (the board and the sheets share one place).
+     */
+    private void boardAway(View sheet, View from) {
+        board.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        board.animate().cancel();
+        board.animate().alpha(0f).scaleX(1f).scaleY(1f).translationY(0f).setStartDelay(0).setDuration(Ui.CLOSE)
+                .setInterpolator(Ui.EASE_STANDARD).withEndAction(() -> {
+                    if (sheetOpen()) board.setVisibility(View.INVISIBLE);
+                }).start();
+        float x = from.getWidth() / 2f, y = from.getHeight() / 2f;
+        for (View v = from; v != board && v.getParent() instanceof View; v = (View) v.getParent()) {
+            x += v.getLeft();
+            y += v.getTop();
+        }
+        sheet.setPivotX(x);
+        sheet.setPivotY(y);
+    }
+
+    /** The board again as the last sheet goes, fading back in while the sheet fades out. */
+    private void boardBack() {
+        board.animate().cancel();
+        board.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
+        board.setVisibility(View.VISIBLE);
+        board.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f).setStartDelay(0).setDuration(Ui.CLOSE)
+                .setInterpolator(Ui.EASE_DECEL).start();
     }
 
     /** Back steps out of the Wi-Fi sheet before it closes Control Center. Returns true if it was used. */
@@ -1083,34 +1146,29 @@ final class ControlCenter {
             return;
         }
         onlySheet(btSheet);
-        board.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
-                .withEndAction(() -> {
-                    if (btSheet.isOpen()) board.setVisibility(View.INVISIBLE);
-                }).start();
+        boardAway(btSheet, bt);
         btSheet.open();
     }
 
-    private void hideBt(boolean focusToggle) {
+    private void hideBt() {
         btSheet.close();
         if (sheetOpen()) return;
-        board.animate().cancel();
-        board.setVisibility(View.VISIBLE);
-        board.setAlpha(1f);
+        boardBack();
         refresh();
-        if (focusToggle) bt.requestFocus();
+        bt.requestFocus();
     }
 
     boolean back() {
         if (inputSheet.isOpen()) {
-            hideInputs(true);
+            hideInputs();
             return true;
         }
         if (btSheet.isOpen()) {
-            hideBt(true);
+            hideBt();
             return true;
         }
         if (!wifiSheet.isOpen()) return false;
-        if (!wifiSheet.back()) hideWifi(true);
+        if (!wifiSheet.back()) hideWifi();
         return true;
     }
 
@@ -1190,9 +1248,9 @@ final class ControlCenter {
                 keepFaces(faces);
                 showNotes(notes);
                 wifi.setOn(online);
-                wifiCap.setText(act.getString(onWifi ? R.string.wi_fi : online ? R.string.ethernet : R.string.offline));
+                label(wifi, wifiCap, act.getString(onWifi ? R.string.wi_fi : online ? R.string.ethernet : R.string.offline));
                 bt.setOn(btOn);
-                btCap.setText(btName);
+                label(bt, btCap, btName);
                 showMemory(mi);
             });
         }, "cc-read").start();
@@ -1210,7 +1268,13 @@ final class ControlCenter {
     private void refreshSleep() {
         long left = Power.sleepLeftMs(act);
         sleep.setOn(left > 0);
-        sleepCap.setText(left <= 0 ? act.getString(R.string.sleep_timer) : act.getString(Power.atEnd(act) ? R.string.at_the_end_value : R.string.sleep_in_value, duration((int) Math.ceil(left / 60_000.0))));
+        label(sleep, sleepCap, left <= 0 ? act.getString(R.string.sleep_timer) : act.getString(Power.atEnd(act) ? R.string.at_the_end_value : R.string.sleep_in_value, duration((int) Math.ceil(left / 60_000.0))));
+    }
+
+    /** A round button's caption, which is also what TalkBack says for the button. */
+    private static void label(Round r, TextView cap, String s) {
+        cap.setText(s);
+        r.setContentDescription(s);
     }
 
     private void refreshMemory() {
@@ -1452,20 +1516,15 @@ final class ControlCenter {
     private void showInputs() {
         if (!isOpen || sources.isEmpty()) return;
         onlySheet(inputSheet);
-        board.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
-                .withEndAction(() -> {
-                    if (inputSheet.isOpen()) board.setVisibility(View.INVISIBLE);
-                }).start();
+        boardAway(inputSheet, inputs);
         inputSheet.open(sources);
     }
 
-    private void hideInputs(boolean focusToggle) {
+    private void hideInputs() {
         inputSheet.close();
         if (sheetOpen()) return;
-        board.animate().cancel();
-        board.setVisibility(View.VISIBLE);
-        board.setAlpha(1f);
-        if (focusToggle) inputs.requestFocus();
+        boardBack();
+        inputs.requestFocus();
     }
 
     private boolean sheetOpen() {
@@ -1486,12 +1545,12 @@ final class ControlCenter {
     }
 
     /**
-     * Focus to whatever is showing: the board's first button, or the open sheet. Sending it to the
-     * board while a sheet covered it left the focus somewhere no one could see.
+     * Focus to whatever is showing: the open sheet, or the board's first button. Sending it to the
+     * board while a sheet covered it (or while the board faded out under one) left the focus
+     * somewhere no one could see.
      */
     private void focusBoard() {
-        if (board.getVisibility() == View.VISIBLE) wifi.requestFocus();
-        else if (inputSheet.isOpen()) inputSheet.requestFocus();
+        if (inputSheet.isOpen()) inputSheet.requestFocus();
         else if (btSheet.isOpen()) btSheet.requestFocus();
         else if (wifiSheet.isOpen()) wifiSheet.requestFocus();
         else wifi.requestFocus();
@@ -1549,9 +1608,20 @@ final class ControlCenter {
         private final Drawable glyph;
         private final int activeColor;
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), rim = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private boolean on, longFired;
+        private boolean on, pressed, longFired;
         private float focus;
-        private ValueAnimator anim;
+        private final Pad.Lift lift = new Pad.Lift(this, new Pad.Lift.Host() {
+            @Override
+            public float lifted() {
+                return Ui.FOCUS_SCALE_CONTROL;
+            }
+
+            @Override
+            public void fill(float f) {
+                focus = f;
+                invalidate();
+            }
+        });
 
         Round(Context c, int iconRes, int activeColor) {
             super(c);
@@ -1586,22 +1656,30 @@ final class ControlCenter {
         @Override
         protected void onFocusChanged(boolean gained, int direction, Rect previous) {
             super.onFocusChanged(gained, direction, previous);
-            if (anim != null) anim.cancel();
-            anim = ValueAnimator.ofFloat(focus, gained ? 1f : 0f);
-            anim.setDuration(gained ? 260 : 180);
-            anim.addUpdateListener(a -> {
-                focus = (float) a.getAnimatedValue();
-                invalidate();
-            });
-            anim.start();
-            animate().scaleX(gained ? 1.12f : 1f).scaleY(gained ? 1.12f : 1f).setInterpolator(gained ? Ui.SPRING : Ui.DECEL)
-                    .setDuration(gained ? 440 : 220).setStartDelay(0).start();
+            if (!gained) pressed = false;
+            lift.focus(gained);
+        }
+
+        /** Its fade goes straight onto its draws, as the board's own does. */
+        @Override
+        public boolean hasOverlappingRendering() {
+            return false;
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            lift.stop();
+            super.onDetachedFromWindow();
         }
 
         @Override
         public boolean onKeyDown(int code, KeyEvent e) {
             if (Pad.isConfirm(code)) {
-                if (e.getRepeatCount() == 0) e.startTracking();
+                if (e.getRepeatCount() == 0) {
+                    e.startTracking();
+                    pressed = true;
+                    lift.press(true);
+                }
                 return true;
             }
             return super.onKeyDown(code, e);
@@ -1611,6 +1689,7 @@ final class ControlCenter {
         public boolean onKeyLongPress(int code, KeyEvent e) {
             if (Pad.isConfirm(code) && onLongClick != null) {
                 longFired = true;
+                lift.press(false);
                 onLongClick.run();
                 return true;
             }
@@ -1620,8 +1699,12 @@ final class ControlCenter {
         @Override
         public boolean onKeyUp(int code, KeyEvent e) {
             if (Pad.isConfirm(code)) {
-                if (!longFired && !e.isCanceled() && onClick != null) onClick.run();
+                // a release whose press began elsewhere presses nothing
+                boolean click = pressed && !longFired && !e.isCanceled();
+                if (pressed && !longFired) lift.press(false);
+                pressed = false;
                 longFired = false;
+                if (click && onClick != null) onClick.run();
                 return true;
             }
             return super.onKeyUp(code, e);
@@ -1637,7 +1720,19 @@ final class ControlCenter {
         private float shown = -1f, focus;
         private int value;
         private boolean muted;
-        private ValueAnimator anim, focusAnim;
+        private ValueAnimator anim;
+        private final Pad.Lift lift = new Pad.Lift(this, new Pad.Lift.Host() {
+            @Override
+            public float lifted() {
+                return Ui.FOCUS_SCALE_CONTROL;
+            }
+
+            @Override
+            public void fill(float f) {
+                focus = f;
+                invalidate();
+            }
+        });
 
         Slider(Context c) {
             super(c);
@@ -1663,6 +1758,7 @@ final class ControlCenter {
             value = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
             // Android 5 can't say whether it's muted, only how loud: silent counts as muted there
             muted = android.os.Build.VERSION.SDK_INT >= 23 ? audio.isStreamMute(AudioManager.STREAM_MUSIC) : value == 0;
+            setContentDescription(act.getString(R.string.volume) + " " + (muted ? 0 : value));
             float level = muted ? 0f : value / (float) max;
             if (shown < 0f) {
                 shown = level;
@@ -1715,16 +1811,13 @@ final class ControlCenter {
         @Override
         protected void onFocusChanged(boolean gained, int direction, Rect previous) {
             super.onFocusChanged(gained, direction, previous);
-            if (focusAnim != null) focusAnim.cancel();
-            focusAnim = ValueAnimator.ofFloat(focus, gained ? 1f : 0f);
-            focusAnim.setDuration(240);
-            focusAnim.addUpdateListener(a -> {
-                focus = (float) a.getAnimatedValue();
-                invalidate();
-            });
-            focusAnim.start();
-            animate().scaleX(gained ? 1.04f : 1f).scaleY(gained ? 1.04f : 1f).setInterpolator(gained ? Ui.SPRING : Ui.DECEL)
-                    .setDuration(gained ? 440 : 220).setStartDelay(0).start();
+            lift.focus(gained);
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            lift.stop();
+            super.onDetachedFromWindow();
         }
 
         @Override
@@ -1740,12 +1833,17 @@ final class ControlCenter {
                 sync();
                 return true;
             }
-            return Pad.isConfirm(code) || super.onKeyDown(code, e);
+            if (Pad.isConfirm(code)) {
+                if (e.getRepeatCount() == 0) lift.press(true);
+                return true;
+            }
+            return super.onKeyDown(code, e);
         }
 
         @Override
         public boolean onKeyUp(int code, KeyEvent e) {
             if (Pad.isConfirm(code)) {
+                lift.press(false);
                 if (!e.isCanceled()) {
                     try {
                         if (android.os.Build.VERSION.SDK_INT >= 23) {

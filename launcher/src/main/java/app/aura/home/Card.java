@@ -1,10 +1,12 @@
 package app.aura.home;
 
+import android.animation.TimeInterpolator;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
+import android.graphics.ColorMatrixColorFilter;
 import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Outline;
@@ -14,13 +16,17 @@ import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewOutlineProvider;
 
 /**
  * App card. Focused, a bright ring hugs it, it glows in the app's own colour and catches a sheen;
- * in the carousel it can also recede (dim) and cast a reflection.
+ * in the carousel it can also recede (dim) and cast a reflection. It takes focus as measured on
+ * tvOS 26: an app tile rises to x1.20 on a quick spring with a small overshoot, a content card
+ * ({@link #asContent}) eases to x1.10, and a press sinks either to 0.95 of that. On LOW the rise
+ * is a short ease-out and only view properties move.
  */
 final class Card extends View {
     interface FocusListener {
@@ -55,6 +61,14 @@ final class Card extends View {
      * tinted with the app's colour, and its art (a lifted logo) is laid on top.
      */
     Backdrop glass;
+    /** Runs on every frame the card rises, settles or is pressed: a cell's name rides the tile's growth. */
+    Runnable moved;
+    /** Its focus shadow is one of {@link FocusLayer}'s shared views (LOW), so it draws none of its own. */
+    boolean layered;
+    /** The share of their full durations its last focus change ran at: a quick run shortens them ({@link Ui#speedIn}). */
+    float pace = 1f;
+    /** When any card last took focus: the time since sets the pace of the next move. */
+    static long movedAt = Long.MIN_VALUE / 2;
     private ValueAnimator swayAnim;
     private final Paint blur = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG), pane = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final int[] loc = new int[2];
@@ -79,9 +93,31 @@ final class Card extends View {
     private Bitmap bitmap, reflection, liftShadow;
     private final Paint shadowPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Matrix shadowMatrix = new Matrix();
-    private float focus, dim, glintPos = -1f;
-    private ValueAnimator focusAnim, glintAnim;
+    private float focus, dim, glintPos = -1f, artAlpha = 1f;
+    private ValueAnimator focusAnim, glintAnim, tween, pressAnim, artFade;
     private boolean longFired;
+
+    /** A poster or a show to continue rather than an app: x1.10, easing in and letting go slowly. */
+    private boolean content;
+    /** Room on each side to grow into, in px; below 0, the full token scale. */
+    private float room = -1f;
+    /** How far it has risen into focus (0 at rest, 1 focused; the spring takes it a touch past), and the press on top. */
+    private float risen, pressed = 1f;
+    /** Each move of the rise runs from riseFrom to riseTo, carrying the translation from (tx0, ty0) to (tx1, ty1). */
+    private float riseFrom, riseTo, tx0, ty0, tx1, ty1;
+    /** The lean toward the way focus came, in px. */
+    private float leanX, leanY;
+    private float glowFrom, glowTo, tweenFrom, tweenTo, pressFrom, pressTo;
+    private Spring.Mover spring;
+    private float springPace;
+    private boolean springContent;
+    /** Where in the window the last card to lose focus was, and when: the next one leans away from it. */
+    private static long leftAt = Long.MIN_VALUE / 2;
+    private static float leftX, leftY;
+    /** An app tile's rim and shadow light up over this as it rises (§8.3.3); a logo that lands late fades in as long. */
+    private static final int LIGHT_IN = 150;
+    /** The glass's colour filter at 65 strengths of focus, shared by every card: none is made as a card lights. */
+    private static final ColorMatrixColorFilter[] PANES = new ColorMatrixColorFilter[65];
 
     Card(Context c, Tiles.Painter painter, int color, float radiusDp) {
         super(c);
@@ -89,7 +125,6 @@ final class Card extends View {
         this.color = color;
         this.radius = Ui.dpf(radiusDp);
         setFocusable(true);
-        setElevation(Ui.dpf(3));
         setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View v, Outline o) {
@@ -114,6 +149,38 @@ final class Card extends View {
         mark.setShadowLayer(Ui.dpf(3), 0, Ui.dpf(1), 0x99000000);
     }
 
+    /** Marks a content card (a poster, a show to continue): it rises to x1.10 and eases in and out like one. */
+    Card asContent() {
+        content = true;
+        return this;
+    }
+
+    /**
+     * Room on each side the card may grow into, in dp (half the gap to its neighbours): focused, it
+     * takes 90 % of it at most, so it never touches them. Unset, it grows to the full token scale.
+     */
+    void setGrowRoom(float dpEachSide) {
+        room = dpEachSide < 0f ? -1f : Ui.dpf(dpEachSide);
+        if (risen != 0f) applyScale();
+    }
+
+    /** The scale focus brings it to: x1.20 for an app, x1.10 for content, held within its room. */
+    float focusedScale() {
+        float token = content ? Ui.FOCUS_SCALE_CONTENT : Ui.FOCUS_SCALE_APP;
+        int w = getWidth();
+        return room < 0f || w <= 0 ? token : Math.max(1f, Math.min(token, 1f + 2f * 0.9f * room / w));
+    }
+
+    /** How far it has risen into focus: 0 at rest, 1 focused. */
+    float risen() {
+        return risen;
+    }
+
+    /** The baked shadow for its size (shared by every card that size), or null before it's laid out. */
+    Bitmap shadow() {
+        return liftShadow;
+    }
+
     @Override
     protected void onSizeChanged(int w, int h, int ow, int oh) {
         rect.set(0, 0, w, h);
@@ -135,9 +202,9 @@ final class Card extends View {
             }
             if (bitmap != null && whole) showArt(w, h);
             else art.setShader(null);
-            // glass has no system shadow (it would show through the pane), so a lifted glass tile
-            // casts this one; opaque tiles keep their elevation shadow
-            liftShadow = (glass != null && bezel || tvos) && lift ? Ui.shadow(w, h, radius) : null;
+            // the shadow a raised tile casts where no real one is drawn (glass and tvOS tiles on HIGH,
+            // every tile on LOW): baked once per size and shared, never made as focus moves
+            liftShadow = lift ? Ui.shadow(w, h, radius) : null;
         }
         // a hairline all the way round the pane, brightest where the light falls on the top edge
         rim.setShader(new LinearGradient(0, 0, w * 0.35f, h,
@@ -166,7 +233,11 @@ final class Card extends View {
             if (bitmap != b || painter != p || !isAttachedToWindow()) return;
             b.eraseColor(0);
             try {
-                if (paintArt(w, h)) showArt(w, h);
+                if (paintArt(w, h)) {
+                    showArt(w, h);
+                    // landed after a cold start: on HIGH it comes up instead of popping in
+                    if (!Ui.light) fadeArtIn();
+                }
             } catch (OutOfMemoryError e) {
                 noRoom();
             }
@@ -184,6 +255,22 @@ final class Card extends View {
             bs.setLocalMatrix(up);
         }
         art.setShader(bs);
+    }
+
+    /** The picture fading in over the card's colour in 150 ms, a redraw a frame for that long only. */
+    private void fadeArtIn() {
+        if (artFade == null) {
+            artFade = ValueAnimator.ofFloat(0f, 1f);
+            artFade.setDuration(LIGHT_IN);
+            artFade.setInterpolator(Ui.EASE_DECEL);
+            artFade.addUpdateListener(a -> {
+                artAlpha = a.getAnimatedFraction();
+                invalidate();
+            });
+        }
+        artFade.cancel();
+        artAlpha = 0f;
+        artFade.start();
     }
 
     /**
@@ -239,6 +326,9 @@ final class Card extends View {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        // tiles at rest cast no shadow (the focused one's comes with its rise); the switcher's cards,
+        // which don't rise, keep a slight one on HIGH, and LOW casts none at all (PC6)
+        setElevation(lift || Ui.light ? 0f : Ui.dpf(3));
         // glass repaints with the photograph's drift, like the other glass
         if (glass != null) glass.addMirror(this);
     }
@@ -248,14 +338,25 @@ final class Card extends View {
         if (swayAnim != null) swayAnim.cancel();
         // ended at rest rather than cut off midway: the switcher shows its cards again, and one must
         // not come back half lit or half grown
-        if (focusAnim != null) focusAnim.end();
+        stopRise();
+        if (pressAnim != null) pressAnim.cancel();
+        if (focusAnim != null && focusAnim.isStarted()) focusAnim.end();
         if (glintAnim != null) glintAnim.end();
+        if (artFade != null && artFade.isStarted()) artFade.end();
         animate().cancel();
+        risen = riseFrom = riseTo = 0f;
+        tx0 = ty0 = tx1 = ty1 = 0f;
+        pressed = 1f;
         setScaleX(1f);
         setScaleY(1f);
+        if (lift) {
+            setTranslationX(0f);
+            setTranslationY(0f);
+        }
         setTranslationZ(0f);
         setRotationX(0f);
         setRotationY(0f);
+        if (moved != null) moved.run();
         if (glass != null) glass.removeMirror(this);
         super.onDetachedFromWindow();
     }
@@ -283,24 +384,27 @@ final class Card extends View {
     @Override
     protected void onDraw(Canvas c) {
         int w = getWidth(), h = getHeight();
-        if (liftShadow != null && focus > 0f) {
-            // raised, the pane casts a soft shadow onto the photograph, falling further as it lifts
+        // raised, the pane casts a soft shadow onto the photograph, falling further as it lifts: on HIGH
+        // under glass and tvOS tiles (the others cast a real one), on LOW under every tile, unless home's
+        // shared shadow already lies beneath it
+        boolean casts = Ui.light ? !layered : glass != null && bezel || tvos;
+        if (liftShadow != null && focus > 0f && casts) {
             Ui.drawShadow(c, liftShadow, w, h, Ui.dpf(tvos ? 11 : 9) * focus, Math.round((tvos ? 165 : 120) * focus), shadowPaint, shadowMatrix);
         }
         if (glass != null) {
             // neutral frosted glass, the same on every wallpaper; focused, the pane fills with light
-            int smoke = Ui.withAlpha(Ui.SMOKE, Math.round(255 * (0.40f - 0.16f * focus)));
-            int frost = Ui.withAlpha(Ui.IVORY, Math.round(255 * (0.11f + 0.21f * focus)));
             if (glass.hasImage()) {
                 // one slice of the shared, pre-blurred photograph with the tints folded into its filter
-                int key = Math.round(focus * 64);
+                int key = Math.max(0, Math.min(64, Math.round(focus * 64)));
                 if (key != paneKey) {
                     paneKey = key;
-                    blur.setColorFilter(Ui.glass(Ui.GLASS_SAT, smoke, frost));
+                    blur.setColorFilter(paneFilter(key));
                 }
                 getLocationInWindow(loc);
                 glass.drawBlurRound(c, rect, radius, loc[0], loc[1], blur);
             } else {
+                int smoke = Ui.withAlpha(Ui.SMOKE, Math.round(255 * (0.40f - 0.16f * focus)));
+                int frost = Ui.withAlpha(Ui.IVORY, Math.round(255 * (0.11f + 0.21f * focus)));
                 pane.setColor(Ui.over(smoke, frost));
                 c.drawRoundRect(rect, radius, radius, pane);
             }
@@ -319,7 +423,13 @@ final class Card extends View {
             Ui.place(art, artMatrix);
         }
         if (art.getShader() != null) {
+            if (artAlpha < 1f) {
+                // a logo that landed late comes up over the card's colour
+                if (glass == null) c.drawRoundRect(rect, radius, radius, plain);
+                art.setAlpha(Math.round(255 * artAlpha));
+            }
             c.drawRoundRect(rect, radius, radius, art);
+            if (artAlpha < 1f) art.setAlpha(255);
         } else if (glass == null) {
             // no picture on show (no room for one, or its logo still being lifted): the card's colour.
             // Never the painter here: painters allocate, and this runs on every frame the card animates
@@ -362,56 +472,226 @@ final class Card extends View {
         if (badge) c.drawCircle(w - Ui.dpf(9), Ui.dpf(9), Ui.dpf(3.5f), mark);
     }
 
+    private static ColorMatrixColorFilter paneFilter(int key) {
+        ColorMatrixColorFilter f = PANES[key];
+        if (f == null) {
+            float k = key / 64f;
+            f = Ui.glass(Ui.GLASS_SAT, Ui.withAlpha(Ui.SMOKE, Math.round(255 * (0.40f - 0.16f * k))),
+                    Ui.withAlpha(Ui.IVORY, Math.round(255 * (0.11f + 0.21f * k))));
+            PANES[key] = f;
+        }
+        return f;
+    }
+
     @Override
     protected void onFocusChanged(boolean gained, int direction, Rect previous) {
         super.onFocusChanged(gained, direction, previous);
-        if (focusAnim != null) focusAnim.cancel();
-        focusAnim = ValueAnimator.ofFloat(focus, gained ? 1f : 0f);
-        focusAnim.setDuration(gained ? 320 : 200);
-        focusAnim.setInterpolator(Ui.DECEL);
-        focusAnim.addUpdateListener(a -> {
-            focus = (float) a.getAnimatedValue();
-            invalidate();
-        });
-        focusAnim.start();
+        long now = SystemClock.uptimeMillis(), dt = now - movedAt;
+        // a clock started again (a test) reads as a long rest
+        if (dt < 0) dt = Long.MAX_VALUE / 4;
+        pace = gained ? Ui.speedIn(dt) : Ui.speedOut(dt);
+        if (gained) {
+            movedAt = now;
+        } else {
+            getLocationInWindow(loc);
+            leftX = loc[0] + getWidth() * getScaleX() / 2f;
+            leftY = loc[1] + getHeight() * getScaleY() / 2f;
+            leftAt = now;
+        }
+        glow(gained);
         if (lift) {
-            if (swayAnim != null) swayAnim.cancel();
-            if (gained && sway) {
-                setCameraDistance(Ui.density * 5200);
-                // tvOS entry bank: the leading edge dips into the step and springs level on the GPU
-                if (direction == FOCUS_RIGHT) setRotationY(4.2f);
-                else if (direction == FOCUS_LEFT) setRotationY(-4.2f);
-                else if (direction == FOCUS_DOWN) setRotationX(-3.4f);
-                else if (direction == FOCUS_UP) setRotationX(3.4f);
+            if (gained) {
+                lean(direction, previous, now);
+                riseIn();
+            } else {
+                riseOut();
             }
-            float sc = gained ? (tvos ? 1.12f : 1.1f) : 1f;
-            animate().scaleX(sc).scaleY(sc).translationZ(gained ? Ui.dpf(18) : 0f)
-                    .rotationX(0f).rotationY(0f)
-                    .setInterpolator(gained ? Ui.SPRING : Ui.DECEL).setDuration(gained ? 460 : 240)
-                    .setStartDelay(0).setUpdateListener(null).start();
-            if (gained && sway) {
-                setCameraDistance(Ui.density * 5200);
-                // one slow tilt that swells and settles, then stillness: an endless loop would keep
-                // the TV redrawing every frame for as long as a tile sits focused
-                swayAnim = ValueAnimator.ofFloat(0f, 1f);
-                swayAnim.setDuration(3600);
-                swayAnim.setInterpolator(new android.view.animation.LinearInterpolator());
-                swayAnim.setStartDelay(450);
-                swayAnim.addUpdateListener(a -> {
-                    float f = a.getAnimatedFraction();
-                    double p = f * Math.PI * 2;
-                    float amp = (float) Math.sin(Math.PI * f);
-                    // a little more tilt with parallax on, so the layers can be seen moving
-                    float more = parallax ? 1.5f : 1f;
-                    setRotationY(amp * 2.4f * more * (float) Math.sin(p));
-                    setRotationX(amp * 1.6f * more * (float) Math.sin(2 * p + 0.8));
-                    if (parallax) invalidate();
-                });
-                swayAnim.start();
-            }
+            sway(gained);
         }
         if (!gained) removeCallbacks(hold);
         if (focusListener != null) focusListener.onFocus(this, gained);
+    }
+
+    /**
+     * The light of focus (ring, rim, sheen, the glass filling, a baked shadow): eased on HIGH; on LOW
+     * switched at once, one redraw, so only view properties move while the card rises.
+     */
+    private void glow(boolean gained) {
+        if (focusAnim == null) {
+            focusAnim = ValueAnimator.ofFloat(0f, 1f);
+            focusAnim.addUpdateListener(a -> {
+                focus = glowFrom + (glowTo - glowFrom) * a.getAnimatedFraction();
+                invalidate();
+            });
+        }
+        focusAnim.cancel();
+        float to = gained ? 1f : 0f;
+        if (Ui.light) {
+            if (focus != to) {
+                focus = to;
+                invalidate();
+            }
+            return;
+        }
+        glowFrom = focus;
+        glowTo = to;
+        int ms = gained ? (content ? Ui.CONTENT_FOCUS_IN : LIGHT_IN) : content ? Ui.CONTENT_FOCUS_OUT : Ui.APP_FOCUS_OUT;
+        focusAnim.setDuration(Math.round(ms * pace));
+        focusAnim.setInterpolator(gained || !content ? Ui.EASE_DECEL : Ui.EASE_STANDARD);
+        focusAnim.start();
+    }
+
+    /** The 2 dp lean toward the way focus came: away from the card that has just lost it, else Android's direction. */
+    private void lean(int direction, Rect previous, long now) {
+        float dx = 0f, dy = 0f;
+        long since = now - leftAt;
+        if (since >= 0 && since <= 50) {
+            getLocationInWindow(loc);
+            dx = loc[0] + getWidth() * getScaleX() / 2f - leftX;
+            dy = loc[1] + getHeight() * getScaleY() / 2f - leftY;
+        } else if (previous != null) {
+            dx = direction == FOCUS_RIGHT ? 1f : direction == FOCUS_LEFT ? -1f : 0f;
+            dy = direction == FOCUS_DOWN ? 1f : direction == FOCUS_UP ? -1f : 0f;
+        }
+        float n = Ui.dpf(Ui.FOCUS_NUDGE);
+        boolean across = Math.abs(dx) >= Math.abs(dy);
+        leanX = across ? Math.signum(dx) * n : 0f;
+        leanY = across ? 0f : Math.signum(dy) * n;
+    }
+
+    /** Rising into focus: HIGH on its spring, LOW in a short ease-out with no overshoot. */
+    private void riseIn() {
+        stopRise();
+        startMove(1f, leanX, leanY);
+        if (Ui.light) {
+            tweenRise(1f, (content ? Ui.CONTENT_FOCUS_IN : Ui.LOW_FOCUS_IN) * pace, Ui.EASE_DECEL);
+            return;
+        }
+        Spring.Mover m = spring();
+        m.jump(risen);
+        m.to(1f);
+    }
+
+    /** Settling back: 140 ms ease-out for an app, 320 ms ease-in-out for content, on both tiers. */
+    private void riseOut() {
+        stopRise();
+        startMove(0f, 0f, 0f);
+        tweenRise(0f, (content ? Ui.CONTENT_FOCUS_OUT : Ui.APP_FOCUS_OUT) * pace, content ? Ui.EASE_STANDARD : Ui.EASE_DECEL);
+    }
+
+    private void stopRise() {
+        if (spring != null) spring.stop();
+        if (tween != null) tween.cancel();
+    }
+
+    /** A move of the rise toward {@code to}, from wherever the card is: the translation goes from where it is to (x, y). */
+    private void startMove(float to, float x, float y) {
+        riseFrom = risen;
+        riseTo = to;
+        tx0 = getTranslationX();
+        ty0 = getTranslationY();
+        tx1 = x;
+        ty1 = y;
+    }
+
+    private void tweenRise(float to, float ms, TimeInterpolator curve) {
+        if (tween == null) {
+            tween = ValueAnimator.ofFloat(0f, 1f);
+            tween.addUpdateListener(a -> {
+                risen = tweenFrom + (tweenTo - tweenFrom) * a.getAnimatedFraction();
+                applyMotion();
+            });
+        }
+        tweenFrom = risen;
+        tweenTo = to;
+        tween.setDuration(Math.round(ms));
+        tween.setInterpolator(curve);
+        tween.start();
+    }
+
+    /**
+     * The rise's spring for this card's kind at its pace: {@link Spring#app} or {@link Spring#focus},
+     * with its duration shortened in a quick run. Made again only when either changes.
+     */
+    private Spring.Mover spring() {
+        float k = Math.round(pace * 10f) / 10f;
+        if (spring == null || k != springPace || content != springContent) {
+            if (spring != null) spring.stop();
+            Spring s;
+            if (k >= 1f) s = content ? Spring.focus() : Spring.app();
+            else s = content ? new Spring(0.30 * k, 0) : new Spring(0.20 * k, 0.4);
+            spring = new Spring.Mover(s, 1f / 500f, risen, v -> {
+                risen = v;
+                applyMotion();
+            });
+            springPace = k;
+            springContent = content;
+        }
+        return spring;
+    }
+
+    /** The rise moved: the lean follows it, then scale and depth. Properties only, nothing redrawn. */
+    private void applyMotion() {
+        if (lift) {
+            float span = riseTo - riseFrom, f = Math.abs(span) < 1e-4f ? 1f : (risen - riseFrom) / span;
+            setTranslationX(tx0 + (tx1 - tx0) * f);
+            setTranslationY(ty0 + (ty1 - ty0) * f);
+        }
+        applyScale();
+    }
+
+    /** Scale and depth from how far the card has risen and how far it's pressed in. */
+    private void applyScale() {
+        if (lift) {
+            float s = (1f + (focusedScale() - 1f) * risen) * pressed;
+            setScaleX(s);
+            setScaleY(s);
+            // a real shadow, worked out by the GPU every frame, is HIGH's alone (PC6); a press lowers it
+            float sunk = Ui.clamp((1f - pressed) / (1f - Ui.PRESS_FACTOR), 0f, 1f);
+            setTranslationZ(Ui.light ? 0f : Ui.dpf(18) * Math.max(0f, risen) * (1f - 0.55f * sunk));
+        } else {
+            setScaleX(pressed);
+            setScaleY(pressed);
+        }
+        if (moved != null) moved.run();
+    }
+
+    /**
+     * Aura's own style on HIGH: an entry bank into the step that springs level on the GPU, then one
+     * slow tilt that swells and settles, then stillness (an endless loop would keep the TV redrawing
+     * every frame for as long as a tile sits focused).
+     */
+    private void sway(boolean gained) {
+        if (swayAnim != null) swayAnim.cancel();
+        boolean swaying = gained && sway && !Ui.light;
+        if (swaying) {
+            setCameraDistance(Ui.density * 5200);
+            // tvOS entry bank: the leading edge dips into the step
+            if (leanX > 0f) setRotationY(4.2f);
+            else if (leanX < 0f) setRotationY(-4.2f);
+            else if (leanY > 0f) setRotationX(-3.4f);
+            else if (leanY < 0f) setRotationX(3.4f);
+        }
+        if (swaying || getRotationX() != 0f || getRotationY() != 0f) {
+            animate().rotationX(0f).rotationY(0f).setInterpolator(gained ? Ui.SPRING : Ui.DECEL)
+                    .setDuration(gained ? 460 : 240).setStartDelay(0).setUpdateListener(null).start();
+        }
+        if (!swaying) return;
+        swayAnim = ValueAnimator.ofFloat(0f, 1f);
+        swayAnim.setDuration(3600);
+        swayAnim.setInterpolator(new android.view.animation.LinearInterpolator());
+        swayAnim.setStartDelay(450);
+        swayAnim.addUpdateListener(a -> {
+            float f = a.getAnimatedFraction();
+            double p = f * Math.PI * 2;
+            float amp = (float) Math.sin(Math.PI * f);
+            // a little more tilt with parallax on, so the layers can be seen moving
+            float more = parallax ? 1.5f : 1f;
+            setRotationY(amp * 2.4f * more * (float) Math.sin(p));
+            setRotationX(amp * 1.6f * more * (float) Math.sin(2 * p + 0.8));
+            if (parallax) invalidate();
+        });
+        swayAnim.start();
     }
 
     /**
@@ -454,11 +734,20 @@ final class Card extends View {
         return super.onKeyUp(code, e);
     }
 
+    /** OK held down sinks the card to 0.95 of its focused size in 100 ms; let go, it comes back in 250 ms. */
     private void press(boolean down) {
-        float s = down ? (lift ? 1.03f : 0.95f) : (isFocused() && lift ? (tvos ? 1.12f : 1.1f) : 1f);
-        float z = down ? (lift ? Ui.dpf(8) : 0f) : (isFocused() && lift ? Ui.dpf(18) : 0f);
-        animate().scaleX(s).scaleY(s).translationZ(z)
-                .setDuration(down ? 90 : 300).setStartDelay(0)
-                .setInterpolator(down ? Ui.DECEL : Ui.SPRING).setUpdateListener(null).start();
+        if (pressAnim == null) {
+            pressAnim = ValueAnimator.ofFloat(0f, 1f);
+            pressAnim.setInterpolator(Ui.EASE_DECEL);
+            pressAnim.addUpdateListener(a -> {
+                pressed = pressFrom + (pressTo - pressFrom) * a.getAnimatedFraction();
+                applyScale();
+            });
+        }
+        pressAnim.cancel();
+        pressFrom = pressed;
+        pressTo = down ? Ui.PRESS_FACTOR : 1f;
+        pressAnim.setDuration(down ? Ui.PRESS_DOWN : Ui.PRESS_UP);
+        pressAnim.start();
     }
 }

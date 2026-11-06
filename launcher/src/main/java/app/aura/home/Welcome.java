@@ -372,6 +372,7 @@ final class Welcome extends FrameLayout {
             if (app != null) {
                 Tiles.Painter art = Tiles.forStyle(app, style);
                 Card card = new Card(act, art, app.color, 14);
+                card.setContentDescription(app.label);
                 card.tvos = style.equals("tvos");
                 if (style.equals("glass")) card.glass = backdrop;
                 tile = card;

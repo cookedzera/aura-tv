@@ -9,6 +9,7 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
 import android.net.ConnectivityManager;
@@ -24,6 +25,7 @@ import android.provider.Settings;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
@@ -64,6 +66,14 @@ final class WifiSheet extends GlassFrame {
     private final ScrollView scroll;
     private final EditText password;
     private final TextView joinLabel;
+    private final GlassFrame.Hold hold;
+    private final GlassFrame.Way way;
+    /** Fading out: still on screen for a moment, but no longer open, and nothing in it takes the focus. */
+    private boolean closing;
+    private final Runnable gone = () -> {
+        closing = false;
+        setVisibility(View.GONE);
+    };
     private String joinSsid;
     private boolean listening;
 
@@ -192,10 +202,13 @@ final class WifiSheet extends GlassFrame {
         col.addView(scroll, sl);
         addView(col, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setVisibility(View.GONE);
+        setContentDescription(act.getString(R.string.wi_fi));
+        hold = new GlassFrame.Hold(this, () -> (list.getChildCount() > 0 ? list.getChildAt(0) : toggle).requestFocus());
+        way = new GlassFrame.Way(this, GlassFrame.sheetAt(this));
     }
 
     boolean isOpen() {
-        return getVisibility() == View.VISIBLE;
+        return getVisibility() == View.VISIBLE && !closing;
     }
 
     /** False on a box with no Wi-Fi at all (wired only): Android has no Wi-Fi service to ask. */
@@ -206,6 +219,8 @@ final class WifiSheet extends GlassFrame {
     void open() {
         // look the name up afresh each time: the TV may have moved networks while the sheet was shut
         knownName = knownLink = null;
+        closing = false;
+        setDescendantFocusability(FOCUS_BEFORE_DESCENDANTS);
         setVisibility(View.VISIBLE);
         join.setVisibility(View.GONE);
         // asking at runtime arrived in Android 6; before it the manifest's grant is enough
@@ -222,16 +237,14 @@ final class WifiSheet extends GlassFrame {
         handler.removeCallbacks(scan);
         handler.post(scan);
         rebuild();
-        setAlpha(0f);
-        setTranslationX(Ui.dp(24));
-        animate().alpha(1f).translationX(0f).setStartDelay(0).setDuration(380).setInterpolator(Ui.EMPHASIZED).start();
-        View first = list.getChildCount() > 0 ? list.getChildAt(0) : toggle;
-        first.requestFocus();
+        way.in(Ui.LOW_SHEET_IN, null);
+        hold.start();
+        announceForAccessibility(getContentDescription());
     }
 
     /** Location was just allowed: the scan that came back empty without it is run again now. */
     void granted() {
-        if (getVisibility() != View.VISIBLE) return;
+        if (!isOpen()) return;
         handler.removeCallbacks(scan);
         handler.post(scan);
         rebuild();
@@ -251,7 +264,27 @@ final class WifiSheet extends GlassFrame {
             listening = false;
         }
         hideKeyboard();
-        setVisibility(View.GONE);
+        if (getVisibility() != View.VISIBLE) return;
+        hold.stop();
+        closing = true;
+        setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
+        way.out(gone);
+    }
+
+    @Override
+    public boolean onKeyDown(int code, KeyEvent e) {
+        return hold.down(code) || super.onKeyDown(code, e);
+    }
+
+    @Override
+    public boolean onKeyUp(int code, KeyEvent e) {
+        return hold.up(code) || super.onKeyUp(code, e);
+    }
+
+    @Override
+    protected void onFocusChanged(boolean gained, int direction, Rect previous) {
+        super.onFocusChanged(gained, direction, previous);
+        if (!gained) hold.stop();
     }
 
     /** Back first leaves the password field, then the sheet. */
@@ -400,7 +433,7 @@ final class WifiSheet extends GlassFrame {
         Pad p = new Pad(act, null, 14, 0f);
         p.plainColor = n.connected ? 0x2630D158 : 0x14FFFFFF;
         p.edgeLight = false;
-        p.focusScale = 1.03f;
+        p.row = true;
         p.setTag(n.ssid);
         LinearLayout r = new LinearLayout(act);
         r.setGravity(Gravity.CENTER_VERTICAL);
@@ -502,7 +535,7 @@ final class WifiSheet extends GlassFrame {
         Pad p = new Pad(act, null, 14, 0f);
         p.plainColor = live ? 0x2630D158 : 0x14FFFFFF;
         p.edgeLight = false;
-        p.focusScale = 1.03f;
+        p.row = true;
         p.setTag("action:" + label);
         LinearLayout r = new LinearLayout(act);
         r.setGravity(Gravity.CENTER_VERTICAL);

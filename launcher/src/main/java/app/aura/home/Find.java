@@ -136,6 +136,7 @@ final class Find extends FrameLayout {
 
         // the TV's own search, for a film or a song rather than an app
         Pad row = new Pad(c, null, 18, 0f);
+        row.row = true;
         row.plainColor = 0x14FFFFFF;
         row.edgeLight = false;
         row.focusScale = 1.04f;
@@ -231,6 +232,7 @@ final class Find extends FrameLayout {
             item.setGravity(Gravity.CENTER_HORIZONTAL);
             item.setClipChildren(false);
             Card card = new Card(getContext(), host.art(a), a.color, 14);
+            card.setContentDescription(a.label);
             card.setId(View.generateViewId());
             card.setNextFocusUpId(field.getId());
             if (host.glass() && a.art == null) card.glass = host.backdrop();

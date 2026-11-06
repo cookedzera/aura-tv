@@ -2653,6 +2653,7 @@ final class SettingsPanel {
     private void addSetupCard() {
         boolean done = Adb.on(act);
         Pad p = new Pad(act, null, 18, 0f);
+        p.row = true;
         p.plainColor = done ? 0x1F34C759 : 0x402F7BFF;
         p.edgeLight = false;
         p.focusScale = 1.03f;
@@ -2721,6 +2722,7 @@ final class SettingsPanel {
 
     private void add(String label, String value, String tag, android.graphics.Bitmap thumb, Runnable run) {
         Pad p = new Pad(act, null, 16, 0f);
+        p.row = true;
         p.plainColor = 0x1AFFFFFF;
         p.edgeLight = false;
         p.focusScale = 1.03f;

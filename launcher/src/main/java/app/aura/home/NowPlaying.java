@@ -129,7 +129,7 @@ final class NowPlaying extends FrameLayout {
 
         app = Ui.caps(a, 7.5f, 0x99FFFFFF, 0.32f);
         col.addView(app, lp(0, 22));
-        title = Ui.text(a, 30, Ui.light, 0xFFFFFFFF);
+        title = Ui.text(a, 30, Ui.lightFace, 0xFFFFFFFF);
         title.setIncludeFontPadding(true);
         title.setLetterSpacing(-0.02f);
         title.setSingleLine(true);
@@ -484,7 +484,7 @@ final class NowPlaying extends FrameLayout {
         Pad p = new Pad(act, null, sizeDp / 2f, 0f);
         p.plainColor = 0x1AFFFFFF;
         p.edgeLight = false;
-        p.focusScale = 1.12f;
+        p.focusScale = Ui.FOCUS_SCALE_CONTROL;
         ImageView iv = p.tint(new ImageView(act), 1f);
         iv.setImageResource(icon);
         int s = Math.round(sizeDp * 0.4f);

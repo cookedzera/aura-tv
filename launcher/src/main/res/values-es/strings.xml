@@ -1092,4 +1092,7 @@
     <string name="mbps_value">%1$s Mbps</string>
     <plurals name="n_more_caps"><item quantity="one">+%1$d MÁS</item><item quantity="other">+%1$d MÁS</item></plurals>
     <string name="couldnt_open_that">No se pudo abrir</string>
+    <string name="partway_through">Sin terminar: %1$s</string>
+    <string name="partway_through_left">Sin terminar: %1$s, tiempo restante: %2$s</string>
+    <string name="volume">Volumen</string>
 </resources>

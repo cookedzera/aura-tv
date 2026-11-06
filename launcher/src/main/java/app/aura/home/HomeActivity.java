@@ -30,6 +30,7 @@ import android.speech.RecognizerIntent;
 import android.text.format.DateFormat;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.SoundEffectConstants;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
@@ -64,6 +65,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private static final long RACK_MS = 12_000, PHOTO_MS = 45_000;
     /** Metrics in dp, for the TV's 960 x 540 dp screen. */
     private static final int GAP = 19;
+    /** LOW's shared baked shadow under the focused tile. */
+    private FocusLayer focusLayer;
     /** The app grid: columns, then the tile and row measures that follow from them (see {@link #sizeGrid}). */
     private int COLS = 5, TILE_W = 148, TILE_H = 84, ROW_H = 122;
     private static final int PAGE_X = 104, WIDGET_Y = 104, WIDGET_H = 150, GRID_Y = 296, FOCUS_LINE = 210;
@@ -74,8 +77,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     static final int[] WIDGET_NAMES = {R.string.widget_sky, R.string.smart_stack, R.string.today};
     private static final int SIDE = 0, WIDGETS = 1, GRID = 2, SHELF = 3, TOP = 4;
     private static final int SIDE_GLOW = 0xFF9FB2D6, DAY_GLOW = 0xFF7FB2FF;
-    /** Minimum gap between moves while a direction is held: fast, but every hop stays smooth. */
-    private static final long HOLD_STEP_MS = 110;
+    /** The lengths of Spring.row() and Spring.smooth() (ms): a move whose distance floor (Ui.scrollFloorMs) is longer gets a slower spring. */
+    private static final long ROW_MS = 350, SMOOTH_MS = 450;
+    /** The longest a row or the page glides: farther than that, it jumps to where a glide this long begins. */
+    private static final long GLIDE_MAX_MS = 700;
+    /** How far Spring.row() trails a target moving at a steady speed (2ζ/ω, in ms of that travel). */
+    private static final float ROW_TRAIL_MS = 95f;
     private static List<AppRepo.App> cache;
     /** False until the first launch of this process has shown the boot screen. */
     private static boolean warm;
@@ -136,7 +143,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private TextView tdKicker;
     private int zone = GRID, contentZone = GRID, sideAt, widgetAt, gridAt, lastCol = -1, lastHour = -1;
     private float scrollTarget;
-    private ValueAnimator scrollAnim, wiggle;
+    private ValueAnimator wiggle;
     private boolean ccOpen, racked, photo, resumed, introPending, editing, held, tipShown, dashboard = true, greetingShown = true;
     private boolean wallReady, appsReady, splashFinishing;
     /** An app changed while home was behind another (light mode): the list is read again on return. */
@@ -151,6 +158,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     static volatile long lastKeyAt;
     private int appsCount;
     private long splashAt, lastStep;
+    /** A held key's last repeat (uptime), and how far ahead of focus its row aims meanwhile (columns). */
+    private long lastRepeat;
+    private float holdLead;
     private View beforeCc;
     private int swallowUp = -1, heldConfirm = KeyEvent.KEYCODE_DPAD_CENTER;
     /** Live Inputs: HDMI sources that are switched on right now, as {id, label}. */
@@ -322,6 +332,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         } else {
             backdrop.setDefocus(homeDefocus(), 0);
         }
+        restoreFocus(state);
         if (cache != null) {
             apps = cache;
             populate();
@@ -543,6 +554,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     protected void onResume() {
         super.onResume();
         resumed = true;
+        // still stepped back for an app that never hid home (one drawn over it, or one that didn't come)
+        comeForward(true);
         // home is up: the cover over a slow Home on older Fire TVs goes (see HomeCover)
         HomeCover.hide(true);
         // while home is on show, a freeze is caught in the act (see Problem reports)
@@ -665,6 +678,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     @Override
     protected void onStop() {
         super.onStop();
+        // out of sight: full size again, so home never comes back with a snap
+        comeForward(false);
+        keepFocus();
         watchVpn(false);
         endLaunch();
         unregisterReceiver(clockReceiver);
@@ -675,6 +691,48 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             } catch (RuntimeException ignored) {
             }
         }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        if (gridAt < cells.size()) {
+            out.putString("aura_focus_key", cells.get(gridAt).key());
+            out.putInt("aura_focus_at", gridAt);
+        }
+    }
+
+    /** The tile the first fill comes back to (see populate): by its key, else by its place. */
+    private String focusKey;
+    private int focusIndex = -1;
+    /** The tile last written by keepFocus in this process. */
+    private static String keptFocus;
+
+    /**
+     * Back on the tile you left after Android built home again: from the saved state, else (home
+     * opts out of saved state, stateNotNeeded) from where it last went behind an app since the TV
+     * started, as when it was closed for memory while a film played.
+     */
+    private void restoreFocus(Bundle state) {
+        if (state != null) {
+            focusKey = state.getString("aura_focus_key");
+            focusIndex = state.getInt("aura_focus_at", -1);
+            return;
+        }
+        SharedPreferences d = Prefs.device(this);
+        if (d.getLong("focus_time", 0) < System.currentTimeMillis() - SystemClock.elapsedRealtime()) return;
+        focusKey = d.getString("focus_key", null);
+        focusIndex = d.getInt("focus_at", -1);
+    }
+
+    /** The tile in focus as home goes behind an app, written only when it's another one. */
+    private void keepFocus() {
+        if (gridAt >= cells.size()) return;
+        String key = cells.get(gridAt).key();
+        if ((gridAt + "|" + key).equals(keptFocus)) return;
+        keptFocus = gridAt + "|" + key;
+        Prefs.device(this).edit().putString("focus_key", key).putInt("focus_at", gridAt)
+                .putLong("focus_time", System.currentTimeMillis()).apply();
     }
 
     @Override
@@ -942,6 +1000,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         page = flat(this);
         page.setClipChildren(false);
         home.addView(page, new FrameLayout.LayoutParams(MATCH, Ui.dp(GRID_Y + 2 * ROW_H)));
+        // where focus waits while tiles are rebuilt (see park): it draws nothing, and only takes focus then
+        parking = new View(this);
+        parking.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        if (Build.VERSION.SDK_INT >= 26) parking.setDefaultFocusHighlightEnabled(false);
+        page.addView(parking, new FrameLayout.LayoutParams(1, 1));
         buildGreeting();
         buildSky();
         buildForYou();
@@ -959,6 +1022,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         dockGlass.edgeLight = true;
         dockGlass.setVisibility(View.GONE);
         page.addView(dockGlass, frame(MATCH, Ui.dp(ROW_H), Gravity.TOP | Gravity.START, 0, 0, 0, 0));
+        focusLayer = FocusLayer.attach(page, dockGlass);
         // the page dots sit at the foot of the screen, under the dock, centred on it
         pageDots = new PageDots(this);
         pageDots.setVisibility(View.GONE);
@@ -1103,7 +1167,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             @Override
             public void launch(AppRepo.App a, View from) {
                 switcherOver = null;
-                switcher.launchInto(a, () -> openFromSwitcher(a.launch, a.label));
+                // measured now: the card leaves the deck as the switcher's own zoom begins
+                final Bundle zoom = zoomFrom(from);
+                switcher.launchInto(a, () -> openFromSwitcher(a.launch, a.label, zoom));
             }
 
             @Override
@@ -1276,6 +1342,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         });
         root.addView(findPanel, match());
         menu = new AppMenu(this, backdrop);
+        // LOW draws no dim layer behind a menu: the tiles step back instead, all but the one it's for
+        menu.behind = on -> {
+            for (int k = 0; k < cells.size(); k++) {
+                float a = rowAlpha(k);
+                cells.get(k).setAlpha(on && k != gridAt ? a * Ui.LOW_MENU_ROWS : a);
+            }
+        };
         root.addView(menu, match());
         ask = new Ask(this, backdrop);
         root.addView(ask, match());
@@ -1304,7 +1377,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
         };
         greeting.setOrientation(LinearLayout.VERTICAL);
-        hello = Ui.text(this, 26, Ui.light, 0xFFF7F4EE);
+        hello = Ui.text(this, 26, Ui.lightFace, 0xFFF7F4EE);
         hello.setIncludeFontPadding(true);
         hello.setLetterSpacing(-0.02f);
         Ui.lift(hello, 10);
@@ -1615,7 +1688,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         lKick = Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.24f);
         lKick.setEllipsize(android.text.TextUtils.TruncateAt.END);
         col.addView(lKick, lp(MATCH, WRAP, 0, 0));
-        lTitle = Ui.text(this, 24, Ui.light, 0xFFFFFFFF);
+        lTitle = Ui.text(this, 24, Ui.lightFace, 0xFFFFFFFF);
         lTitle.setIncludeFontPadding(true);
         lTitle.setLetterSpacing(-0.02f);
         lTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -2037,7 +2110,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private Pad topButton(int icon, int right, Runnable run) {
         Pad b = new Pad(this, backdrop, 20, 0.26f);
         b.frost = 0.06f;
-        b.focusScale = 1.14f;
+        b.focusScale = Ui.FOCUS_SCALE_CONTROL;
         ImageView iv = b.tint(ControlCenter.icon(this, icon), 1f);
         b.addView(iv, frame(Ui.dp(17), Ui.dp(17), Gravity.CENTER, 0, 0, 0, 0));
         b.onClick = run;
@@ -2199,7 +2272,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         Pad p = new Pad(this, null, 21, 0f);
         p.plainColor = current ? 0x29FFFFFF : 0x00FFFFFF;
         p.edgeLight = false;
-        p.focusScale = 1.12f;
+        p.focusScale = Ui.FOCUS_SCALE_CONTROL;
+        p.setContentDescription(label);
         p.addView(p.tint(ControlCenter.icon(this, iconRes), 1f), frame(Ui.dp(19), Ui.dp(19), Gravity.CENTER, 0, 0, 0, 0));
         p.onClick = action;
         col.addView(p, lp(Ui.dp(42), Ui.dp(42), 0, side.isEmpty() ? 0 : 6));
@@ -2360,6 +2434,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tl.leftMargin = Ui.dp(10);
         r.addView(hudText, tl);
         hud.addView(r, new FrameLayout.LayoutParams(WRAP, MATCH));
+        // TalkBack reads each new message as it comes, without moving focus
+        hud.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         hud.setAlpha(0f);
         hud.setVisibility(View.INVISIBLE);
         root.addView(hud, frame(WRAP, Ui.dp(42), Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, Ui.dp(28), 0, 0));
@@ -2487,6 +2563,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         String keep = gridAt < cells.size() ? cells.get(gridAt).key() : null;
         // on the first fill the window may already have parked focus on the rail; the grid takes it
         boolean firstFill = cells.isEmpty(), hadFocus = zone == GRID && getCurrentFocus() instanceof Card;
+        int place = gridAt;
+        // the first fill after Android built home again: the tile you left (restoreFocus)
+        if (firstFill && focusKey != null) {
+            keep = focusKey;
+            place = Math.max(0, focusIndex);
+        }
+        View had = getWindow().getCurrentFocus();
         stopPreview();
         Map<String, Cell> old = new java.util.HashMap<>();
         for (Cell c : cells) old.put(c.key(), c);
@@ -2497,14 +2580,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         rowsDim = rows && Categories.dim(this);
         if (!rows) {
             // back to the grid: no row slide may keep moving tiles
-            for (RowInfo r : rowInfo) if (r.anim != null) r.anim.cancel();
+            for (RowInfo r : rowInfo) if (r.glide != null) r.glide.stop();
             rowInfo.clear();
             rowIdx = colIdx = new int[0];
         }
         paged = !rows && Prefs.on(this, Prefs.GRID_PAGES);
         if (!paged && pageShift != 0f) {
             // pages switched off: the grid lies flat again, from the first column
-            if (pageAnim != null) pageAnim.cancel();
+            if (pageGlide != null) pageGlide.stop();
+            pageGlide = null;
             gridPage = 0;
             pageShift = 0f;
         }
@@ -2523,6 +2607,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 continue;
             }
             final Cell cell = new Cell(this, Tiles.input(this, label), 0xFF46D7C8, label, "input:" + id, TILE_W, TILE_H);
+            cell.card.setGrowRoom(GAP / 2f);
             cell.sig = sig;
             cell.card.glass = backdrop;
             cell.card.tvos = tvosTiles;
@@ -2576,9 +2661,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 }
             }
         }
+        // the tile in focus is going: focus waits on the page meanwhile, as in leanback's grid, rather
+        // than Android handing it to the first view it finds (the sidebar sliding in, the zone changing)
+        boolean parked = false;
+        if (had != null) for (Cell c : old.values()) if (c.card == had) parked = park();
         // tiles nothing kept: gone from the page
         for (Cell c : old.values()) page.removeView(c);
-        int at = 0;
+        int at = -1;
         for (int i = 0; i < cells.size(); i++) {
             Cell c = cells.get(i);
             c.setNameMode(nameMode, dock && rowOf(i) == 0);
@@ -2591,10 +2680,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (c.getParent() == null) page.addView(c, new FrameLayout.LayoutParams(Ui.dp(TILE_W), WRAP));
             if (c.key().equals(keep)) at = i;
         }
+        // that app has gone: the tile now in its place
+        if (at < 0) at = Math.max(0, Math.min(place, cells.size() - 1));
         gridLabel.setText(getString(R.string.your_apps_n, sorted.size() + foldered.size()));
         allAppsCount = 0;
         for (Object e : entries) allAppsCount += e instanceof Folders.Folder ? folderApps((Folders.Folder) e).size() : 1;
         if (!dock) gridLabel.setVisibility(rows ? View.GONE : View.VISIBLE);
+        // before the labels: the rows are lit for the tile focus goes back to
+        gridAt = at;
         placeRowLabels();
         int lines = rows ? rowInfo.size() : (cells.size() + COLS - 1) / COLS;
         page.getLayoutParams().height = Ui.dp(gridY() + (paged ? Math.min(2, lines) * ROW_H : lines * rowH()) + 40);
@@ -2605,9 +2698,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // apps removed from the last page: back to the last there is
         if (paged && gridPage > pages - 1) slideTo(Math.max(0, pages - 1));
         page.requestLayout();
-        gridAt = at;
-        if (!ccOpen && (firstFill || hadFocus || getCurrentFocus() == null)) focusGrid(at);
+        if (!ccOpen && (firstFill || hadFocus || parked || getCurrentFocus() == null)) focusGrid(at);
         else if (!cells.isEmpty()) reveal(contentZone == WIDGETS ? 0 : at);
+        if (parked) unpark();
+        if (firstFill && !cells.isEmpty()) {
+            focusKey = null;
+            focusIndex = -1;
+            // home arrives showing the tile it comes back to, rather than sliding over to it
+            settleNow();
+        }
         if (introPending && splash == null) cascade();
         if (!appsReady) {
             appsReady = true;
@@ -2634,6 +2733,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         Cell cell = reuse(old, row == null ? f.tag() : row + "|" + f.tag(), sig.toString());
         if (cell == null) {
             cell = new Cell(this, Tiles.folder(inside, !glassTiles), 0xFF9AA6BA, f.name, f.tag(), TILE_W, TILE_H);
+            cell.card.setGrowRoom(GAP / 2f);
             cell.sig = sig.toString();
             if (glassTiles) cell.card.glass = backdrop;
             cell.card.tvos = style.equals("tvos") || dock;
@@ -2655,6 +2755,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         Cell cell = reuse(old, row == null ? a.pkg : row + "|" + a.pkg, sig);
         if (cell == null) {
             cell = new Cell(this, artFor(a), a.color, a.label, a.pkg, TILE_W, TILE_H);
+            cell.card.setGrowRoom(GAP / 2f);
             cell.sig = sig;
             if (style.equals("glass") && a.art == null) cell.card.glass = backdrop;
             cell.card.tvos = style.equals("tvos") || dock;
@@ -2692,13 +2793,79 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         /** The first column on screen, and where the slide is now (columns, animated). */
         int first;
         float shift;
-        ValueAnimator anim;
+        /** Its slide, made the first time it moves (see slideRow). */
+        Glide glide;
 
         RowInfo(String id, String title, int start, int count) {
             this.id = id;
             this.title = title;
             this.start = start;
             this.count = count;
+        }
+    }
+
+    /**
+     * One value on Aura's retargetable spring ({@link Spring.Mover}) that never moves quicker than
+     * Android TV's own rows ({@link Ui#scrollFloorMs}): from rest, a move the floor gives longer than
+     * its spring gets a calm spring of that length, at most GLIDE_MAX_MS, and anything farther first
+     * jumps to where a glide that long begins. Mid-flight it's only retargeted, keeping its speed.
+     */
+    private static final class Glide {
+        private final Spring spring;
+        private final long springMs;
+        private final float minChange;
+        private final Spring.Sink sink;
+        private Spring.Mover mover;
+        private boolean slow;
+
+        Glide(Spring spring, long springMs, float minChange, float start, Spring.Sink sink) {
+            this.spring = spring;
+            this.springMs = springMs;
+            this.minChange = minChange;
+            this.sink = sink;
+            mover = new Spring.Mover(spring, minChange, start, sink);
+        }
+
+        /** Heads for {@code to}; {@code floorMs}: the least time the distance there may take. */
+        void to(float to, long floorMs) {
+            if (!mover.moving()) {
+                float from = mover.value();
+                if (floorMs > springMs) {
+                    float start = from;
+                    if (floorMs > GLIDE_MAX_MS) {
+                        start = to - (to - from) * GLIDE_MAX_MS / floorMs;
+                        floorMs = GLIDE_MAX_MS;
+                    }
+                    mover = new Spring.Mover(new Spring(floorMs / 1000.0, 0), minChange, start, sink);
+                    slow = true;
+                    if (start != from) sink.at(start);
+                } else if (slow) {
+                    mover = new Spring.Mover(spring, minChange, from, sink);
+                    slow = false;
+                }
+            }
+            mover.to(to);
+        }
+
+        float value() {
+            return mover.value();
+        }
+
+        float target() {
+            return mover.target();
+        }
+
+        boolean moving() {
+            return mover.moving();
+        }
+
+        void stop() {
+            mover.stop();
+        }
+
+        /** Straight to where it's heading. */
+        void finish() {
+            if (mover.moving()) mover.jump(mover.target());
         }
     }
 
@@ -2710,7 +2877,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         Map<String, Integer> firstBefore = new java.util.HashMap<>();
         for (RowInfo r : rowInfo) {
             // a slide still running would move tiles that belong to other rows by now
-            if (r.anim != null) r.anim.cancel();
+            if (r.glide != null) r.glide.stop();
             firstBefore.put(r.id, r.first);
         }
         rowInfo.clear();
@@ -2807,15 +2974,68 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         dimRows(zone == GRID && gridAt < rowIdx.length ? rowIdx[gridAt] : -1);
     }
 
-    /** Rows other than the one you're on recede a little (Settings, Home screen); all lit off the rows. */
+    /** Each row's light: 1 where focus is, Ui.DIM_OTHER_ROWS on the others while rows recede (dimRows). */
+    private float[] rowLit = new float[0], litFrom = new float[0], litTo = new float[0];
+    private ValueAnimator litAnim;
+
+    /** Rows other than the one you're on recede a little (Settings, Home screen), at once; all lit off the rows. */
     private void dimRows(int on) {
+        dimRows(on, false);
+    }
+
+    /**
+     * The receding is the tiles' own alpha, so nothing is drawn again. {@code eased}, it takes 250 ms
+     * as Android TV's rows do, except in light mode, where it changes at once.
+     */
+    private void dimRows(int on, boolean eased) {
         if (!rows) return;
-        for (int i = 0; i < cells.size() && i < rowIdx.length; i++) {
-            cells.get(i).card.setDim(rowsDim && on >= 0 && rowIdx[i] != on ? 0.42f : 0f);
+        int n = rowInfo.size();
+        if (rowLit.length != n) {
+            rowLit = new float[n];
+            litFrom = new float[n];
+            litTo = new float[n];
+            java.util.Arrays.fill(rowLit, 1f);
+            java.util.Arrays.fill(litTo, 1f);
+            eased = false;
         }
-        for (int i = 0; i < rowLabels.size() && i < rowInfo.size(); i++) {
-            rowLabels.get(i).setAlpha(rowsDim && on >= 0 && i != on ? 0.55f : 1f);
+        boolean changed = false;
+        for (int r = 0; r < n; r++) {
+            float to = rowsDim && on >= 0 && r != on ? Ui.DIM_OTHER_ROWS : 1f;
+            changed |= litTo[r] != to;
+            litTo[r] = to;
         }
+        // a move along the same row
+        if (eased && !changed) return;
+        if (!eased || Ui.light) {
+            if (litAnim != null) litAnim.cancel();
+            System.arraycopy(litTo, 0, rowLit, 0, n);
+            for (int r = 0; r < n; r++) lightRow(r);
+            return;
+        }
+        System.arraycopy(rowLit, 0, litFrom, 0, n);
+        if (litAnim == null) {
+            litAnim = ValueAnimator.ofFloat(0f, 1f);
+            litAnim.setDuration(250);
+            litAnim.setInterpolator(Ui.DECEL);
+            litAnim.addUpdateListener(a -> {
+                float k = a.getAnimatedFraction();
+                for (int r = 0; r < rowLit.length; r++) {
+                    if (litFrom[r] == litTo[r]) continue;
+                    rowLit[r] = litFrom[r] + (litTo[r] - litFrom[r]) * k;
+                    lightRow(r);
+                }
+            });
+        }
+        litAnim.cancel();
+        litAnim.start();
+    }
+
+    /** Row {@code r}'s tiles and label at its light. */
+    private void lightRow(int r) {
+        if (r >= rowInfo.size()) return;
+        RowInfo row = rowInfo.get(r);
+        for (int k = row.start; k < row.start + row.count && k < cells.size(); k++) cells.get(k).setAlpha(rowAlpha(k));
+        if (r < rowLabels.size()) rowLabels.get(r).setAlpha(1f - (1f - rowLit[r]) / (1f - Ui.DIM_OTHER_ROWS) * 0.45f);
     }
 
     /** Slides a row so column {@code col} is on screen; those slid past the left edge fade out. */
@@ -2824,41 +3044,62 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         int col = colIdx[i], first = r.first;
         if (col < first) first = col;
         else if (col >= first + COLS) first = col - COLS + 1;
-        if (first == r.first && r.anim == null) return;
+        int way = Integer.signum(first - r.first);
         r.first = first;
-        if (r.anim != null) r.anim.cancel();
-        final RowInfo row = r;
-        r.anim = ValueAnimator.ofFloat(r.shift, first);
-        r.anim.setDuration(420);
-        r.anim.setInterpolator(Ui.EMPHASIZED);
-        r.anim.addUpdateListener(a -> {
-            // the rows were built again meanwhile: this slide belongs to none of them
-            if (!rowInfo.contains(row)) {
-                a.cancel();
-                return;
-            }
-            row.shift = (float) a.getAnimatedValue();
-            for (int k = row.start; k < row.start + row.count && k < cells.size(); k++) {
-                Cell c = cells.get(k);
-                c.setTranslationX(cellX(k));
-                c.setAlpha(rowAlpha(k));
-                if (c.card.glass != null) c.card.invalidate();
-            }
-            if (a.getAnimatedFraction() >= 1f) row.anim = null;
-        });
-        r.anim.start();
+        float to = first;
+        // held: aimed ahead by what the spring trails a steady target, so the row keeps pace and the
+        // tile in focus stays on screen; settle() brings it to a whole column once the key is let go
+        if (held && way != 0) to = Math.max(0f, Math.min(Math.max(0, r.count - COLS), first + way * holdLead));
+        if (to != r.shift || r.glide != null && r.glide.moving()) slideRow(r, to);
+    }
+
+    /** Row {@code r} glides to column {@code to}, retargeted mid-flight (see Glide). */
+    private void slideRow(RowInfo r, float to) {
+        float pitch = Ui.dpf(TILE_W + GAP);
+        if (r.glide == null) {
+            final RowInfo row = r;
+            r.glide = new Glide(Spring.row(), ROW_MS, 1f / pitch, r.shift, v -> {
+                // the rows were built again meanwhile: this slide belongs to none of them
+                if (!rowInfo.contains(row)) {
+                    if (row.glide != null) row.glide.stop();
+                    return;
+                }
+                row.shift = v;
+                for (int k = row.start; k < row.start + row.count && k < cells.size(); k++) {
+                    Cell c = cells.get(k);
+                    c.setTranslationX(placeX(k, c));
+                    c.setAlpha(rowAlpha(k));
+                    if (c.card.glass != null) c.card.invalidate();
+                }
+            });
+        }
+        r.glide.to(to, floorMs(Math.abs(to - r.glide.value()) * pitch, false));
+    }
+
+    /** Android TV's least time for a scroll of {@code px} across the screen, or down it. */
+    private long floorMs(float px, boolean vertical) {
+        int screen = vertical ? root.getHeight() : root.getWidth();
+        return Ui.scrollFloorMs(px, getResources().getDisplayMetrics().densityDpi, screen > 0 ? screen : Ui.dp(vertical ? 540 : 960));
+    }
+
+    /** Every row, the page and its pages straight to where they're heading. */
+    private void settleNow() {
+        for (int r = 0; r < rowInfo.size(); r++) if (rowInfo.get(r).glide != null) rowInfo.get(r).glide.finish();
+        if (scroll != null) scroll.finish();
+        if (pageGlide != null) pageGlide.finish();
     }
 
     /**
      * How much of tile {@code k} shows as its row slides: those past the left edge fade out; in the
-     * tvOS style those past the dock's right edge too, as the glass ends there.
+     * tvOS style those past the dock's right edge too, as the glass ends there. Times its row's light.
      */
     private float rowAlpha(int k) {
         if (k < 0 || k >= rowIdx.length || k >= colIdx.length || rowIdx[k] >= rowInfo.size()) return 1f;
-        float shift = rowInfo.get(rowIdx[k]).shift;
+        int r = rowIdx[k];
+        float shift = rowInfo.get(r).shift;
         float a = Math.min(1f, 1f - (shift - colIdx[k]));
         if (dock) a = Math.min(a, 1f - (colIdx[k] - (shift + COLS - 1)));
-        return Math.max(0f, Math.min(1f, a));
+        return Math.max(0f, Math.min(1f, a)) * (r < rowLit.length ? rowLit[r] : 1f);
     }
 
     /** Up or Down from {@code slot} (columns from the row's left edge on screen) to row {@code to}. */
@@ -2874,7 +3115,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         switch (code) {
             case KeyEvent.KEYCODE_DPAD_LEFT:
                 if (col > 0) focusGrid(gridAt - 1);
-                else if (!held) enterSide();
+                else if (!held && !scrollingV()) enterSide();
                 break;
             case KeyEvent.KEYCODE_DPAD_RIGHT:
                 if (col < row.count - 1) focusGrid(gridAt + 1);
@@ -2937,7 +3178,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private int gridPage;
     /** How far the dock has slid to the left, in dp: a page is a screen's width. */
     private float pageShift, pageGlassAt;
-    private ValueAnimator pageAnim;
+    /** The slide between pages, on the page spring (made the first time it moves). */
+    private Glide pageGlide;
     private PageDots pageDots;
 
     private int perPage() {
@@ -2984,27 +3226,24 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     /** Slides the dock to page {@code p}: every page moves together, the glass following the photo. */
     private void slideTo(int p) {
-        if (p == gridPage && (pageAnim == null || !pageAnim.isRunning()) && pageShift == p * pageW()) return;
+        float to = p * pageW();
+        if (p == gridPage && (pageGlide == null || !pageGlide.moving()) && pageShift == to) return;
         gridPage = p;
-        if (pageAnim != null) pageAnim.cancel();
-        pageAnim = ValueAnimator.ofFloat(pageShift, p * pageW());
-        pageAnim.setDuration(560);
-        pageAnim.setInterpolator(Ui.EMPHASIZED);
-        pageAnim.addUpdateListener(a -> {
-            pageShift = (float) a.getAnimatedValue();
-            for (int i = 0; i < cells.size(); i++) cells.get(i).setTranslationX(cellX(i));
-            if (pageDots != null) pageDots.setPosition(pageShift / pageW());
+        if (pageGlide == null) pageGlide = new Glide(Spring.smooth(), SMOOTH_MS, 1f / Ui.density, pageShift, v -> {
+            pageShift = v;
+            for (int i = 0; i < cells.size(); i++) cells.get(i).setTranslationX(placeX(i, cells.get(i)));
+            if (pageDots != null) pageDots.setPosition(v / pageW());
             // like the vertical scroll: panes on screen repaint every 6dp and where they stop
-            boolean done = a.getAnimatedFraction() >= 1f;
-            if (!done && Math.abs(pageShift - pageGlassAt) < 6) return;
-            pageGlassAt = pageShift;
+            if (pageGlide.moving() && Math.abs(v - pageGlassAt) < 6) return;
+            pageGlassAt = v;
             float w = root.getWidth();
-            for (Cell c : cells) {
+            for (int i = 0; i < cells.size(); i++) {
+                Cell c = cells.get(i);
                 float x = c.getTranslationX();
                 if (c.card.glass != null && x + c.getWidth() >= -Ui.dp(32) && x <= w + Ui.dp(32)) c.card.invalidate();
             }
         });
-        pageAnim.start();
+        pageGlide.to(to, floorMs(Math.abs(to - pageGlide.value()) * Ui.density, false));
     }
 
     /** The dots beneath the dock, one a page, the current one a pill that glides along with the slide. */
@@ -3050,9 +3289,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      * From the switcher's launch screen: the app fades in over it, which holds still beneath, so the
      * wait for the app is never a black screen or a frozen switcher.
      */
-    private void openFromSwitcher(Intent intent, String label) {
+    private void openFromSwitcher(Intent intent, String label, Bundle zoom) {
         try {
-            Bundle opts = ActivityOptions.makeCustomAnimation(this, R.anim.app_in, R.anim.hold).toBundle();
+            Bundle opts = zoom != null ? zoom : ActivityOptions.makeCustomAnimation(this, R.anim.app_in, R.anim.hold).toBundle();
             startActivity(intent, opts);
             String pkg = intent.getPackage() != null ? intent.getPackage()
                     : intent.getComponent() != null ? intent.getComponent().getPackageName() : null;
@@ -3068,6 +3307,18 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             hud(R.drawable.ic_info, getString(R.string.couldnt_open, label));
             endLaunch();
         }
+    }
+
+    /**
+     * Android 12 and later ignore a custom animation into another app's task and fade instead: there
+     * the system zooms the app out of the card it was picked from. Null below 12 or for no card.
+     */
+    private Bundle zoomFrom(View card) {
+        if (Build.VERSION.SDK_INT < 31 || card == null) return null;
+        android.graphics.Rect r = new android.graphics.Rect();
+        if (!card.getGlobalVisibleRect(r) || r.isEmpty()) return null;
+        card.getLocationInWindow(loc);
+        return ActivityOptions.makeScaleUpAnimation(card, r.left - loc[0], r.top - loc[1], r.width(), r.height()).toBundle();
     }
 
     private final Runnable launchGaveUp = this::endLaunch;
@@ -3097,6 +3348,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         try {
             Bundle opts = ActivityOptions.makeScaleUpAnimation(from, 0, 0, from.getWidth(), from.getHeight()).toBundle();
             startActivity(intent, opts);
+            recede();
             String pkg = intent.getPackage() != null ? intent.getPackage()
                     : intent.getComponent() != null ? intent.getComponent().getPackageName() : null;
             Habits.opened(getApplicationContext(), pkg);
@@ -3114,6 +3366,59 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (!(e instanceof ActivityNotFoundException)) Trouble.caught("opening " + (label != null ? label : intent.getAction()), e);
             hud(R.drawable.ic_info, label != null ? getString(R.string.couldnt_open, label) : getString(R.string.couldnt_open_that));
         }
+    }
+
+    private static final android.view.animation.LinearInterpolator LINEAR = new android.view.animation.LinearInterpolator();
+    /** The black veil home recedes under (see recede), made the first time; and whether home is stepped back now. */
+    private View launchVeil;
+    private boolean receded;
+    private final Runnable comeBack = () -> {
+        if (resumed) comeForward(true);
+    };
+
+    /**
+     * Strong TVs: home steps back 3 % under a dark veil while the system zooms the app in, as
+     * Launcher3 does (0.97 over 350 ms, the veil over 217 ms), on one hardware layer only while it
+     * moves. Light mode adds nothing: the TV's attention goes to the app that's starting.
+     */
+    private void recede() {
+        if (Ui.light || !resumed || photo || ccOpen || home.getVisibility() != View.VISIBLE) return;
+        // a live input's picture is a surface: it can't be drawn into the layer home recedes on
+        stopPreview();
+        if (launchVeil == null) {
+            launchVeil = new View(this);
+            launchVeil.setBackgroundColor(0xFF000000);
+            launchVeil.setAlpha(0f);
+            launchVeil.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            root.addView(launchVeil, root.indexOfChild(home) + 1, match());
+        }
+        receded = true;
+        home.animate().scaleX(0.97f).scaleY(0.97f).setStartDelay(0).setDuration(350).setInterpolator(Ui.EMPHASIZED).withLayer().start();
+        launchVeil.setVisibility(View.VISIBLE);
+        launchVeil.animate().alpha(0.35f).setStartDelay(0).setDuration(217).setInterpolator(LINEAR).start();
+        // an app that never comes up leaves home as it was
+        handler.removeCallbacks(comeBack);
+        handler.postDelayed(comeBack, 1500);
+    }
+
+    /** Home back to its full size: gently while it's on screen, at once out of sight. */
+    private void comeForward(boolean gently) {
+        handler.removeCallbacks(comeBack);
+        if (!receded) return;
+        receded = false;
+        if (gently) {
+            home.animate().scaleX(1f).scaleY(1f).setStartDelay(0).setDuration(250).setInterpolator(Ui.EMPHASIZED).withLayer().start();
+            launchVeil.animate().alpha(0f).setStartDelay(0).setDuration(250).setInterpolator(Ui.EMPHASIZED)
+                    .withEndAction(() -> launchVeil.setVisibility(View.GONE)).start();
+            return;
+        }
+        // a scale animation of its own replaces the receding one; whatever else home is doing carries on
+        home.animate().scaleX(1f).scaleY(1f).setStartDelay(0).setDuration(0).start();
+        home.setScaleX(1f);
+        home.setScaleY(1f);
+        launchVeil.animate().cancel();
+        launchVeil.setAlpha(0f);
+        launchVeil.setVisibility(View.GONE);
     }
 
     /** Opened at last: a new app's dot goes. */
@@ -3685,8 +3990,34 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return Math.max(0, Math.min(gridY() + row * rowH() - FOCUS_LINE, end));
     }
 
-    private ValueAnimator bounceAnim;
+    /**
+     * The page's travel up and down (px): its scroll on the page spring, plus the give at the end of
+     * the apps on a springier one of its own; each made the first time it moves.
+     */
+    private Glide scroll;
+    private Spring.Mover give, giveX;
+    private float scrollY, giveY, giveOut, giveOutX;
+    /** The tile giving at the end of its row, and its place among the cells then. */
+    private Cell giveCell;
+    private int giveAt;
     private float scrollBlurY;
+
+    /** Where cell {@code k} sits across: its column, plus the give if it's the tile giving at its row's end. */
+    private float placeX(int k, Cell c) {
+        return cellX(k) + (c == giveCell && giveX != null ? giveX.value() : 0f);
+    }
+
+    /** The page still well on its way up or down: sideways presses stay among the tiles, as in Android TV's own rows. */
+    private boolean scrollingV() {
+        return scroll != null && scroll.moving() && Math.abs(scroll.target() - scroll.value()) > Ui.dpf(24);
+    }
+
+    private void placePage() {
+        float ty = scrollY + giveY;
+        page.setTranslationY(ty);
+        // the glass samples the photo at its own position, so visible panes repaint as they travel
+        repaintScrollGlass(ty, (scroll == null || !scroll.moving()) && (give == null || !give.moving()));
+    }
 
     /**
      * The glass samples the photo at its own place, so panes repaint as the page travels: every 6dp
@@ -3697,9 +4028,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (!done && Math.abs(ty - scrollBlurY) < Ui.dpf(6)) return;
         scrollBlurY = ty;
         int h = root.getHeight() > 0 ? root.getHeight() : Ui.dp(540);
-        for (Widget w : widgets) if (w.getAlpha() > 0f) w.invalidate();
+        for (int i = 0; i < widgets.size(); i++) if (widgets.get(i).getAlpha() > 0f) widgets.get(i).invalidate();
         if (dock) dockGlass.invalidate();
-        for (Cell c : cells) {
+        for (int i = 0; i < cells.size(); i++) {
+            Cell c = cells.get(i);
             if (c.card.glass != null) {
                 // cells are placed by translation: getY() is where one sits on the page
                 float top = c.getY() + c.card.getTop() + ty;
@@ -3709,46 +4041,49 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     /**
-     * The end of the apps: the page gives a little, then springs back, so the edge is felt rather
-     * than met with nothing. Only the page's position moves, exactly as when scrolling.
+     * The end of the apps: the page (or the tile at a row's end) gives a little, then springs back,
+     * so the edge is felt rather than met with nothing. The page's give rides on its scroll.
      */
     private void bounce(boolean vertical) {
-        if (bounceAnim != null && bounceAnim.isRunning()) return;
-        if (vertical && scrollAnim != null) scrollAnim.cancel();
-        final View target = vertical ? page : cells.get(gridAt).card;
-        final float base = vertical ? -Ui.dpf(scrollTarget) : 0f, reach = Ui.dpf(vertical ? -16 : 10);
-        bounceAnim = ValueAnimator.ofFloat(0f, 1f);
-        bounceAnim.setDuration(520);
-        bounceAnim.addUpdateListener(a -> {
-            float t = a.getAnimatedFraction();
-            // a quick push out, then a damped spring home
-            float k = t < 0.22f ? t / 0.22f : (float) (Math.exp(-6 * (t - 0.22f)) * Math.cos(9 * (t - 0.22f)));
-            if (vertical) {
-                float ty = base + reach * k;
-                page.setTranslationY(ty);
-                repaintScrollGlass(ty, t >= 0.99f);
-            } else {
-                target.setTranslationX(reach * k);
+        if (vertical) {
+            if (give != null && give.moving()) return;
+            if (give == null) give = new Spring.Mover(new Spring(0.30, 0.45), 1f, 0f, v -> {
+                giveY = v;
+                // pushed out far enough: back it springs, carrying on a touch first
+                if (giveOut != 0f && Math.abs(v) >= Math.abs(giveOut) * 0.85f) {
+                    giveOut = 0f;
+                    give.to(0f);
+                }
+                placePage();
+            });
+            giveOut = Ui.dpf(-16);
+            give.to(giveOut);
+            return;
+        }
+        // the whole tile gives, on top of its place in the row: the card's own moves are its focus
+        if (giveX != null && giveX.moving()) return;
+        giveAt = gridAt;
+        giveCell = cells.get(gridAt);
+        if (giveX == null) giveX = new Spring.Mover(new Spring(0.30, 0.45), 1f, 0f, v -> {
+            if (giveOutX != 0f && Math.abs(v) >= Math.abs(giveOutX) * 0.85f) {
+                giveOutX = 0f;
+                giveX.to(0f);
             }
+            if (giveAt < cells.size() && cells.get(giveAt) == giveCell) giveCell.setTranslationX(placeX(giveAt, giveCell));
         });
-        bounceAnim.start();
+        giveOutX = Ui.dpf(10);
+        giveX.to(giveOutX);
     }
 
     private void scrollTo(float target) {
         if (target == scrollTarget) return;
         scrollTarget = target;
-        if (scrollAnim != null) scrollAnim.cancel();
-        if (bounceAnim != null) bounceAnim.cancel();
-        scrollAnim = ValueAnimator.ofFloat(page.getTranslationY(), -Ui.dpf(target));
-        scrollAnim.setDuration(560);
-        scrollAnim.setInterpolator(Ui.EMPHASIZED);
-        scrollAnim.addUpdateListener(a -> {
-            float ty = (float) a.getAnimatedValue();
-            page.setTranslationY(ty);
-            // the glass samples the photo at its own position, so visible panes repaint as they travel
-            repaintScrollGlass(ty, a.getAnimatedFraction() >= 0.99f);
+        float to = -Ui.dpf(target);
+        if (scroll == null) scroll = new Glide(Spring.smooth(), SMOOTH_MS, 1f, scrollY, v -> {
+            scrollY = v;
+            placePage();
         });
-        scrollAnim.start();
+        scroll.to(to, floorMs(Math.abs(to - scroll.value()), true));
         // the greeting and the status pill leave on any scroll (the apps pass beneath them); the
         // widgets only once they're half off screen, so a short scroll never empties the top
         boolean top = target == 0, shown = dock ? top : target < WIDGET_Y + WIDGET_H / 2f;
@@ -3868,8 +4203,30 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         preview = null;
     }
 
+    /** Where focus waits while the tile that had it is rebuilt (made in buildUi, focusable only then). */
+    private View parking;
+
+    /** Focus onto the page's holder, which draws nothing, as leanback's grid parks it on itself. */
+    private boolean park() {
+        parking.setFocusable(true);
+        parking.setFocusableInTouchMode(true);
+        if (parking.requestFocus()) return true;
+        unpark();
+        return false;
+    }
+
+    /** The holder takes focus no more, once focus has left it: taken from it, Android would hand focus to the first view it finds. */
+    private void unpark() {
+        if (parking.isFocused()) return;
+        parking.setFocusableInTouchMode(false);
+        parking.setFocusable(false);
+    }
+
     private void onFocusMoved(View n) {
         if (n == null || ccOpen) return;
+        // waiting on the page while tiles are rebuilt: as far as home goes, nothing has moved
+        if (n == parking) return;
+        if (parking.isFocusable()) unpark();
         glints = 0;
         // the card you're looking at stays put; in light mode, so does the stack of a home left alone
         stack.hold(n == fyW || racked && Perf.light(this));
@@ -3905,7 +4262,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (i >= 0) {
             hideShelf();
             zone = contentZone = WIDGETS;
-            dimRows(-1);
+            dimRows(-1, true);
             widgetAt = i;
             // the song's clock current at once, and every second from here (light mode slows it out of focus)
             if (n == listenW) {
@@ -3919,7 +4276,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (cells.get(i).card == n) {
                 zone = contentZone = GRID;
                 gridAt = i;
-                if (rows && i < rowIdx.length) dimRows(rowIdx[i]);
+                if (rows && i < rowIdx.length) dimRows(rowIdx[i], true);
                 glideToCell();
                 shelfFor(i);
                 return;
@@ -4395,11 +4752,43 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (!isArrow(code)) return false;
         long now = SystemClock.uptimeMillis();
         if (e.getRepeatCount() > 0) {
-            // a held key repeats ~20 times a second; step at a steady pace in short hops instead
-            if (now - lastStep < HOLD_STEP_MS) return true;
+            // a held key repeats ~20 times a second: it steps on Ui.holdStep's ladder instead, quicker
+            // the longer it's held sideways, and the repeats between go, so focus stops where it's let go
+            boolean vertical = code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN;
+            long step = Ui.holdStep(now - e.getDownTime(), vertical), gap = now - lastRepeat;
+            lastRepeat = now;
+            if (now - lastStep < step) return true;
+            // on the ladder's beat whatever the remote's repeat rate: a step that came late is made up once
+            lastStep = now - lastStep < 2 * step ? lastStep + step : now;
+            holdLead = 0.5f + ROW_TRAIL_MS / Math.max(step, gap);
             held = true;
+        } else {
+            // a press of its own is never held back: each one is a step, however quickly they come
+            lastStep = now;
+            lastRepeat = now;
         }
-        lastStep = now;
+        View before = getWindow().getCurrentFocus();
+        route(code);
+        // the TV's own tick, once for each move focus really made
+        if (getWindow().getCurrentFocus() != before) navTick(code);
+        return true;
+    }
+
+    /** The TV's navigation tick for a move by the remote: silent when its system sounds are switched off. */
+    private void navTick(int code) {
+        int way = code == KeyEvent.KEYCODE_DPAD_LEFT ? View.FOCUS_LEFT : code == KeyEvent.KEYCODE_DPAD_RIGHT ? View.FOCUS_RIGHT
+                : code == KeyEvent.KEYCODE_DPAD_UP ? View.FOCUS_UP : View.FOCUS_DOWN;
+        try {
+            View v = getWindow().getDecorView();
+            // Android 13 has a softer tick for a held key's steps
+            if (Build.VERSION.SDK_INT >= 33) v.playSoundEffect(SoundEffectConstants.getConstantForFocusDirection(way, held));
+            else v.playSoundEffect(SoundEffectConstants.getContantForFocusDirection(way));
+        } catch (RuntimeException ignored) {
+            // the TV's sound service refused: the move stays silent
+        }
+    }
+
+    private void route(int code) {
         View f = getCurrentFocus();
         if (zone == SIDE && side.indexOf(f) < 0 || zone == WIDGETS && widgets.indexOf(f) < 0
                 || zone == SHELF && shelf.cards.indexOf(f) < 0 || zone == TOP && !tops.contains(f)) zone = contentZone;
@@ -4413,26 +4802,26 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 else if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
                     int at = tops.indexOf(f) + (code == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1);
                     if (at >= 0 && at < tops.size()) tops.get(at).requestFocus();
-                    else if (at < 0 && !held) enterSide();
+                    else if (at < 0 && !held && !scrollingV()) enterSide();
                 } else if (code == KeyEvent.KEYCODE_DPAD_UP && !held) {
                     setPhoto(true);
                 }
-                return true;
+                return;
             case SHELF:
                 if (code == KeyEvent.KEYCODE_DPAD_LEFT && shelfAt > 0) shelf.cards.get(shelfAt - 1).requestFocus();
                 else if (code == KeyEvent.KEYCODE_DPAD_RIGHT && shelfAt < shelf.cards.size() - 1) shelf.cards.get(shelfAt + 1).requestFocus();
                 else if (code == KeyEvent.KEYCODE_DPAD_DOWN) focusGrid(gridAt);
                 else if (code == KeyEvent.KEYCODE_DPAD_UP && dock && !held) topCc.requestFocus();
-                return true;
+                return;
             case SIDE:
                 if (code == KeyEvent.KEYCODE_DPAD_UP) focusSide(sideAt - 1);
                 else if (code == KeyEvent.KEYCODE_DPAD_DOWN) focusSide(sideAt + 1);
                 else if (code == KeyEvent.KEYCODE_DPAD_RIGHT) returnToContent();
-                return true;
+                return;
             case WIDGETS:
                 if (code == KeyEvent.KEYCODE_DPAD_LEFT) {
                     if (widgetAt > 0) focusWidget(widgetAt - 1);
-                    else enterSide();
+                    else if (!scrollingV()) enterSide();
                 } else if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
                     if (widgetAt < widgets.size() - 1) focusWidget(widgetAt + 1);
                 } else if (code == KeyEvent.KEYCODE_DPAD_DOWN && !cells.isEmpty()) {
@@ -4442,7 +4831,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     if (dock) topCc.requestFocus();
                     else if (widgets.get(widgetAt) == fyW) stack.flip();
                 }
-                return true;
+                return;
             default: {
                 if (cells.isEmpty()) {
                     // nothing on home at all (every app hidden, an empty kids' profile): the remote
@@ -4450,11 +4839,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     if (!widgets.isEmpty()) focusWidget(widgetAt);
                     else if (dock) topCc.requestFocus();
                     else enterSide();
-                    return true;
+                    return;
                 }
                 if (rows && gridAt < rowIdx.length) {
                     rowsKey(code);
-                    return true;
+                    return;
                 }
                 int col = gridAt % COLS, row = rowOf(gridAt), page = pageOf(gridAt), n = cells.size();
                 switch (code) {
@@ -4462,7 +4851,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                         if (col > 0) focusGrid(gridAt - 1);
                         // past the first column: the previous page, same row, its last column
                         else if (page > 0) focusGrid(gridAt - perPage() + COLS - 1);
-                        else if (!held) enterSide();
+                        else if (!held && !scrollingV()) enterSide();
                         break;
                     case KeyEvent.KEYCODE_DPAD_RIGHT:
                         if (col < COLS - 1 && gridAt + 1 < n && pageOf(gridAt + 1) == page && rowOf(gridAt + 1) == row) {
@@ -4505,14 +4894,27 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                         }
                         break;
                 }
-                return true;
             }
         }
     }
 
-    /** A held key was released: the tile you landed on catches the light. */
+    /**
+     * A held key was released: its row, aimed ahead to keep pace, coasts on to the next whole column
+     * (never back) with the tile still in view, and the tile you landed on catches the light.
+     */
     private void settle() {
         held = false;
+        if (rows && zone == GRID && gridAt < rowIdx.length && rowIdx[gridAt] < rowInfo.size()) {
+            RowInfo r = rowInfo.get(rowIdx[gridAt]);
+            if (r.glide != null && r.glide.moving()) {
+                float x = r.glide.value(), aim = r.glide.target();
+                int col = colIdx[gridAt], first = r.first;
+                if (aim > first && x > first) first = (int) Math.ceil(x - 0.01f);
+                else if (aim < first && x < first) first = (int) Math.floor(x + 0.01f);
+                r.first = Math.max(Math.max(0, col - COLS + 1), Math.min(Math.min(col, Math.max(0, r.count - COLS)), first));
+                slideRow(r, r.first);
+            }
+        }
         View f = getCurrentFocus();
         if (f instanceof Card) ((Card) f).glint();
         if (f != null) onFocusMoved(f);
@@ -4904,7 +5306,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             AppRepo.App app = find(over);
             if (again != null && app != null && switcher.isOpen()) {
                 final Intent back2 = again;
-                switcher.launchInto(app, () -> openFromSwitcher(back2.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), app.label));
+                switcher.launchInto(app, () -> openFromSwitcher(back2.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), app.label, null));
                 return;
             }
             if (again != null) {
@@ -5445,6 +5847,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         editing = true;
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
+        focusLayer.hide();
         final Card card = c.card;
         wiggle = ValueAnimator.ofFloat(-1f, 1f);
         wiggle.setDuration(150);
@@ -5479,7 +5882,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             cells.add(j, cells.remove(i));
             gridAt = j;
             RowInfo row = rowInfo.get(rowIdx[j]);
-            if (row.anim != null) row.anim.cancel();
+            // its next slide starts afresh from where the tiles are put now
+            if (row.glide != null) row.glide.stop();
+            row.glide = null;
             int first = row.first, col = colIdx[j];
             if (col < first) first = col;
             else if (col >= first + COLS) first = col - COLS + 1;
@@ -5970,8 +6375,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             case "parallax":
             case "light":
                 applyLight();
-                // tiles sway or stay still with it
+                // tiles sway or stay still with it, and the banners are read again at the size this mode keeps
                 populate();
+                reloadApps(true);
                 home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
                 break;
             case "art":
@@ -6015,6 +6421,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     /** Light mode (see {@link Perf}): stillness wherever movement costs frames. */
     private void applyLight() {
         boolean light = Perf.light(this);
+        Ui.light = light;
         Card.parallax = !light && Prefs.on(this, Prefs.PARALLAX);
         Backdrop.calm = light;
         if (bloom != null) bloom.setVisibility(light ? View.GONE : View.VISIBLE);
@@ -6114,8 +6521,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     private void showHud(int icon, String text, long ms) {
-        hudIcon.setImageResource(icon);
-        hudText.setText(text);
         // with Settings open the list fills the top right: speak under the title instead
         FrameLayout.LayoutParams hl = (FrameLayout.LayoutParams) hud.getLayoutParams();
         boolean side = settings != null && settings.isOpen();
@@ -6134,6 +6539,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             hud.setScaleX(0.94f);
             hud.setScaleY(0.94f);
         }
+        // written once it's on show: a live region only speaks for what changes while it's visible
+        hudIcon.setImageResource(icon);
+        hudText.setText(text);
         hud.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setInterpolator(Ui.SPRING).setDuration(520)
                 .setStartDelay(0).setUpdateListener(a -> hud.invalidate()).start();
         if (ms > 0) handler.postDelayed(hideHud, ms);

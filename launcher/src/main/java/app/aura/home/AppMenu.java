@@ -1,7 +1,10 @@
 package app.aura.home;
 
 import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.Rect;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -29,13 +32,30 @@ final class AppMenu extends FrameLayout {
         }
     }
 
+    /** Told as the menu comes and goes on LOW, where no dim layer is drawn: the rows behind it go to {@link Ui#LOW_MENU_ROWS}. */
+    interface Rows {
+        void dim(boolean on);
+    }
+
     private static final int WIDTH = 244;
+    /** LOW's slide in, ms: the snappy spring's stand-in. */
+    private static final int LOW_IN = 220;
 
     private final GlassFrame panel;
     private final TextView name, detail;
     private final android.widget.ScrollView scroll;
     private final LinearLayout list;
-    private boolean shown;
+    private final GlassFrame.Way way;
+    private final GlassFrame.Hold hold;
+    private boolean shown, lowered;
+    private final Runnable gone = () -> {
+        if (!shown) setVisibility(GONE);
+    };
+    Rows behind;
+    /** The tile the menu belongs to: the focus goes back to it as the menu closes, where it's still on show. */
+    private View anchor;
+    /** HIGH's dim behind the menu, 0 to 1, and LOW's slide in from the tile's side, px. */
+    private float dim, slideX, slideY;
 
     AppMenu(Context c, Backdrop b) {
         super(c);
@@ -69,6 +89,21 @@ final class AppMenu extends FrameLayout {
         col.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         panel.addView(col, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         addView(panel, new FrameLayout.LayoutParams(Ui.dp(WIDTH), ViewGroup.LayoutParams.WRAP_CONTENT));
+        // HIGH pops out of the tile from ×0.85 about the edge facing it and dims the rest; LOW slides 16 dp
+        way = new GlassFrame.Way(panel, p -> {
+            float a = Ui.clamp(p, 0f, 1f);
+            panel.setAlpha(a);
+            float s = Ui.light ? 1f : 0.85f + 0.15f * p;
+            panel.setScaleX(s);
+            panel.setScaleY(s);
+            panel.setTranslationX(Ui.light ? slideX * (1f - p) : 0f);
+            panel.setTranslationY(Ui.light ? slideY * (1f - p) : 0f);
+            dim = Ui.light ? 0f : a;
+            invalidate();
+        });
+        hold = new GlassFrame.Hold(this, () -> {
+            if (list.getChildCount() > 0) list.getChildAt(0).requestFocus();
+        });
     }
 
     boolean isOpen() {
@@ -83,6 +118,7 @@ final class AppMenu extends FrameLayout {
     /** As {@link #show(View, String, List)}, with an optional short note (such as an episode synopsis) above the choices. */
     void show(View anchor, String label, String note, List<Item> items) {
         shown = true;
+        this.anchor = anchor;
         name.setText(label.toUpperCase(Locale.getDefault()));
         if (note != null && !note.trim().isEmpty()) {
             detail.setText(note.trim());
@@ -108,6 +144,7 @@ final class AppMenu extends FrameLayout {
             r.setNextFocusUpId(rows[(i - 1 + n) % n].getId());
             r.setNextFocusDownId(rows[(i + 1) % n].getId());
         }
+        setDescendantFocusability(FOCUS_BEFORE_DESCENDANTS);
         setVisibility(VISIBLE);
         View screen = (View) getParent();
         int sw = screen.getWidth(), sh = screen.getHeight();
@@ -144,36 +181,70 @@ final class AppMenu extends FrameLayout {
             below = ay + ah + gap + h <= sh - edge;
             y = below ? ay + ah + gap : Math.max(edge, ay - h - gap);
         }
-        // placed by margins, so the slide-in below can use the translation freely
+        // placed by margins, so the entrance below can use the translation and scale freely
         FrameLayout.LayoutParams l = (FrameLayout.LayoutParams) panel.getLayoutParams();
         l.leftMargin = Math.round(x);
         l.topMargin = Math.round(y);
         panel.setLayoutParams(l);
-        // it slides out from the tile's side, or from under or over it; text is never scaled mid-animation
-        panel.animate().cancel();
-        panel.setAlpha(0f);
-        panel.setTranslationX(beside ? Ui.dpf(right ? -16 : 16) : 0f);
-        panel.setTranslationY(beside ? 0f : Ui.dpf(below ? -16 : 16));
-        panel.animate().alpha(1f).translationX(0f).translationY(0f).setDuration(380).setStartDelay(0)
-                .setInterpolator(Ui.SPRING).withEndAction(null).start();
-        if (list.getChildCount() > 0) list.getChildAt(0).requestFocus();
+        // it comes from the tile's side, or from under or over it: HIGH grows from the edge facing
+        // the tile, level with its middle; LOW slides from that side
+        panel.setPivotX(beside ? (right ? 0f : w) : Ui.clamp(ax + aw / 2f - x, 0f, w));
+        panel.setPivotY(beside ? Ui.clamp(ay + ah / 2f - y, 0f, h) : (below ? 0f : h));
+        slideX = beside ? Ui.dpf(right ? -16 : 16) : 0f;
+        slideY = beside ? 0f : Ui.dpf(below ? -16 : 16);
+        way.jump(0f);
+        way.in(LOW_IN, null);
+        hold.start();
+        if (Ui.light && behind != null && !lowered) {
+            lowered = true;
+            behind.dim(true);
+        }
+        announceForAccessibility(label);
     }
 
     void hide() {
         if (!shown) return;
         shown = false;
-        panel.animate().cancel();
-        panel.animate().alpha(0f).setDuration(150).setStartDelay(0).setInterpolator(Ui.SOFT)
-                .withEndAction(() -> {
-                    if (!shown) setVisibility(GONE);
-                }).start();
+        hold.stop();
+        // the focus back on its tile where that's on show (an open folder's), never left on a row fading out
+        if (hasFocus() && anchor != null && anchor.isShown()) anchor.requestFocus();
+        anchor = null;
+        setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
+        if (lowered) {
+            lowered = false;
+            if (behind != null) behind.dim(false);
+        }
+        way.out(gone);
+    }
+
+    /** HIGH dims the rest of the screen to ×0.6 behind the menu; LOW draws no full-screen layer. */
+    @Override
+    protected void dispatchDraw(Canvas c) {
+        if (dim > 0f) c.drawColor(Ui.withAlpha(0xFF000000, Math.round(255 * (1f - Ui.DIM_MENU) * dim)));
+        super.dispatchDraw(c);
+    }
+
+    @Override
+    public boolean onKeyDown(int code, KeyEvent e) {
+        return hold.down(code) || super.onKeyDown(code, e);
+    }
+
+    @Override
+    public boolean onKeyUp(int code, KeyEvent e) {
+        return hold.up(code) || super.onKeyUp(code, e);
+    }
+
+    @Override
+    protected void onFocusChanged(boolean gained, int direction, Rect previous) {
+        super.onFocusChanged(gained, direction, previous);
+        if (!gained) hold.stop();
     }
 
     private View row(Item it) {
         Pad p = new Pad(getContext(), null, 13, 0f);
         p.plainColor = 0x00FFFFFF;
         p.edgeLight = false;
-        p.focusScale = 1.03f;
+        p.row = true;
         LinearLayout r = new LinearLayout(getContext());
         r.setGravity(Gravity.CENTER_VERTICAL);
         r.setPadding(Ui.dp(12), 0, Ui.dp(12), 0);

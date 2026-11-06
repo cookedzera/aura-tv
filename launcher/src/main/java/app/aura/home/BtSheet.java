@@ -10,10 +10,12 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.Rect;
 import android.os.Build;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -46,6 +48,14 @@ final class BtSheet extends GlassFrame {
     private final TextView status, toggleText;
     private final Pad toggle;
     private final LinearLayout list;
+    private final GlassFrame.Hold hold;
+    private final GlassFrame.Way way;
+    /** Fading out: still on screen for a moment, but no longer open, and nothing in it takes the focus. */
+    private volatile boolean closing;
+    private final Runnable gone = () -> {
+        closing = false;
+        setVisibility(View.GONE);
+    };
     private volatile BluetoothProfile a2dp;
     private volatile boolean released;
     private boolean listening;
@@ -135,13 +145,18 @@ final class BtSheet extends GlassFrame {
         col.addView(scroll, sl);
         addView(col, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setVisibility(View.GONE);
+        setContentDescription(act.getString(R.string.bluetooth));
+        hold = new GlassFrame.Hold(this, () -> (list.getChildCount() > 0 ? list.getChildAt(0) : toggle).requestFocus());
+        way = new GlassFrame.Way(this, GlassFrame.sheetAt(this));
     }
 
     boolean isOpen() {
-        return getVisibility() == View.VISIBLE;
+        return getVisibility() == View.VISIBLE && !closing;
     }
 
     void open() {
+        closing = false;
+        setDescendantFocusability(FOCUS_BEFORE_DESCENDANTS);
         setVisibility(View.VISIBLE);
         if (Build.VERSION.SDK_INT >= 31 && !Compat.granted(act, "android.permission.BLUETOOTH_CONNECT")) {
             act.requestPermissions(new String[]{"android.permission.BLUETOOTH_CONNECT"}, 8);
@@ -156,11 +171,9 @@ final class BtSheet extends GlassFrame {
             listening = true;
         }
         rebuild();
-        setAlpha(0f);
-        setTranslationX(Ui.dp(24));
-        animate().alpha(1f).translationX(0f).setStartDelay(0).setDuration(380).setInterpolator(Ui.EMPHASIZED).start();
-        View first = list.getChildCount() > 0 ? list.getChildAt(0) : toggle;
-        first.requestFocus();
+        way.in(Ui.LOW_SHEET_IN, null);
+        hold.start();
+        announceForAccessibility(getContentDescription());
     }
 
     void close() {
@@ -168,7 +181,27 @@ final class BtSheet extends GlassFrame {
             act.unregisterReceiver(changes);
             listening = false;
         }
-        setVisibility(View.GONE);
+        if (getVisibility() != View.VISIBLE) return;
+        hold.stop();
+        closing = true;
+        setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
+        way.out(gone);
+    }
+
+    @Override
+    public boolean onKeyDown(int code, KeyEvent e) {
+        return hold.down(code) || super.onKeyDown(code, e);
+    }
+
+    @Override
+    public boolean onKeyUp(int code, KeyEvent e) {
+        return hold.up(code) || super.onKeyUp(code, e);
+    }
+
+    @Override
+    protected void onFocusChanged(boolean gained, int direction, Rect previous) {
+        super.onFocusChanged(gained, direction, previous);
+        if (!gained) hold.stop();
     }
 
     void release() {
@@ -297,7 +330,7 @@ final class BtSheet extends GlassFrame {
         Pad p = new Pad(act, null, 14, 0f);
         p.plainColor = d.connected ? 0x2630D158 : 0x14FFFFFF;
         p.edgeLight = false;
-        p.focusScale = 1.03f;
+        p.row = true;
         p.setTag(d.addr);
         LinearLayout r = new LinearLayout(act);
         r.setGravity(Gravity.CENTER_VERTICAL);
@@ -325,7 +358,7 @@ final class BtSheet extends GlassFrame {
         Pad p = new Pad(act, null, 14, 0f);
         p.plainColor = live ? 0x2630D158 : 0x14FFFFFF;
         p.edgeLight = false;
-        p.focusScale = 1.03f;
+        p.row = true;
         p.setTag("action:" + label);
         LinearLayout r = new LinearLayout(act);
         r.setGravity(Gravity.CENTER_VERTICAL);

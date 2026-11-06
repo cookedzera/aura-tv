@@ -1,5 +1,9 @@
 package app.aura.home;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.TimeInterpolator;
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
@@ -7,7 +11,9 @@ import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.widget.FrameLayout;
 
@@ -33,7 +39,7 @@ class GlassFrame extends FrameLayout {
     private final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF box = new RectF();
     private final int[] loc = new int[2];
-    private int tintKey, frostKey, highlightKey = -1;
+    private int tintKey, frostKey = -1;
 
     GlassFrame(Context c, Backdrop backdrop, float radiusDp, float darkness) {
         super(c);
@@ -48,6 +54,8 @@ class GlassFrame extends FrameLayout {
             @Override
             public void getOutline(View v, Outline o) {
                 o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), radius);
+                // LOW: no pane casts a shadow, whatever lifts it (soft edges are filled every frame they draw)
+                o.setAlpha(Ui.light ? 0f : 1f);
             }
         });
         setClipToOutline(true);
@@ -107,14 +115,18 @@ class GlassFrame extends FrameLayout {
             c.drawRoundRect(box, radius, radius, fill);
             return;
         }
-        if (tint != tintKey || frostC != frostKey || hi != highlightKey) {
+        if (tint != tintKey || frostC != frostKey) {
             tintKey = tint;
             frostKey = frostC;
-            highlightKey = hi;
-            blurPaint.setColorFilter(Ui.glass(saturation, tint, frostC, hi));
+            blurPaint.setColorFilter(Ui.glass(saturation, tint, frostC));
         }
         getLocationInWindow(loc);
         backdrop.drawBlurRound(c, box, radius, loc[0], loc[1], blurPaint);
+        // the focus light as a pass of its own: folded into the filter, it made a new filter every frame of a focus change
+        if (highlight > 0f) {
+            fill.setColor(hi);
+            c.drawRoundRect(box, radius, radius, fill);
+        }
     }
 
     @Override
@@ -124,6 +136,178 @@ class GlassFrame extends FrameLayout {
             float i = edge.getStrokeWidth() / 2f;
             edge.setAlpha(Math.round(255 * (1f - highlight * 0.7f)));
             c.drawRoundRect(i, i, getWidth() - i, getHeight() - i, radius, radius, edge);
+        }
+    }
+
+    /** A sheet's look at {@code p} (0 gone, 1 in place): faded, and HIGH a little smaller about its pivot, LOW 12 dp low. */
+    static Spring.Sink sheetAt(View v) {
+        return p -> {
+            v.setAlpha(Ui.clamp(p, 0f, 1f));
+            float s = Ui.light ? 1f : 0.94f + 0.06f * p;
+            v.setScaleX(s);
+            v.setScaleY(s);
+            v.setTranslationY(Ui.light ? Ui.dpf(12) * (1f - p) : 0f);
+        };
+    }
+
+    /**
+     * A sheet on its way in holds the focus itself, unseen, until its content may take it
+     * ({@link Ui#SHEET_CONTENT_AT}, LOW {@link Ui#LOW_SHEET_FOCUS_AT}): the focus never stays on what
+     * fades out behind it, nor lands on content that isn't there yet. An arrow meanwhile hands the
+     * focus on at once and moves on from there; OK hands it on at its release, so it presses nothing.
+     * The sheet passes its own key and focus calls here, which reach it only while it holds the focus.
+     */
+    static final class Hold implements Runnable {
+        private final ViewGroup sheet;
+        private final Runnable first;
+        private boolean on, ok;
+
+        Hold(ViewGroup sheet, Runnable first) {
+            this.sheet = sheet;
+            this.first = first;
+        }
+
+        void start() {
+            sheet.removeCallbacks(this);
+            on = true;
+            ok = false;
+            sheet.setFocusable(true);
+            sheet.requestFocus();
+            sheet.postDelayed(this, Ui.light ? Ui.LOW_SHEET_FOCUS_AT : Ui.SHEET_CONTENT_AT);
+        }
+
+        @Override
+        public void run() {
+            if (!ok) release();
+        }
+
+        /** The content takes the focus now. */
+        void release() {
+            if (!on) return;
+            stop();
+            first.run();
+        }
+
+        /**
+         * Nothing more to hand on: closing, or the sheet's own focus went. A sheet still holding the
+         * focus stays focusable until it moves on (dropping it here would send it anywhere first).
+         */
+        void stop() {
+            on = false;
+            ok = false;
+            sheet.removeCallbacks(this);
+            if (!sheet.isFocused()) sheet.setFocusable(false);
+        }
+
+        boolean down(int code) {
+            if (!on) return false;
+            if (Pad.isConfirm(code)) {
+                ok = true;
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN
+                    || code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) release();
+            return false;
+        }
+
+        boolean up(int code) {
+            if (!ok || !Pad.isConfirm(code)) return false;
+            release();
+            return true;
+        }
+    }
+
+    /**
+     * A pane's way in and out as one number, 0 (gone) to 1 (in place), which the pane turns into its
+     * alpha, scale and offset. HIGH comes in on the snappy spring, LOW in the time given; every way out
+     * takes {@link Ui#CLOSE} ms. The view given keeps a hardware layer, HIGH only, while it moves, so
+     * its text isn't drawn again at each scale. Each move starts where the last one got to.
+     */
+    static final class Way {
+        private final View layered;
+        private final Spring.Sink sink;
+        private final Spring.Mover spring;
+        private final ValueAnimator timed = ValueAnimator.ofFloat(0f, 1f);
+        private final Runnable arrive = this::arrived;
+        private float at, from, to;
+        private boolean halting;
+        private Runnable end;
+
+        Way(View layered, Spring.Sink sink) {
+            this.layered = layered;
+            this.sink = sink;
+            spring = new Spring.Mover(Spring.snappy(), 1f / 256, 0f, this::set);
+            timed.addUpdateListener(a -> set(from + (to - from) * a.getAnimatedFraction()));
+            timed.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator a) {
+                    if (!halting) arrived();
+                }
+            });
+        }
+
+        /** In from where it is: on the spring on HIGH, in {@code lowMs} ms on LOW; {@code settled} runs once it's there. */
+        void in(long lowMs, Runnable settled) {
+            halt();
+            end = settled;
+            layer(true);
+            if (Ui.light) {
+                run(1f, lowMs, Ui.EASE_DECEL);
+                return;
+            }
+            spring.jump(at);
+            spring.to(1f);
+            if (spring.moving()) spring.then(arrive);
+            else arrived();
+        }
+
+        /** Out from where it is, in {@link Ui#CLOSE} ms; {@code gone} runs once it's there. */
+        void out(Runnable gone) {
+            halt();
+            end = gone;
+            layer(true);
+            run(0f, Ui.CLOSE, Ui.EASE_STANDARD);
+        }
+
+        /** There at once, nothing moving and nothing left to run. */
+        void jump(float v) {
+            halt();
+            layer(false);
+            set(v);
+        }
+
+        private void run(float target, long ms, TimeInterpolator curve) {
+            from = at;
+            to = target;
+            timed.setDuration(ms);
+            timed.setInterpolator(curve);
+            timed.start();
+        }
+
+        private void halt() {
+            end = null;
+            halting = true;
+            timed.cancel();
+            halting = false;
+            spring.stop();
+        }
+
+        private void arrived() {
+            layer(false);
+            Runnable r = end;
+            end = null;
+            if (r != null) r.run();
+        }
+
+        private void set(float v) {
+            at = v;
+            sink.at(v);
+        }
+
+        private void layer(boolean on) {
+            if (layered == null) return;
+            int type = on && !Ui.light ? View.LAYER_TYPE_HARDWARE : View.LAYER_TYPE_NONE;
+            if (layered.getLayerType() != type) layered.setLayerType(type, null);
         }
     }
 }

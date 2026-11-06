@@ -55,6 +55,18 @@ final class Continue {
         }
     }
 
+    /**
+     * What TalkBack says for a card: "Partway through X, 20 minutes left" for something under way
+     * (the time left when the app gave it), else its title.
+     */
+    static String spoken(Item it) {
+        String title = it.title == null ? "" : it.title;
+        if (it.progress <= 0f) return title;
+        if (it.leftMin <= 0) return Words.get(R.string.partway_through, title);
+        return Words.get(R.string.partway_through_left, title,
+                Words.count(R.plurals.n_minutes, (int) Math.min(it.leftMin, Integer.MAX_VALUE)));
+    }
+
     private static final String[] COLUMNS = {
             TvContract.WatchNextPrograms.COLUMN_TITLE,
             TvContract.WatchNextPrograms.COLUMN_EPISODE_TITLE,
@@ -263,8 +275,11 @@ final class Continue {
         List<Item> raw = new ArrayList<>(), fallback = new ArrayList<>();
         List<String> uris = new ArrayList<>(), fallbackUris = new ArrayList<>();
         // no selection: Android's TV provider refuses one from any app but its own system ones, and
-        // already narrows the rows to those an app with the listings permission may read
-        try (Cursor cur = c.getContentResolver().query(TvContract.PreviewPrograms.CONTENT_URI, cols, null, null, null)) {
+        // already narrows the rows to those an app with the listings permission may read. It does
+        // take a package to read one app's rows only; YouTube's clients also show YouTube's rows
+        Uri uri = ytMusic || ytClient ? TvContract.PreviewPrograms.CONTENT_URI
+                : TvContract.PreviewPrograms.CONTENT_URI.buildUpon().appendQueryParameter("package", pkg).build();
+        try (Cursor cur = c.getContentResolver().query(uri, cols, null, null, null)) {
             if (cur == null) return out;
             while (cur.moveToNext()) {
                 String intentUri = cur.getString(4), title = cur.getString(0), rowPkg = cur.getString(5);

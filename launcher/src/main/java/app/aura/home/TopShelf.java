@@ -369,7 +369,10 @@ final class TopShelf extends FrameLayout {
             boolean tvos = Prefs.tvos(getContext());
             for (int i = 0; i < n; i++) {
                 final Continue.Item it = r.items.get(i);
-                final Card card = new Card(getContext(), paint(it, r.color), r.color, 22);
+                final Card card = new Card(getContext(), paint(it, r.color), r.color, 22).asContent();
+                // the shelf's gaps are 18 dp: a poster grows into its half and never onto the next
+                card.setGrowRoom(9);
+                card.setContentDescription(Continue.spoken(it));
                 card.ready = r.art[i];
                 card.tvos = tvos;
                 card.onClick = () -> open.open(it);

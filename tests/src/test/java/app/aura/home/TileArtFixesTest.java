@@ -11,6 +11,7 @@ import android.graphics.drawable.ColorDrawable;
 import android.widget.FrameLayout;
 
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
@@ -37,6 +38,17 @@ import java.util.concurrent.TimeUnit;
 @Config(sdk = 30)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 public class TileArtFixesTest {
+    /**
+     * Robolectric restarts its clock every test but keeps the animation clock's last reported time,
+     * so a spring started inside the first frame would begin in the future and never move.
+     */
+    @Before
+    public void freshAnimationClock() throws Exception {
+        Field f = android.view.animation.AnimationUtils.class.getDeclaredField("sAnimationState");
+        f.setAccessible(true);
+        ((ThreadLocal<?>) f.get(null)).remove();
+    }
+
     private static void run(long ms) {
         for (long t = 0; t < ms; t += 16) ShadowLooper.idleMainLooper(16, TimeUnit.MILLISECONDS);
     }

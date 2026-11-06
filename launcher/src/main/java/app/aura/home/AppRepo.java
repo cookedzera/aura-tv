@@ -9,8 +9,12 @@ import android.content.pm.ResolveInfo;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Shader;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
@@ -44,6 +48,8 @@ final class AppRepo {
         boolean fresh;
         /** Its category and activity, and where its package lives (a new path after each update): for the saved copy. */
         String category, cls, src;
+        /** Its banner was read for Light mode: only as sharp as its tile, and 16-bit where nothing on it is transparent. */
+        boolean light;
     }
 
     private static final List<String> DEFAULT_DOCK = Arrays.asList(
@@ -54,14 +60,17 @@ final class AppRepo {
 
     /**
      * Every app with a home-screen entry (its TV entry when it has one), each with its name, its
-     * sharpest banner and icon, and its colour. Reading an app's pictures from its own package is
-     * the slow part, worst just after the TV starts, when every app's files are cold: it's done on a
-     * few threads at once, behind the screen. An app whose package can't be read is left out, rather
-     * than leaving the whole grid empty. Off the main thread.
+     * banner and icon as sharp as the tiles need (see {@link #bannerDensity}), and its colour. Reading
+     * an app's pictures from its own package is the slow part, worst just after the TV starts, when
+     * every app's files are cold: it's done on a few threads at once, behind the screen. An app whose
+     * package can't be read is left out, rather than leaving the whole grid empty. Off the main thread.
      */
     static List<App> load(Context c) {
         PackageManager pm = c.getPackageManager();
-        int maxDensity = bannerDensity(c);
+        Resources res = c.getResources();
+        boolean light = Perf.light(c);
+        float density = res.getDisplayMetrics().density;
+        int bannerDensity = bannerDensity(density, light), iconDensity = bannerDensity(density, false);
         Map<String, ResolveInfo> found = new LinkedHashMap<>();
         Map<String, String> category = new HashMap<>();
         for (String cat : new String[]{Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER}) {
@@ -92,7 +101,7 @@ final class AppRepo {
         for (Map.Entry<String, ResolveInfo> e : found.entrySet()) {
             final ResolveInfo ri = e.getValue();
             final String cat = category.get(e.getKey());
-            made.add(pool.submit(() -> make(pm, ri, cat, maxDensity)));
+            made.add(pool.submit(() -> make(pm, res, ri, cat, bannerDensity, iconDensity, light)));
         }
         List<App> list = new ArrayList<>();
         try {
@@ -118,23 +127,31 @@ final class AppRepo {
         return list;
     }
 
-    private static int bannerDensity(Context c) {
-        // focused tile is 148dp * 1.1 wide; an xhdpi (320dpi) banner is 320px wide, so pick
-        // the smallest of 320 / 480 / 640 whose banner width (density px) is at least that wide
-        float w = 148f * 1.1f * c.getResources().getDisplayMetrics().density;
+    /**
+     * The density to read banners at: the smallest whose banner (as many pixels wide as its dpi: an
+     * xhdpi one is 320) covers the focused tile, 148 dp grown by a tenth. Light mode settles for 95 %
+     * of that, hdpi on a 720p screen and xhdpi at 1080p: a tile is painted at its resting size, and
+     * only the GPU enlarges it on focus.
+     */
+    static int bannerDensity(float density, boolean light) {
+        float w = 148f * 1.1f * density * (light ? 0.95f : 1f);
+        if (light && w <= DisplayMetrics.DENSITY_HIGH) return DisplayMetrics.DENSITY_HIGH;
         if (w <= DisplayMetrics.DENSITY_XHIGH) return DisplayMetrics.DENSITY_XHIGH;
         if (w <= DisplayMetrics.DENSITY_XXHIGH) return DisplayMetrics.DENSITY_XXHIGH;
         return DisplayMetrics.DENSITY_XXXHIGH;
     }
 
-    private static App make(PackageManager pm, ResolveInfo ri, String category, int maxDensity) {
+    private static App make(PackageManager pm, Resources res, ResolveInfo ri, String category, int bannerDensity,
+                            int iconDensity, boolean light) {
         ActivityInfo ai = ri.activityInfo;
         App a = new App();
         a.pkg = ai.packageName;
         a.label = String.valueOf(ri.loadLabel(pm)).trim();
-        a.banner = loadBannerHighRes(pm, ai, maxDensity);
-        a.icon = loadIconHighRes(pm, ri, ai, maxDensity);
+        a.banner = loadBannerHighRes(pm, ai, bannerDensity);
+        a.icon = loadIconHighRes(pm, ri, ai, iconDensity);
         a.color = colorOf(a.banner != null ? a.banner : a.icon);
+        if (light) a.banner = slim(res, a.banner);
+        a.light = light;
         a.category = category;
         a.cls = ai.name;
         // never null, so a list read now and the saved one compare alike
@@ -165,9 +182,14 @@ final class AppRepo {
             try {
                 JSONArray a = new JSONArray(read(new File(dir, "index.json")));
                 android.content.res.Resources res = c.getResources();
+                boolean light = Perf.light(c);
                 List<App> out = new ArrayList<>();
                 for (int i = 0; i < a.length(); i++) {
                     JSONObject o = a.getJSONObject(i);
+                    // Light mode's banners are too soft for the full mode, and a copy from before Light mode
+                    // read its own holds bigger ones than it needs: the real list is read, and kept, instead
+                    boolean made = o.optBoolean("light");
+                    if (made && !light || light && !o.has("light")) return null;
                     App x = new App();
                     x.pkg = o.getString("pkg");
                     x.label = o.getString("label");
@@ -176,8 +198,10 @@ final class AppRepo {
                     x.src = o.optString("src", "");
                     x.color = o.getInt("color");
                     x.launch = launchFor(x.pkg, x.cls, x.category);
-                    x.banner = picture(res, new File(dir, x.pkg + ".b.png"), o.optInt("bd", 0));
-                    x.icon = picture(res, new File(dir, x.pkg + ".i.png"), o.optInt("id", 0));
+                    x.light = made;
+                    x.banner = picture(res, new File(dir, x.pkg + ".b.png"), o.optInt("bd", 0), made);
+                    if (light) x.banner = slim(res, x.banner);
+                    x.icon = picture(res, new File(dir, x.pkg + ".i.png"), o.optInt("id", 0), false);
                     if (x.banner == null && x.icon == null) return null;
                     x.art = Art.load(c, x.pkg);
                     out.add(x);
@@ -198,7 +222,10 @@ final class AppRepo {
         StringBuilder s = new StringBuilder();
         for (App a : list) {
             s.append(a.pkg).append('|').append(a.label).append('|').append(a.cls).append('|').append(a.src)
-                    .append('|').append(a.banner != null).append('\n');
+                    .append('|').append(a.banner != null);
+            // Light mode's list says so: a copy made for the other mode is made again (the full mode's is as before)
+            if (a.light) s.append("|light");
+            s.append('\n');
         }
         return Integer.toHexString(s.toString().hashCode()) + ":" + s.length();
     }
@@ -222,7 +249,8 @@ final class AppRepo {
                 for (App x : list) {
                     if (x.cls == null || x.category == null) continue;
                     JSONObject o = new JSONObject().put("pkg", x.pkg).put("label", x.label).put("cls", x.cls)
-                            .put("cat", x.category).put("src", x.src != null ? x.src : "").put("color", x.color);
+                            .put("cat", x.category).put("src", x.src != null ? x.src : "").put("color", x.color)
+                            .put("light", x.light);
                     int bd = write(x.banner, new File(dir, x.pkg + ".b.png"), 640, 360);
                     int id = write(x.icon, new File(dir, x.pkg + ".i.png"), 256, 256);
                     if (bd < 0 && id < 0) continue;
@@ -294,9 +322,12 @@ final class AppRepo {
         return density;
     }
 
-    private static Drawable picture(android.content.res.Resources res, File f, int density) {
+    private static Drawable picture(android.content.res.Resources res, File f, int density, boolean rgb565) {
         if (!f.isFile()) return null;
-        Bitmap b = BitmapFactory.decodeFile(f.getPath());
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        // kept from 16 bits, read back into 16 exactly; the decoder keeps 32 for a picture with transparency
+        if (rgb565) o.inPreferredConfig = Bitmap.Config.RGB_565;
+        Bitmap b = BitmapFactory.decodeFile(f.getPath(), o);
         if (b == null) return null;
         if (density > 0) b.setDensity(density);
         return new android.graphics.drawable.BitmapDrawable(res, b);
@@ -347,7 +378,8 @@ final class AppRepo {
             int[] densities = {
                     DisplayMetrics.DENSITY_XXXHIGH,
                     DisplayMetrics.DENSITY_XXHIGH,
-                    DisplayMetrics.DENSITY_XHIGH
+                    DisplayMetrics.DENSITY_XHIGH,
+                    DisplayMetrics.DENSITY_HIGH
             };
             TypedValue v = new TypedValue();
             for (int density : densities) {
@@ -366,6 +398,44 @@ final class AppRepo {
         } catch (Exception ignored) {
         }
         return null;
+    }
+
+    /**
+     * Light mode: a banner with nothing transparent on it in 16-bit colour, half the memory, dithered on
+     * the way so a gradient doesn't band; anything else as it is. The 32-bit original isn't recycled:
+     * the app's own resources may hand it out again.
+     */
+    static Drawable slim(Resources res, Drawable d) {
+        if (!(d instanceof BitmapDrawable)) return d;
+        Bitmap b = ((BitmapDrawable) d).getBitmap();
+        if (b == null || b.isRecycled() || b.getConfig() != Bitmap.Config.ARGB_8888 || !opaque(b)) return d;
+        try {
+            Bitmap out = Bitmap.createBitmap(b.getWidth(), b.getHeight(), Bitmap.Config.RGB_565);
+            out.setDensity(b.getDensity());
+            // through a shader: a plain same-size draw into 16 bits truncates instead of dithering
+            Paint p = new Paint(Paint.DITHER_FLAG);
+            p.setShader(new BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+            new Canvas(out).drawPaint(p);
+            return new BitmapDrawable(res, out);
+        } catch (OutOfMemoryError e) {
+            return d;
+        }
+    }
+
+    /**
+     * Nothing transparent on {@code b}: by its own word, or all round its edges, where rounded corners
+     * or a clear margin would show (a PNG can carry an alpha channel it never uses).
+     */
+    private static boolean opaque(Bitmap b) {
+        if (!b.hasAlpha()) return true;
+        int w = b.getWidth(), h = b.getHeight();
+        int[] px = new int[2 * (w + h)];
+        b.getPixels(px, 0, w, 0, 0, w, 1);
+        b.getPixels(px, w, w, 0, h - 1, w, 1);
+        b.getPixels(px, 2 * w, 1, 0, 0, 1, h);
+        b.getPixels(px, 2 * w + h, 1, w - 1, 0, 1, h);
+        for (int p : px) if (p >>> 24 != 0xFF) return false;
+        return true;
     }
 
     /** A vivid representative colour for the focus glow (saturation-weighted mean hue). */

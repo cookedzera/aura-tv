@@ -35,6 +35,13 @@ final class WeatherSheet extends FrameLayout {
     private final ImageView icon;
     private final SkyArc arc;
     private final LinearLayout nowBlock, hours, days, hoursBlock, daysBlock;
+    private final GlassFrame.Way way;
+    /** Fading out: still visible for a moment, but no longer open (the home screen mustn't hide behind it). */
+    private boolean closing;
+    private final Runnable gone = () -> {
+        closing = false;
+        setVisibility(GONE);
+    };
 
     WeatherSheet(Activity a, Backdrop b) {
         super(a);
@@ -42,6 +49,7 @@ final class WeatherSheet extends FrameLayout {
         setVisibility(GONE);
         setFocusable(true);
         setClipChildren(false);
+        setContentDescription(a.getString(R.string.weather));
         GlassFrame veil = new GlassFrame(a, b, 0, 0.62f);
         veil.edgeLight = false;
         addView(veil, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -62,7 +70,7 @@ final class WeatherSheet extends FrameLayout {
         icon = ControlCenter.icon(a, R.drawable.ic_w_sun);
         icon.setColorFilter(0xFFFFFFFF);
         big.addView(icon, new LinearLayout.LayoutParams(Ui.dp(46), Ui.dp(46)));
-        temp = Ui.text(a, 60, Ui.light, 0xFFFFFFFF);
+        temp = Ui.text(a, 60, Ui.lightFace, 0xFFFFFFFF);
         temp.setIncludeFontPadding(true);
         temp.setLetterSpacing(-0.04f);
         big.addView(temp, lp(14, 0));
@@ -125,37 +133,39 @@ final class WeatherSheet extends FrameLayout {
         right.addView(daysBlock, new LinearLayout.LayoutParams(Ui.dp(RIGHT_W), ViewGroup.LayoutParams.WRAP_CONTENT));
         body.addView(right, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
         addView(body, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        // the glass fades, the forecast rises 16 dp into place (HIGH from a touch smaller)
+        way = new GlassFrame.Way(body, p -> {
+            setAlpha(Ui.clamp(p, 0f, 1f));
+            float s = Ui.light ? 1f : 0.96f + 0.04f * p;
+            body.setScaleX(s);
+            body.setScaleY(s);
+            body.setTranslationY(Ui.dpf(16) * (1f - p));
+        });
     }
 
-    /** Fading out: still visible for a moment, but no longer open (the home screen mustn't hide behind it). */
-    private boolean closing;
+    /** Its fades go straight onto the glass and the text: no full-screen offscreen pass each frame. */
+    @Override
+    public boolean hasOverlappingRendering() {
+        return false;
+    }
 
     boolean isOpen() {
         return getVisibility() == VISIBLE && !closing;
     }
 
     void open(boolean weatherOn) {
-        animate().cancel();
         closing = false;
         show(weatherOn);
         setVisibility(VISIBLE);
-        setAlpha(0f);
-        animate().alpha(1f).setDuration(260).setStartDelay(0).setInterpolator(Ui.SOFT).start();
-        body.setTranslationY(Ui.dp(18));
-        body.setScaleX(0.96f);
-        body.setScaleY(0.96f);
-        body.animate().translationY(0f).scaleX(1f).scaleY(1f).setDuration(520).setInterpolator(Ui.EMPHASIZED).start();
+        way.in(Ui.LOW_SHEET_IN, null);
         requestFocus();
+        announceForAccessibility(getContentDescription());
     }
 
     void close() {
         if (!isOpen()) return;
         closing = true;
-        body.animate().scaleX(0.97f).scaleY(0.97f).setDuration(200).setInterpolator(Ui.SOFT).start();
-        animate().alpha(0f).setDuration(200).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(() -> {
-            closing = false;
-            setVisibility(GONE);
-        }).start();
+        way.out(gone);
     }
 
     /** Fills it from the last reading; called again when a fresher one arrives while it's open. */

@@ -2,7 +2,9 @@ package app.aura.home;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -44,6 +46,14 @@ final class InputSheet extends GlassFrame {
     private final Host host;
     private final LinearLayout list;
     private final TextView status;
+    private final GlassFrame.Hold hold;
+    private final GlassFrame.Way way;
+    /** Fading out: still on screen for a moment, but no longer open, and nothing in it takes the focus. */
+    private boolean closing;
+    private final Runnable gone = () -> {
+        closing = false;
+        setVisibility(View.GONE);
+    };
 
     InputSheet(Activity a, Backdrop b, Host h) {
         super(a, b, 26, 0.5f);
@@ -74,10 +84,15 @@ final class InputSheet extends GlassFrame {
         col.addView(scroll, sl);
         addView(col, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setVisibility(View.GONE);
+        setContentDescription(a.getString(R.string.inputs_title));
+        hold = new GlassFrame.Hold(this, () -> {
+            if (list.getChildCount() > 0) list.getChildAt(0).requestFocus();
+        });
+        way = new GlassFrame.Way(this, GlassFrame.sheetAt(this));
     }
 
     boolean isOpen() {
-        return getVisibility() == View.VISIBLE;
+        return getVisibility() == View.VISIBLE && !closing;
     }
 
     void open(List<Source> sources) {
@@ -87,15 +102,36 @@ final class InputSheet extends GlassFrame {
         status.setText(act.getResources().getQuantityString(R.plurals.n_sources, sources.size(), sources.size())
                 + (live > 0 ? "  ·  " + act.getString(R.string.n_live, live) : ""));
         for (Source s : sources) list.addView(row(s), rowParams());
+        closing = false;
+        setDescendantFocusability(FOCUS_BEFORE_DESCENDANTS);
         setVisibility(View.VISIBLE);
-        setAlpha(0f);
-        setTranslationX(Ui.dp(24));
-        animate().alpha(1f).translationX(0f).setStartDelay(0).setDuration(380).setInterpolator(Ui.EMPHASIZED).start();
-        if (list.getChildCount() > 0) list.getChildAt(0).requestFocus();
+        way.in(Ui.LOW_SHEET_IN, null);
+        hold.start();
+        announceForAccessibility(getContentDescription());
     }
 
     void close() {
-        setVisibility(View.GONE);
+        if (getVisibility() != View.VISIBLE) return;
+        hold.stop();
+        closing = true;
+        setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
+        way.out(gone);
+    }
+
+    @Override
+    public boolean onKeyDown(int code, KeyEvent e) {
+        return hold.down(code) || super.onKeyDown(code, e);
+    }
+
+    @Override
+    public boolean onKeyUp(int code, KeyEvent e) {
+        return hold.up(code) || super.onKeyUp(code, e);
+    }
+
+    @Override
+    protected void onFocusChanged(boolean gained, int direction, Rect previous) {
+        super.onFocusChanged(gained, direction, previous);
+        if (!gained) hold.stop();
     }
 
     private LinearLayout.LayoutParams rowParams() {
@@ -108,7 +144,7 @@ final class InputSheet extends GlassFrame {
         Pad p = new Pad(act, null, 16, 0f);
         p.plainColor = 0x1AFFFFFF;
         p.edgeLight = false;
-        p.focusScale = 1.03f;
+        p.row = true;
         LinearLayout r = new LinearLayout(act);
         r.setGravity(Gravity.CENTER_VERTICAL);
         r.setPadding(Ui.dp(14), 0, Ui.dp(16), 0);

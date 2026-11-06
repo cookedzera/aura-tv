@@ -126,7 +126,7 @@ final class MusicScene extends FrameLayout {
         LinearLayout when = new LinearLayout(c);
         when.setOrientation(LinearLayout.VERTICAL);
         when.setGravity(Gravity.END);
-        clock = Ui.text(c, 30, Ui.light, 0xF2FFFFFF);
+        clock = Ui.text(c, 30, Ui.lightFace, 0xF2FFFFFF);
         when.addView(clock);
         date = Ui.text(c, 11, Ui.regular, 0xB3FFFFFF);
         when.addView(date);

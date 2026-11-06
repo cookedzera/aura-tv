@@ -19,7 +19,9 @@ import android.widget.TextView;
 /** Shared metrics, typography (Inter, variable weights), colour maths and motion curves. */
 final class Ui {
     static float density = 1f, scaled = 1f;
-    static Typeface thin, light, regular, medium, semibold, bold, heavy;
+    /** Light mode (the LOW tier unless Settings forces it), kept by the home screen for code that runs per frame. */
+    static volatile boolean light;
+    static Typeface thin, lightFace, regular, medium, semibold, bold, heavy;
 
     /** Calm hydraulic spring: quick lift with a gentle, weightless settle. */
     static final TimeInterpolator SPRING = t -> (float) (1 - Math.exp(-6.0 * t) * Math.cos(4.2 * t));
@@ -146,7 +148,7 @@ final class Ui {
         if (heavy != null) return;
         // the screensaver's clock: a hairline display cut
         thin = inter(c, 220, 32);
-        light = inter(c, 300, 28);
+        lightFace = inter(c, 300, 28);
         regular = inter(c, 400, 16);
         medium = inter(c, 500, 16);
         semibold = inter(c, 600, 14);

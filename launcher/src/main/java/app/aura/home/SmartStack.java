@@ -151,6 +151,19 @@ final class SmartStack extends FrameLayout {
         if (running) schedule();
     }
 
+    /** What TalkBack says for a card: its kind, title and line, without the marks drawn around them. */
+    private static String spoken(Slide s) {
+        StringBuilder b = new StringBuilder();
+        for (String part : new String[]{s.kicker, s.title, s.sub}) {
+            if (part == null) continue;
+            String said = part.replaceAll("\\s*\u00B7\\s*", ", ").replaceAll("^[^\\p{L}\\p{N}]+", "").trim();
+            if (said.isEmpty()) continue;
+            if (b.length() > 0) b.append(", ");
+            b.append(said);
+        }
+        return b.toString();
+    }
+
     private static boolean sameCard(Slide a, Slide b) {
         return TextUtils.equals(a.title, b.title) && TextUtils.equals(a.kicker, b.kicker) && TextUtils.equals(a.sub, b.sub);
     }
@@ -219,6 +232,7 @@ final class SmartStack extends FrameLayout {
         if (slides.isEmpty()) return;
         at = Compat.mod(i, slides.size());
         Slide s = slides.get(at);
+        setContentDescription(spoken(s));
         dots.moveTo(at, dir != 0);
         if (dir == 0) {
             // straight to it, even if a flip was under way: both pages back to rest first
@@ -264,6 +278,8 @@ final class SmartStack extends FrameLayout {
 
         Page(Context c) {
             super(c);
+            // the stack says what's on its card (see show): its words aren't read out a second time
+            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
             art = new ArtView(c);
             addView(art, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             // two soft shades: the card's own colour from the left, and a darker floor for the words

@@ -67,7 +67,7 @@ final class ProfilePicker extends FrameLayout {
         TextView kicker = Ui.caps(a, 8, 0x99FFFFFF, 0.4f);
         kicker.setText("AURA");
         body.addView(kicker);
-        TextView title = Ui.text(a, 40, Ui.light, 0xFFFFFFFF);
+        TextView title = Ui.text(a, 40, Ui.lightFace, 0xFFFFFFFF);
         title.setLetterSpacing(-0.03f);
         title.setText(act.getString(R.string.whos_watching));
         body.addView(title, lp(0, 6));
@@ -233,7 +233,7 @@ final class ProfilePicker extends FrameLayout {
             ring.setStrokeWidth(Ui.dpf(2.5f));
             ring.setColor(0xFFF4EFE6);
             text.setColor(0xFFFFFFFF);
-            text.setTypeface(Ui.light);
+            text.setTypeface(Ui.lightFace);
             text.setTextAlign(Paint.Align.CENTER);
         }
 
