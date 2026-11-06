@@ -1132,4 +1132,6 @@
     <string name="dock_hint">Ordner anlegen: OK auf einer App halten, dann Zu Ordner hinzufügen, Neuer Ordner</string>
     <plurals name="n_folders"><item quantity="one">%1$d Ordner</item><item quantity="other">%1$d Ordner</item></plurals>
     <string name="none_granted">Keine erteilt</string>
+    <string name="usage_access">Nutzungszugriff</string>
+    <string name="privacy_spotlight_help">Seine Antwort nennt die Fotos; sie laden von Microsofts Bildservern.</string>
 </resources>

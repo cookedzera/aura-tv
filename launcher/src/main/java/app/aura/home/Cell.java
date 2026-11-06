@@ -22,11 +22,11 @@ final class Cell extends LinearLayout {
     /** The category row it's in ({@link Categories}), or null on the grid: an app can be in two rows. */
     String row;
 
-    /** The name fades in over this once its tile is 80 % up, and out over this (§8.3.3); in a quick run it waits for the run to stop. */
+    /** The name fades in over this once its tile is 80 % up, and out over this; in a quick run it waits for the run to stop. */
     private static final int NAME_IN = 120, NAME_OUT = 100, RUN_REST = 180;
     /**
      * White at 33 strengths, made once. On HIGH the name keeps its soft shadow and fades by its colour:
-     * a fading view with a shadow layer would go offscreen every frame (PC13).
+     * a fading view with a shadow layer would go offscreen every frame.
      */
     private static final ColorStateList[] INK = new ColorStateList[33];
 
@@ -96,8 +96,13 @@ final class Cell extends LinearLayout {
     private void focused(boolean gained) {
         removeCallbacks(reveal);
         rising = gained;
-        if (gained) place();
-        else fadeName(targetAlpha(false), Math.round(NAME_OUT * card.pace));
+        if (gained) {
+            place();
+            // back before a frame of its fall, a tile already up has no rise left to bring the name
+            ride();
+        } else {
+            fadeName(targetAlpha(false), Math.round(NAME_OUT * card.pace));
+        }
     }
 
     /** Each frame the tile moves: on HIGH the name rides its growth; once the tile is 80 % up, the name comes. */
@@ -144,7 +149,7 @@ final class Cell extends LinearLayout {
 
     /**
      * The name at strength {@code a}. HIGH keeps its soft shadow and fades it with the colour; LOW draws
-     * no text shadow (PC6) and fades the view, which redraws nothing.
+     * no text shadow and fades the view, which redraws nothing.
      */
     private void showName(float a) {
         named = a;

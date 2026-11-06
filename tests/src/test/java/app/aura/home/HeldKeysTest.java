@@ -128,6 +128,8 @@ public class HeldKeysTest {
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16));
         setStatic(HomeActivity.class, "warm", true);
+        // the apps a test fills in place are the process's cache too: each test starts with none
+        setStatic(HomeActivity.class, "cache", null);
         HomeActivity.lastKeyAt = 0;
     }
 
@@ -307,6 +309,45 @@ public class HeldKeysTest {
         View parking = field(a, "parking");
         for (View v : seen) Assert.assertTrue("focus only waited on the page meanwhile, never elsewhere: " + v, v == parking || v == now);
         Assert.assertFalse("the holder takes focus no more", parking.isFocusable());
+        ac.pause().stop().destroy();
+    }
+
+    @Test
+    public void focusNeverStaysOnTheHolderWhenTheLastTileGoes() throws Exception {
+        ActivityController<HomeActivity> ac = start();
+        HomeActivity a = ac.get();
+        List<Cell> cells = field(a, "cells");
+        focusGrid(a, 2);
+        leaveTouchMode(cells.get(2).card);
+        Assert.assertSame(cells.get(2).card, a.getWindow().getCurrentFocus());
+        // every app hidden at once (a kids' profile left empty): the tile in focus goes with them
+        List<AppRepo.App> apps = field(a, "apps");
+        apps.clear();
+        call(a, "populate", new Class<?>[]{});
+        Assert.assertTrue("the grid is empty", cells.isEmpty());
+        View now = a.getWindow().getCurrentFocus(), parking = field(a, "parking");
+        Assert.assertNotNull("focus is somewhere the remote can go on from", now);
+        Assert.assertNotSame("never left on the holder, which draws nothing", parking, now);
+        Assert.assertFalse("the holder takes focus no more", parking.isFocusable());
+        ac.pause().stop().destroy();
+    }
+
+    @Test
+    public void rowsDimAsFocusMovesDuringTheIntro() throws Exception {
+        ActivityController<HomeActivity> ac = start();
+        HomeActivity a = ac.get();
+        List<Cell> cells = field(a, "cells");
+        leaveTouchMode(cells.get(0).card);
+        focusGrid(a, 0);
+        run(500);
+        // the tiles rise into place (after boot), and focus moves down to Music before they're done
+        call(a, "cascade", new Class<?>[]{});
+        run(200);
+        focusGrid(a, 24);
+        run(3500);
+        Assert.assertEquals("the row focus moved to is lit", 1f, cells.get(24).getAlpha(), 0.01f);
+        Assert.assertEquals("the row it left recedes", Ui.DIM_OTHER_ROWS, cells.get(0).getAlpha(), 0.01f);
+        Assert.assertEquals("risen to full size", 1f, cells.get(24).getScaleX(), 0.001f);
         ac.pause().stop().destroy();
     }
 

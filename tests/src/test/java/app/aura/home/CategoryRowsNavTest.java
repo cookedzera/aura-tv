@@ -95,6 +95,10 @@ public class CategoryRowsNavTest {
         Field w = HomeActivity.class.getDeclaredField("warm");
         w.setAccessible(true);
         w.setBoolean(null, true);
+        // the apps a test fills in place are the process's cache too: each test starts with none
+        Field cache = HomeActivity.class.getDeclaredField("cache");
+        cache.setAccessible(true);
+        cache.set(null, null);
     }
 
     private HomeActivity launchWithCategoryApps(int videoCount, int toolCount) throws Exception {

@@ -651,8 +651,7 @@ final class WifiSheet extends GlassFrame {
             password.post(() -> {
                 // closed again before this ran: a keyboard now would take the remote
                 if (join.getVisibility() != View.VISIBLE || !password.hasFocus()) return;
-                InputMethodManager imm = Compat.svc(act, InputMethodManager.class);
-                if (imm != null) imm.showSoftInput(password, InputMethodManager.SHOW_IMPLICIT);
+                Compat.keyboard(password, true);
             });
         }
     }

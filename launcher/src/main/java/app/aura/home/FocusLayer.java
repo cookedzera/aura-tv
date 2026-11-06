@@ -11,7 +11,7 @@ import android.view.ViewParent;
 import android.view.ViewTreeObserver;
 
 /**
- * The focused tile's shadow on home's page in Light mode (§6 T10, §10 PC6). A LOW tile casts no real
+ * The focused tile's shadow on home's page in Light mode. A LOW tile casts no real
  * shadow (the GPU would work it out every frame) and doesn't redraw a baked one as it rises: two
  * shared views beneath the tiles carry the baked shadow instead, moved and faded by view properties
  * alone, one under the tile rising into focus and one under the tile it left while that one settles.

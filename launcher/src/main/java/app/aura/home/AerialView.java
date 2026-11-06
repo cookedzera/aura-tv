@@ -39,6 +39,12 @@ final class AerialView extends FrameLayout {
     private final Listener listener;
     private final View veil;
     private Slot shown, coming;
+    /**
+     * The video dipping away to what lies beneath ({@link #leave}): it holds its decoder until the veil
+     * is dark, and still counts as showing. {@code leavingNext} loads once it's gone.
+     */
+    private Slot leaving;
+    private Aerials.Video leavingNext;
     private String kind = "mix", lastUrl;
     /** This TV wouldn't play two videos at once: the last one goes before the next one loads. */
     private boolean oneAtATime;
@@ -88,21 +94,45 @@ final class AerialView extends FrameLayout {
             coming.release();
             coming = null;
         }
+        if (leaving != null) {
+            // the last one is still dipping away: whichever is chosen last loads once it's gone
+            leavingNext = v;
+            return;
+        }
         if (oneAtATime && shown != null) {
             // the video on screen gives way to what's beneath first, then the next one loads
-            final Slot old = shown;
-            final Aerials.Video nextVideo = v;
-            shown = null;
-            handler.removeCallbacks(watchdog);
-            veil(1f, 500, () -> {
-                old.release();
-                listener.lost();
-                veil(0f, 700, null);
-                startComing(nextVideo, light);
-            });
+            leave(v, 500, 700);
             return;
         }
         startComing(v, light);
+    }
+
+    /**
+     * The video on screen dips to black over {@code dip} ms and goes, what lies beneath is told it
+     * shows again, and the veil opens over {@code open}; then {@code then}, or the last video
+     * {@link #next} chose meanwhile, loads.
+     */
+    private void leave(Aerials.Video then, long dip, long open) {
+        leaving = shown;
+        leavingNext = then;
+        shown = null;
+        handler.removeCallbacks(watchdog);
+        veil(1f, dip, () -> {
+            Aerials.Video v = leavingNext;
+            leavingNext = null;
+            letLeavingGo();
+            veil(0f, open, null);
+            if (v != null) startComing(v, light);
+        });
+    }
+
+    /** The video dipping away let go, and what lies beneath told it shows again. */
+    private void letLeavingGo() {
+        Slot s = leaving;
+        leaving = null;
+        if (s == null) return;
+        s.release();
+        listener.lost();
     }
 
     private boolean metered() {
@@ -134,13 +164,14 @@ final class AerialView extends FrameLayout {
     }
 
     boolean showing() {
-        return shown != null;
+        return shown != null || leaving != null;
     }
 
     /** The video dims away over {@code ms}, as what's next arrives (home, or the photographs). */
     void dimOut(long ms) {
         handler.removeCallbacksAndMessages(null);
-        veil(1f, ms, null);
+        leavingNext = null;
+        veil(1f, ms, this::letLeavingGo);
     }
 
     /**
@@ -155,16 +186,20 @@ final class AerialView extends FrameLayout {
             coming.release();
             coming = null;
         }
-        if (shown == null) {
+        leavingNext = null;
+        final Slot old = shown != null ? shown : leaving;
+        if (old == null) {
             veil.animate().cancel();
             veil.setAlpha(0f);
             if (done != null) done.run();
             return;
         }
-        final Slot old = shown;
-        shown = null;
+        // one already dipping away hadn't yet said what lies beneath shows again
+        final boolean owed = old == leaving;
+        shown = leaving = null;
         veil(1f, 150, () -> {
             old.release();
+            if (owed) listener.lost();
             veil(0f, 240, done);
         });
     }
@@ -175,6 +210,8 @@ final class AerialView extends FrameLayout {
         if (coming != null) coming.release();
         if (shown != null) shown.release();
         coming = shown = null;
+        leavingNext = null;
+        letLeavingGo();
     }
 
     // ---- one video -----------------------------------------------------------------------------
@@ -355,15 +392,16 @@ final class AerialView extends FrameLayout {
             else handler.postDelayed(() -> next(kind), 1500);
         } else if (s == shown) {
             // the video on screen stopped (the network went): what's beneath comes back
-            shown = null;
-            handler.removeCallbacks(watchdog);
-            // it gave out while the next was loading beside it: two decoders at once is likely what this TV can't do
-            if (coming != null) oneAtATime = true;
-            veil(1f, 400, () -> {
-                s.release();
-                listener.lost();
-                veil(0f, 900, null);
-            });
+            Aerials.Video then = null;
+            if (coming != null) {
+                // it gave out while the next was loading beside it: two decoders at once is likely what
+                // this TV can't do, so the next loads again once this one is gone
+                oneAtATime = true;
+                then = coming.v;
+                coming.release();
+                coming = null;
+            }
+            leave(then, 400, 900);
         }
     }
 

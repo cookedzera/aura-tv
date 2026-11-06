@@ -74,8 +74,9 @@ public class MediaWatch extends NotificationListenerService {
     private static final Map<android.media.session.MediaSession.Token, PlaybackState> stateOf = new java.util.concurrent.ConcurrentHashMap<>();
     /**
      * When each player last started playing (elapsedRealtime), kept as the list of players changes:
-     * Android sends the remote's Play to the latest. Those found playing as the list is read count
-     * as starting together, so the list's own order (the latest first) decides between them.
+     * Android sends the remote's Play to the latest still playing, else the latest. Those found
+     * playing as the list is read count as starting together, so the list's own order (the latest
+     * first) decides between them.
      */
     private static final Map<MediaSession.Token, Long> playingSince = new java.util.concurrent.ConcurrentHashMap<>();
     /** Players playing at their last report. */
@@ -548,6 +549,25 @@ public class MediaWatch extends NotificationListenerService {
         else if (!followers.contains(r)) followers.add(r);
     }
 
+    /**
+     * When another player is playing and the remote's Play key would reach it now, {@code cb} moves
+     * there from {@code from}: that player's controller, or null when nothing moved.
+     */
+    static MediaController moveTo(Context c, MediaController from, MediaController.Callback cb, Handler h) {
+        Playing p = now(c);
+        if (p == null || !p.playing || p.controller == null || p.controller.getSessionToken().equals(from.getSessionToken())) return null;
+        try {
+            p.controller.registerCallback(cb, h);
+        } catch (RuntimeException e) {
+            return null;
+        }
+        try {
+            from.unregisterCallback(cb);
+        } catch (RuntimeException ignored) {
+        }
+        return p.controller;
+    }
+
     private static void changed() {
         final Runnable r = onChange;
         if (r == null && followers.isEmpty()) return;
@@ -708,8 +728,9 @@ public class MediaWatch extends NotificationListenerService {
 
     /**
      * The player the remote's Play key would reach, or null when none has anything to show: on
-     * Android 13 and later the one Android names, before that the one that most recently started
-     * playing (Android sends media keys to the last app that played). With nothing to tell them
+     * Android 13 and later the one Android names, before that the one playing that most recently
+     * started, else the last to play (Android sends media keys to the app playing, else the last
+     * app that played; see {@link #buttonSession}). With nothing to tell them
      * apart, the one playing, else the first paused. Main thread is fine: no I/O (on 13+, with
      * several players, one quick question to Android).
      */
@@ -782,8 +803,9 @@ public class MediaWatch extends NotificationListenerService {
 
     /**
      * Of {@code live}, the player Android would send Play and Pause to: on Android 13 and later the
-     * one it names (the listener's approval lets Aura ask), before that the one that most recently
-     * started playing. Null when that can't be told.
+     * one it names (the listener's approval lets Aura ask), before that the one playing that most
+     * recently started, else (none playing) the one that most recently started. Null when that
+     * can't be told.
      */
     static MediaController buttonSession(Context c, List<MediaController> live) {
         if (Build.VERSION.SDK_INT >= 33 && c != null) {
@@ -797,11 +819,15 @@ public class MediaWatch extends NotificationListenerService {
         }
         MediaController best = null;
         long bestAt = -1;
+        boolean bestPlays = false;
         for (MediaController m : live) {
             Long at = playingSince.get(m.getSessionToken());
-            if (at != null && at > bestAt) {
+            if (at == null) continue;
+            boolean plays = playingNow.contains(m.getSessionToken());
+            if (plays && !bestPlays || plays == bestPlays && at > bestAt) {
                 best = m;
                 bestAt = at;
+                bestPlays = plays;
             }
         }
         return best;
@@ -812,7 +838,7 @@ public class MediaWatch extends NotificationListenerService {
      * the player Play would reach (whose media button can start it again).
      */
     static void dispatchKey(Context c, int code) {
-        AudioManager am = c != null ? Compat.svc(c, AudioManager.class) : null;
+        AudioManager am = Compat.svc(c, AudioManager.class);
         if (am == null) return;
         long t = SystemClock.uptimeMillis();
         try {

@@ -343,7 +343,7 @@ final class Banner extends FrameLayout {
     }
 
     /** Off the main thread: an app's name and icon; its package name and no icon when it can't be read. */
-    private static Object[] face(Context c, String pkg) {
+    static Object[] face(Context c, String pkg) {
         PackageManager pm = c.getPackageManager();
         try {
             return new Object[]{String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0))), pm.getApplicationIcon(pkg)};

@@ -288,6 +288,7 @@ final class Safety {
                 || !Prefs.device(c).getStringSet(Debloat.MINE, new java.util.HashSet<>()).isEmpty();
     }
 
+    /** Xiaomi's PatchWall, a prefix: its international sets have it as com.mitv.tvhome.atv. */
     private static final String XIAOMI_HOME = "com.mitv.tvhome";
 
     /**
@@ -307,7 +308,7 @@ final class Safety {
     }
 
     private static boolean neverOff(String pkg) {
-        return pkg.equals(GOOGLE_TV_HOME) || pkg.equals(XIAOMI_HOME);
+        return pkg.equals(GOOGLE_TV_HOME) || pkg.startsWith(XIAOMI_HOME);
     }
 
     private static boolean enabled(Context c, String pkg) {

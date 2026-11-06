@@ -201,4 +201,83 @@ final class Spring {
             sink.at(value);
         }
     }
+
+    /**
+     * One value on Aura's retargetable spring ({@link Mover}) that never moves quicker than Android
+     * TV's own rows ({@link Ui#scrollFloorMs}): from rest, a move the floor gives longer than its
+     * spring gets a calm spring of that length, at most MAX_MS, and anything farther first jumps to
+     * where a glide that long begins. Mid-flight it's only retargeted, keeping its speed.
+     */
+    static final class Glide {
+        private static final long MAX_MS = 700;
+        private final Spring spring;
+        private final long springMs;
+        private final float minChange;
+        private final Sink sink;
+        private Mover mover;
+        private boolean slow;
+
+        Glide(Spring spring, long springMs, float minChange, float start, Sink sink) {
+            this.spring = spring;
+            this.springMs = springMs;
+            this.minChange = minChange;
+            this.sink = sink;
+            mover = new Mover(spring, minChange, start, sink);
+        }
+
+        /** Heads for {@code to}; {@code floorMs}: the least time the distance there may take. */
+        void to(float to, long floorMs) {
+            to(to, floorMs, null);
+        }
+
+        /** Heads for {@code to}, taking at least {@code floorMs}; {@code settled} runs once it rests there. */
+        void to(float to, long floorMs, Runnable settled) {
+            if (!mover.moving()) {
+                float from = mover.value();
+                if (floorMs > springMs) {
+                    float start = from;
+                    long ms = floorMs;
+                    if (ms > MAX_MS) {
+                        start = to - (to - from) * MAX_MS / ms;
+                        ms = MAX_MS;
+                    }
+                    mover = new Mover(new Spring(ms / 1000.0, 0), minChange, start, sink);
+                    slow = true;
+                    if (start != from) sink.at(start);
+                } else if (slow) {
+                    mover = new Mover(spring, minChange, from, sink);
+                    slow = false;
+                }
+            }
+            mover.to(to);
+            if (mover.moving()) mover.then(settled);
+            else if (settled != null) settled.run();
+        }
+
+        float value() {
+            return mover.value();
+        }
+
+        float target() {
+            return mover.target();
+        }
+
+        boolean moving() {
+            return mover.moving();
+        }
+
+        void stop() {
+            mover.stop();
+        }
+
+        /** There at once. */
+        void jump(float v) {
+            mover.jump(v);
+        }
+
+        /** Straight to where it's heading. */
+        void finish() {
+            if (mover.moving()) mover.jump(mover.target());
+        }
+    }
 }

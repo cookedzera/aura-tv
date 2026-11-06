@@ -17,6 +17,7 @@ public class AuraApp extends Application {
         // phones and computers can play on the TV whenever Aura's process runs (the Home button
         // service keeps it running), not only while home is on screen
         Renderer.apply(this);
+        HomeKeys.watchList(this);
         // the process is back (a job, a cast, a remote command) after Android ended it for memory:
         // on Android 11+ that put the Home button service on a "crashed" list, where only a switch
         // off and on brings it back, and waiting for someone to open Aura's home screen could mean

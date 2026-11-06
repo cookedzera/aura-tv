@@ -36,7 +36,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * All apps (§8.3) on a simulated 960 x 540 dp TV: the rows sit on the tvOS grid above the folder dock;
+ * All apps on a simulated 960 x 540 dp TV: the rows sit on the tvOS grid above the folder dock;
  * Up and Down keep the place on screen and come back exactly; the header and the dock are round
  * trips; Back climbs to the first row, then closes; a held key steps on the ladder and stops where
  * it's let go; LOW keeps only the tiles near the view; TalkBack hears a row as focus enters it; Move
@@ -398,6 +398,191 @@ public class AllAppsTest {
         Assert.assertEquals("the empty row is shown, its ghost focusable", "ghost:" + empty, focus());
         String name = String.valueOf(act.getWindow().getCurrentFocus().getContentDescription());
         Assert.assertTrue(name, name.contains(c.getString(R.string.add_apps_to, "Empty")));
+    }
+
+    /**
+     * A device draws a view only inside its own bounds (Robolectric doesn't clip): every tile on show
+     * must sit inside the rows' page, every row whose tiles are in the window must show one, and
+     * every app is reached by walking the rows.
+     */
+    @Test
+    public void everyRowInTheWindowShowsItsTilesAndEveryAppIsReached() throws Exception {
+        open(true);
+        View grid = field(page, "page");
+        View window = (View) grid.getParent();
+        List<?> rows = field(page, "rows");
+        List<String> reached = new ArrayList<>();
+        for (int k = 0; k < rows.size(); k++) {
+            if (k > 0) press(KeyEvent.KEYCODE_DPAD_DOWN);
+            run(800);
+            Object row = rows.get(k);
+            int n = ((List<?>) field(row, "items")).size();
+            // Down keeps the place on screen: to the row's start first
+            for (int i = 0; i < n; i++) press(KeyEvent.KEYCODE_DPAD_LEFT);
+            run(800);
+            for (int i = 0; i < n; i++) {
+                if (i > 0) {
+                    press(KeyEvent.KEYCODE_DPAD_RIGHT);
+                    run(48);
+                }
+                reached.add(focus());
+            }
+            run(800);
+            for (int r = 0; r < rows.size(); r++) {
+                String id = field(rows.get(r), "id");
+                boolean inWindow = false, showing = false;
+                for (int i = 0; i < ((ViewGroup) grid).getChildCount(); i++) {
+                    View v = ((ViewGroup) grid).getChildAt(i);
+                    if (!(v instanceof Cell) || !id.equals(((Cell) v).row) || v.getVisibility() != View.VISIBLE) continue;
+                    float top = v.getTop() + v.getTranslationY();
+                    Assert.assertTrue("row " + id + ": a tile drawn inside the page's bounds, at " + top + " of " + grid.getHeight(),
+                            top >= 0 && top + v.getHeight() <= grid.getHeight());
+                    float onScreen = grid.getTranslationY() + top;
+                    if (onScreen >= 0 && onScreen + ((Cell) v).card.getHeight() <= window.getHeight()) inWindow = true;
+                    showing = true;
+                }
+                float tilesAt = grid.getTranslationY() + Ui.dpf(103 - 57 + r * 146);
+                if (tilesAt >= 0 && tilesAt + Ui.dp(71) <= window.getHeight()) {
+                    Assert.assertTrue("row " + id + " is in the window, with its tiles on show", showing && inWindow);
+                }
+            }
+        }
+        List<String> expected = new ArrayList<>();
+        for (int i = 0; i < 39; i++) if (i != 20 && i != 21) expected.add(pkg(i));
+        for (String p : expected) Assert.assertTrue(p + " is reached", reached.contains(p));
+        Assert.assertTrue("and the folder", reached.contains("folder:" + folder));
+    }
+
+    private void focusTile(int row, int col) throws Exception {
+        Object r = ((List<?>) field(page, "rows")).get(row);
+        Method m = AllApps.class.getDeclaredMethod("focusTile", r.getClass(), int.class);
+        m.setAccessible(true);
+        m.invoke(page, r, col);
+        run(400);
+    }
+
+    @Test
+    public void theNameCardKeepsTheRowsOutAndGivesTheFocusBackToItsTile() throws Exception {
+        open(true);
+        press(KeyEvent.KEYCODE_DPAD_DOWN);
+        press(KeyEvent.KEYCODE_DPAD_RIGHT);
+        press(KeyEvent.KEYCODE_DPAD_RIGHT);
+        run(400);
+        Assert.assertEquals(pkg(5), focus());
+        int rowAt = field(page, "rowAt");
+        final List<String> atDone = new ArrayList<>();
+        Method askName = AllApps.class.getDeclaredMethod("askName", String.class, String.class, List.class, Ask.Done.class);
+        askName.setAccessible(true);
+        askName.invoke(page, "Name it", "", new ArrayList<String>(), (Ask.Done) got -> atDone.add(focus()));
+        run(400);
+        Ask ask = field(page, "ask");
+        Assert.assertTrue(ask.isOpen());
+        ViewGroup content = field(page, "content");
+        Assert.assertEquals("the rows take no focus under the card", ViewGroup.FOCUS_BLOCK_DESCENDANTS, content.getDescendantFocusability());
+        for (int code : new int[]{KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_UP}) {
+            if (press(code) == AllApps.VIEW) act.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, code));
+            View f = act.getWindow().getCurrentFocus();
+            Assert.assertFalse("an arrow on the card never reaches a tile", f != null && f.getParent() instanceof Cell);
+        }
+        Method finish = Ask.class.getDeclaredMethod("finish", String.class);
+        finish.setAccessible(true);
+        finish.invoke(ask, "Shows");
+        Assert.assertEquals("the change is made with the focus back on its tile", Arrays.asList(pkg(5)), atDone);
+        run(400);
+        Assert.assertEquals(pkg(5), focus());
+        Assert.assertEquals("the page's place kept", rowAt, (int) field(page, "rowAt"));
+        Assert.assertEquals(ViewGroup.FOCUS_AFTER_DESCENDANTS, content.getDescendantFocusability());
+    }
+
+    @Test
+    public void aFolderChangedWhileOpenClosesBackOntoItsTile() throws Exception {
+        open(true);
+        List<?> rows = field(page, "rows");
+        int last = ((List<?>) field(rows.get(2), "items")).size() - 1;
+        focusTile(2, last);
+        Assert.assertEquals("folder:" + folder, focus());
+        act.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER));
+        act.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_CENTER));
+        run(600);
+        FolderPanel sheet = field(page, "sheet");
+        Assert.assertTrue("the folder is open", sheet.isOpen());
+        // an app joins it while it's open: the sheet is made again around it
+        Folders.add(c, folder, pkg(22));
+        page.refresh();
+        run(600);
+        Assert.assertTrue(sheet.isOpen());
+        Assert.assertEquals("the page's place stays on the folder's row", 2, (int) field(page, "rowAt"));
+        press(KeyEvent.KEYCODE_BACK);
+        run(600);
+        Assert.assertFalse(sheet.isOpen());
+        Assert.assertEquals("back on the folder's own tile", "folder:" + folder, focus());
+    }
+
+    @Test
+    public void closedThePageKeepsNoAppsOrPictures() throws Exception {
+        open(true);
+        page.close();
+        run(600);
+        Map<String, ?> known = field(page, "known");
+        Assert.assertTrue("the apps as last read are let go", known.isEmpty());
+        for (Object r : (List<?>) field(page, "rows")) Assert.assertTrue(((List<?>) field(r, "items")).isEmpty());
+        page.open();
+        run(600);
+        Assert.assertEquals("and read again as it opens", pkg(0), focus());
+    }
+
+    @Test
+    public void anEmptyRowThatFillsItselfStaysOffThePage() throws Exception {
+        // Movies & TV on, with none of the apps a video app; Favorites emptied, a row of your own empty
+        Categories.setHidden(c, "video", false);
+        for (int i = 0; i < 3; i++) Categories.removeFrom(c, Categories.FAV, pkg(i));
+        String empty = Categories.create(c, "Empty");
+        open(true);
+        List<String> ids = new ArrayList<>();
+        for (Object r : (List<?>) field(page, "rows")) ids.add(field(r, "id"));
+        Assert.assertFalse("no row of ghosts pushing the apps down: " + ids, ids.contains("video"));
+        Assert.assertTrue("Favorites stays, to be filled", ids.contains(Categories.FAV));
+        Assert.assertTrue("so does a row of your own", ids.contains(empty));
+    }
+
+    @Test
+    public void openingWithNoFavoritesStartsOnTheFirstAppAndUpReachesTheGhost() throws Exception {
+        for (int i = 0; i < 3; i++) Categories.removeFrom(c, Categories.FAV, pkg(i));
+        open(true);
+        Assert.assertEquals("Favorites holds only its ghost: the first app of the first row with apps (Mine)", pkg(3), focus());
+        press(KeyEvent.KEYCODE_DPAD_UP);
+        Assert.assertEquals("Favorites' ghost one Up away", "ghost:" + Categories.FAV, focus());
+    }
+
+    @Test
+    public void withNoFavoritesBackCountsFromTheFirstRowOfApps() throws Exception {
+        for (int i = 0; i < 3; i++) Categories.removeFrom(c, Categories.FAV, pkg(i));
+        open(true);
+        Assert.assertEquals(pkg(3), focus());
+        press(KeyEvent.KEYCODE_BACK);
+        Assert.assertFalse("opened and Back at once: the page closes, never a stop on Favorites' ghost", page.isOpen());
+        Assert.assertTrue(said.contains("closed"));
+        run(400);
+
+        said.clear();
+        open(true);
+        press(KeyEvent.KEYCODE_DPAD_DOWN);
+        Assert.assertNotEquals(pkg(3), focus());
+        press(KeyEvent.KEYCODE_BACK);
+        Assert.assertEquals("from a lower row, back to the first row of apps", pkg(3), focus());
+        Assert.assertTrue(page.isOpen());
+        press(KeyEvent.KEYCODE_DPAD_UP);
+        Assert.assertEquals("ghost:" + Categories.FAV, focus());
+        press(KeyEvent.KEYCODE_BACK);
+        Assert.assertFalse("from the ghost above the start, the page closes", page.isOpen());
+    }
+
+    @Test
+    public void openingWithFavoritesStartsOnTheFirstFavorite() {
+        open(true);
+        Assert.assertEquals(pkg(0), focus());
+        press(KeyEvent.KEYCODE_DPAD_DOWN);
+        Assert.assertEquals(pkg(3), focus());
     }
 
     @Test

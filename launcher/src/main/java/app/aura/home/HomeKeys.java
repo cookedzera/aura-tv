@@ -7,6 +7,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.database.ContentObserver;
 import android.hardware.input.InputManager;
 import android.os.Handler;
 import android.os.Looper;
@@ -59,11 +60,13 @@ public class HomeKeys extends AccessibilityService {
     static final int KEYCODE_PROFILE_SWITCH = 288;
     /** Home goes to Aura even where Android hands it to another launcher (on unless switched off). */
     private static final String TAKEOVER = "home_takeover";
-    /** The TV's list of switched-on accessibility services as Aura last wrote it, or last found it while running. */
+    /** The TV's list of switched-on accessibility services as Aura last wrote it, or last saw it with the service on it. */
     private static final String LIST = "keys_list";
     /** {@link #heal} switches the service off and on this many times at most per start of the process, each given this long. */
     private static final int HEALS = 3;
     private static final long HEAL_WAIT_MS = 20_000;
+    /** The service gone from the list this soon after Aura switched it off is still Aura's doing (see {@link #watchList}). */
+    private static final long OFF_MS = 5_000;
 
     /** Running in this process right now. */
     static volatile boolean live;
@@ -77,9 +80,15 @@ public class HomeKeys extends AccessibilityService {
         HomeKeys s = running;
         return s != null && s.performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS);
     }
-    /** How often {@link #heal} has switched the service off and on in this process, and when it last tried. */
+    /**
+     * How often {@link #heal} has switched the service off and on in this process, and when it last
+     * tried or the service was last switched on: Android takes a while to start a service just
+     * switched on, and switched off meanwhile it starts all over.
+     */
     private static int heals;
-    private static long healAt;
+    private static volatile long healAt;
+    /** When Aura last switched the service off itself; 0 when it hasn't in this process. */
+    private static volatile long offAt;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private String front, firstFront;
@@ -1316,11 +1325,17 @@ public class HomeKeys extends AccessibilityService {
         if (!Compat.granted(c, android.Manifest.permission.WRITE_SECURE_SETTINGS)) return false;
         String list = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         java.util.List<String> keep = new java.util.ArrayList<>();
-        if (list != null) for (String s : TextUtils.split(list, ":")) if (!s.isEmpty() && !isMe(c, s)) keep.add(s);
+        boolean was = false;
+        if (list != null) for (String s : TextUtils.split(list, ":")) {
+            if (isMe(c, s)) was = true;
+            else if (!s.isEmpty()) keep.add(s);
+        }
         if (on) keep.add(me(c));
+        else offAt = SystemClock.uptimeMillis();
         String to = keep.isEmpty() ? null : TextUtils.join(":", keep);
         try {
             if (!Settings.Secure.putString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, to)) return false;
+            if (on && !was) healAt = SystemClock.uptimeMillis();
             Settings.Secure.putInt(c.getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED, keep.isEmpty() ? 0 : 1);
             android.content.SharedPreferences.Editor ed = Prefs.device(c).edit().putString(LIST, to == null ? "" : to);
             // heal() switches it off and on: only a real switch-off counts as not wanted
@@ -1358,6 +1373,36 @@ public class HomeKeys extends AccessibilityService {
         if (!live && wanted(c) && takeover(c) && Compat.granted(c, android.Manifest.permission.WRITE_SECURE_SETTINGS)) relist(c);
     }
 
+    /**
+     * Follows the TV's list for as long as Aura's process runs. With the service on it, the list is
+     * kept as it stands, so a service switched on meanwhile isn't later taken for an edit by hand
+     * ({@link #relist}). Taken off it, not by Aura: someone's choice, which stands, even with the
+     * service not running to hear it (onUnbind). A force-stop ends Aura's process before Android
+     * drops the service, so that's never seen here, and relist() still brings the service back.
+     */
+    static void watchList(Context c) {
+        final Context app = c.getApplicationContext();
+        app.getContentResolver().registerContentObserver(Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES), false,
+                new ContentObserver(new Handler(Looper.getMainLooper())) {
+                    private boolean listed = on(app);
+
+                    @Override
+                    public void onChange(boolean self) {
+                        String list = list(app);
+                        boolean was = listed;
+                        listed = false;
+                        for (String s : TextUtils.split(list, ":")) listed |= isMe(app, s);
+                        long off = offAt;
+                        if (listed) {
+                            Prefs.device(app).edit().putString(LIST, list).apply();
+                        } else if (was && !Prefs.device(app).getBoolean("keys_healing", false)
+                                && (off == 0 || SystemClock.uptimeMillis() - off > OFF_MS)) {
+                            Prefs.device(app).edit().putBoolean("keys_wanted", false).putString(LIST, list).apply();
+                        }
+                    }
+                });
+    }
+
     /** The other services in a list, as a set: Android writes the list back in its own order and form. */
     private static java.util.Set<ComponentName> others(Context c, String list) {
         java.util.Set<ComponentName> out = new java.util.HashSet<>();
@@ -1382,7 +1427,7 @@ public class HomeKeys extends AccessibilityService {
 
     static void heal(Context c, Runnable done) {
         final Context app = c.getApplicationContext();
-        // a switch off and on of Aura's own is under way, or still being given its time
+        // a switch off and on of Aura's own is under way, or the service was switched on lately: given its time
         if (healAt > 0 && SystemClock.uptimeMillis() - healAt < HEAL_WAIT_MS) {
             if (done != null) done.run();
             return;

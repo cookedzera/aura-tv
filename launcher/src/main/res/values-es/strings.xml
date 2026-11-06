@@ -1132,4 +1132,6 @@
     <string name="dock_hint">Crea una carpeta: mantén OK en una app y elige Añadir a una carpeta, Carpeta nueva</string>
     <plurals name="n_folders"><item quantity="one">%1$d carpeta</item><item quantity="other">%1$d carpetas</item></plurals>
     <string name="none_granted">Ninguno concedido</string>
+    <string name="usage_access">Acceso de uso</string>
+    <string name="privacy_spotlight_help">Su respuesta indica las fotos, que se cargan desde los servidores de imágenes de Microsoft.</string>
 </resources>

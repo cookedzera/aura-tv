@@ -123,18 +123,9 @@ final class MusicStrip extends LinearLayout {
     /** Another player started and the remote's Play key would reach it now: the strip shows that one instead. */
     private void follow() {
         if (controller == null) return;
-        MediaWatch.Playing p = MediaWatch.now(getContext());
-        if (p == null || !p.playing || p.controller == null || p.controller.getSessionToken().equals(controller.getSessionToken())) return;
-        try {
-            p.controller.registerCallback(watch, handler);
-        } catch (RuntimeException e) {
-            return;
-        }
-        try {
-            controller.unregisterCallback(watch);
-        } catch (RuntimeException ignored) {
-        }
-        controller = p.controller;
+        MediaController to = MediaWatch.moveTo(getContext(), controller, watch, handler);
+        if (to == null) return;
+        controller = to;
         show();
     }
 

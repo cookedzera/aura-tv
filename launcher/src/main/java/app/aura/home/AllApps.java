@@ -4,8 +4,6 @@ import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.DashPathEffect;
@@ -45,7 +43,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 
 /**
- * All apps (§8.3): every app on the TV in category rows (Favorites, the rows that fill themselves,
+ * All apps: every app on the TV in category rows (Favorites, the rows that fill themselves,
  * your own, All, then Hidden) scrolling above a glass dock of folders, on the tvOS 26 Home grid with
  * Android's own 16:9 banners: six 126 x 71 dp tiles a row, 24 dp apart, two rows and the next row's
  * title above the dock. It is a view over Aura's own stores (rows from {@link Categories}, your
@@ -92,20 +90,20 @@ final class AllApps extends FrameLayout {
     static final int PASS = 0, DONE = 1, VIEW = 2;
 
     private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT, WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
-    /** dp on the 960 x 540 canvas (§8.3.1): the rows' window between the header and the dock, the first title, the dock. */
+    /** dp on the 960 x 540 canvas: the rows' window between the header and the dock, the first title, the dock. */
     private static final float VIEW_TOP = 57f, VIEW_BOTTOM = 387f, TITLE_Y = 68f, TITLE_TO_TILE = 35f, DOCK_Y = 399f;
-    /** The focused row's title moves up as far as its tile grows at x1.20, and is 90 % white against 60 % (§8.3.3). */
+    /** The focused row's title moves up as far as its tile grows at x1.20, and is 90 % white against 60 %. */
     private static final float TITLE_LIFT = 7f, TITLE_ON = 0.9f, TITLE_OFF = 0.6f;
-    /** The lengths of Spring.row() and Spring.smooth(), and the longest a glide may take. */
-    private static final long ROW_MS = 350, SMOOTH_MS = 450, GLIDE_MAX_MS = 700;
+    /** The lengths of Spring.row() and Spring.smooth(). */
+    private static final long ROW_MS = 350, SMOOTH_MS = 450;
     /** How far Spring.row() trails a target moving at a steady speed (2ζ/ω, in ms of that travel). */
     private static final float ROW_TRAIL_MS = 95f;
     private static final int ROWS = 0, DOCK = 1, HEAD = 2;
     private static final String HIDDEN_ROW = "hidden";
-    /** Tiles about to come on screen are painted here, one at a time, just below the screen's priority (PC9). */
+    /** Tiles about to come on screen are painted here, one at a time, just below the screen's priority. */
     private static final ExecutorService PAINTER = Compat.background("all-apps", android.os.Process.THREAD_PRIORITY_DEFAULT + 2);
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
-    /** A stand-in while the apps are read (§8.3.4): 8 % white, never a spinner. */
+    /** A stand-in while the apps are read: 8 % white, never a spinner. */
     private static final Tiles.Painter WAITING = (c, w, h) -> c.drawColor(0x14FFFFFF);
 
     /** One tile's worth: an app, a folder, an empty row's "Add apps", the hidden apps, or a stand-in while loading. */
@@ -141,7 +139,7 @@ final class AllApps extends FrameLayout {
         final List<Tile> cells = new ArrayList<>();
         int index, first, col;
         float shift, lit = 1f, litFrom = 1f, litTo = 1f;
-        Glide glide;
+        Spring.Glide glide;
         TextView label;
         /** The card focus is on in this row (or last was) and the one before it: the title rides their growth. */
         Card lead, prev;
@@ -197,19 +195,19 @@ final class AllApps extends FrameLayout {
     };
     private GlassFrame empty;
     private Pad emptyButton;
-    private boolean shown, held, dim, busy, opening, jumping, trimming, fresh, menuDim;
+    private boolean shown, held, dim, busy, opening, jumping, trimming, fresh, menuDim, covered;
     private int zone = ROWS, rowAt, headAt, pass, gen;
     private String style = "tvos", nameMode = "focus";
-    /** The grid in dp (§8.3.1): six 126 x 71 tiles at a 150 dp pitch from x 42, rows 146 dp apart; Large, five 150 x 84. */
+    /** The grid in dp: six 126 x 71 tiles at a 150 dp pitch from x 42, rows 146 dp apart; Large, five 150 x 84. */
     private int cols = 6, tileW = 126, tileH = 71;
     private float x0 = 42f, pitch = 150f, rowPitch = 146f, room = 12f;
     /** The page's travel down its rows, dp: where it is, and where it's heading. */
-    private Glide scroll;
+    private Spring.Glide scroll;
     private float scrollDp, scrollAim, glassAt;
     private long lastStep, lastRepeat;
     private float holdLead;
     private ValueAnimator litAnim, jiggle;
-    /** rememberSource (§8.3.2): the last move up or down, so the opposite key goes back exactly where it came from. */
+    /** rememberSource: the last move up or down, so the opposite key goes back exactly where it came from. */
     private Row srcFrom, srcTo;
     private int srcCol, srcToCol, srcDir;
     /** The tile the dock was entered from: Up and Back out of the dock return to it. */
@@ -221,7 +219,7 @@ final class AllApps extends FrameLayout {
     /** The folder whose sheet is open and the tile it opened from; what a menu or the name card is for. */
     private String sheetTag;
     private View sheetFrom, menuFor, askFor;
-    /** Move (§8.3.5): the tile being carried, and its row as it was before. */
+    /** Move: the tile being carried, and its row as it was before. */
     private Tile carry;
     private List<Item> carryWas;
 
@@ -233,12 +231,12 @@ final class AllApps extends FrameLayout {
         setClipChildren(false);
         setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
         Backdrop b = h.backdrop();
-        // the photograph blurred and 25 % darker (§8.3.7), from home's one pre-blurred copy
+        // the photograph blurred and 25 % darker, from home's one pre-blurred copy
         veil = new GlassFrame(a, b, 0, 0.25f);
         veil.edgeLight = false;
         addView(veil, new LayoutParams(MATCH, MATCH));
         content = new FrameLayout(a) {
-            // its fade goes straight onto its views: no offscreen copy of the page each frame (PC13)
+            // its fade goes straight onto its views: no offscreen copy of the page each frame
             @Override
             public boolean hasOverlappingRendering() {
                 return false;
@@ -347,8 +345,9 @@ final class AllApps extends FrameLayout {
         held = false;
         srcFrom = null;
         dockRow = null;
+        covered = false;
         setVisibility(VISIBLE);
-        setDescendantFocusability(FOCUS_AFTER_DESCENDANTS);
+        focusable();
         // LOW: the first frame is the glass and the tile in focus; the others are painted behind it and come up as it fades in
         opening = Ui.light;
         jumping = true;
@@ -368,15 +367,31 @@ final class AllApps extends FrameLayout {
         if (menu.isOpen()) menu.hide();
         if (sheet.isOpen()) sheet.close();
         if (ask.isOpen()) ask.cancel();
+        askFor = null;
         remember();
         shown = false;
         held = false;
-        setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
+        focusable();
         for (int i = 0; i < rows.size(); i++) if (rows.get(i).glide != null) rows.get(i).glide.stop();
         if (scroll != null) scroll.stop();
         give.stop();
         way.out(gone);
         host.closed();
+    }
+
+    /**
+     * One of home's panels (Control Center, Settings, Find, a PIN card) is over the page: none of its
+     * tiles may take the focus, which Android's own search hands to anything focusable beneath.
+     */
+    void cover(boolean on) {
+        covered = on;
+        focusable();
+    }
+
+    /** The page's tiles take focus only while it's open with nothing over it; its own name card keeps the rows out too. */
+    private void focusable() {
+        setDescendantFocusability(shown && !covered ? FOCUS_AFTER_DESCENDANTS : FOCUS_BLOCK_DESCENDANTS);
+        content.setDescendantFocusability(ask.isOpen() ? FOCUS_BLOCK_DESCENDANTS : FOCUS_AFTER_DESCENDANTS);
     }
 
     /** Home's apps, folders or rows changed (an app installed, a profile switched): the page follows, the focus kept. */
@@ -412,7 +427,7 @@ final class AllApps extends FrameLayout {
      * page) while the page is open: it comes back here, to where the page says it is.
      */
     void regain() {
-        if (shown && !busy && !menu.isOpen() && !sheet.isOpen() && !ask.isOpen()) land();
+        if (shown && !covered && !busy && !menu.isOpen() && !sheet.isOpen() && !ask.isOpen()) land();
     }
 
     /** Words typed on the phone: into the name card, when this page has it open. */
@@ -432,6 +447,11 @@ final class AllApps extends FrameLayout {
         int code = e.getKeyCode();
         boolean first = e.getRepeatCount() == 0;
         boolean shut = code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU;
+        // the card closed on nothing typed, which tells no one
+        if (askFor != null && !ask.isOpen()) {
+            asked();
+            if (findFocus() == null) land();
+        }
         if (ask.isOpen()) {
             if (code == KeyEvent.KEYCODE_BACK) {
                 if (first) closeAsk();
@@ -455,13 +475,13 @@ final class AllApps extends FrameLayout {
             }
             return VIEW;
         }
-        if (findFocus() == null && (isArrow(code) || Pad.isConfirm(code))) {
+        if (findFocus() == null && (Pad.isArrow(code) || Pad.isConfirm(code))) {
             // the focus went somewhere off the page (a name card shut on nothing typed): it comes back first
             if (first) land();
             return DONE;
         }
         if (carry != null) return editKey(code, e);
-        if (isArrow(code)) {
+        if (Pad.isArrow(code)) {
             arrow(code, e);
             return DONE;
         }
@@ -509,7 +529,7 @@ final class AllApps extends FrameLayout {
 
     // ---- building -----------------------------------------------------------------------------
 
-    /** The grid's measures (§8.3.1): six 126 x 71 dp tiles at a 150 dp pitch; Large, five 150 x 84 at 182.5. */
+    /** The grid's measures: six 126 x 71 dp tiles at a 150 dp pitch; Large, five 150 x 84 at 182.5. */
     private void grid(boolean big) {
         cols = big ? 5 : 6;
         tileW = big ? 150 : 126;
@@ -548,6 +568,12 @@ final class AllApps extends FrameLayout {
             if (was != null) r.lit = r.litFrom = r.litTo = was.lit;
         }
         rowAt = Math.max(0, Math.min(rowAt, rows.size() - 1));
+        // as tall as its rows: the viewport draws it only inside its own bounds, which scroll with it
+        int tall = Ui.dp(titleTop(rows.size()) + rowPitch);
+        if (page.getLayoutParams().height != tall) {
+            page.getLayoutParams().height = tall;
+            page.requestLayout();
+        }
         heading(apps, docked.size());
         titles();
         dock.show(docked, style, host.backdrop());
@@ -577,6 +603,12 @@ final class AllApps extends FrameLayout {
             } else {
                 int i = indexOf(r, tag);
                 c = i >= 0 ? i : Math.max(0, Math.min(col, r.items.size() - 1));
+            }
+            // opening onto Favorites with no favorites yet: the first app instead, its ghost one Up away
+            int firstApps = firstApps();
+            if (fresh && r.id.equals(Categories.FAV) && !r.items.get(0).real() && firstApps >= 0) {
+                r = rows.get(firstApps);
+                c = 0;
             }
             focusTile(r, c);
         }
@@ -656,7 +688,10 @@ final class AllApps extends FrameLayout {
                     if (a != null) r.items.add(app(a));
                 }
             }
-            // an empty row stays, with a ghost tile to fill it (§8.3.4)
+            // a row that fills itself (Movies & TV, Music...) with nothing in it stays off the page, so it never
+            // pushes the apps below the first screen; an app's menu (Add to category) still lists it.
+            // Favorites and your own rows stay, with a ghost tile to fill them
+            if (r.items.isEmpty() && k.auto != null) continue;
             if (r.items.isEmpty()) r.items.add(new Item(Item.GHOST, "ghost:" + k.id, null, null, null, 0));
             rows.add(r);
         }
@@ -759,7 +794,7 @@ final class AllApps extends FrameLayout {
     // ---- the tiles near the view --------------------------------------------------------------
 
     /**
-     * Makes the tiles near the view and lets the rest go, pictures and all (§8.3.7, LOW memory): the
+     * Makes the tiles near the view and lets the rest go, pictures and all (LOW memory): the
      * rows on screen and one beyond each side, and in each the columns on screen with their peeks,
      * plus one more each side on HIGH. Tiles on screen show at once; the others are painted on the
      * painting thread and come up when their picture is ready. The tile with the focus, or being
@@ -850,7 +885,12 @@ final class AllApps extends FrameLayout {
         tiles.clear();
         for (int i = 0; i < orphans.size(); i++) drop(orphans.get(i));
         orphans.clear();
-        for (int i = 0; i < rows.size(); i++) rows.get(i).cells.clear();
+        // the apps as last read go too (their pictures with them): the next opening reads them again
+        for (int i = 0; i < rows.size(); i++) {
+            rows.get(i).cells.clear();
+            rows.get(i).items.clear();
+        }
+        known.clear();
         dock.release();
     }
 
@@ -863,7 +903,7 @@ final class AllApps extends FrameLayout {
         cell.row = r.id;
         Card card = cell.card;
         card.setGrowRoom(room);
-        // a dense grid: no sway, no parallax (§8.3.7)
+        // a dense grid: no sway, no parallax
         card.sway = false;
         card.tvos = !it.real() || "tvos".equals(style);
         if ("glass".equals(style) && (it.kind == Item.FOLDER || it.kind == Item.APP && it.app.art == null)) card.glass = host.backdrop();
@@ -911,7 +951,7 @@ final class AllApps extends FrameLayout {
 
     /**
      * Paints {@code p} at {@code w} x {@code h} px off the main thread, starts its upload to the GPU
-     * (Android 7 and later) and hands it over on the main thread (PC9). {@code p} must be a painter no
+     * (Android 7 and later) and hands it over on the main thread. {@code p} must be a painter no
      * view draws with: painters keep their own paints and matrices.
      */
     static void paintOff(final Tiles.Painter p, final int w, final int h, final Landed then) {
@@ -964,7 +1004,7 @@ final class AllApps extends FrameLayout {
         }
     }
 
-    /** What TalkBack says for a tile (§8.3, TalkBack): the app's or folder's own name. */
+    /** What TalkBack says for a tile: the app's or folder's own name. */
     private String said(Tile t) {
         Item it = t.item;
         switch (it.kind) {
@@ -1036,7 +1076,7 @@ final class AllApps extends FrameLayout {
     }
 
     /**
-     * Rows without the focus recede to x0.6 by their tiles' alpha (§12 X19, Settings' Dim other rows):
+     * Rows without the focus recede to x0.6 by their tiles' alpha (Settings' Dim other rows):
      * eased over 250 ms on HIGH, at once on LOW or while a key is held. Every row recedes while the
      * dock has the focus; none while the header has it.
      */
@@ -1090,7 +1130,7 @@ final class AllApps extends FrameLayout {
         }
     }
 
-    /** A card in a row moved: its row's title rides the growth of the card focus is on, or has just left (§8.3.3). */
+    /** A card in a row moved: its row's title rides the growth of the card focus is on, or has just left. */
     private void lifted(Tile t) {
         Row r = t.row;
         Card c = t.cell.card;
@@ -1169,6 +1209,9 @@ final class AllApps extends FrameLayout {
             if (t == carry) cancelEdit();
             return;
         }
+        // a folder's sheet remaking its grid drops the focused card and Android hands the focus to a
+        // tile under the sheet: the page's place stays where the sheet was opened from
+        if (sheet.isOpen()) return;
         Row r = t.row;
         if (r.index >= rows.size() || rows.get(r.index) != r) return;
         if (r.lead != c) {
@@ -1212,7 +1255,7 @@ final class AllApps extends FrameLayout {
     }
 
     private void scrollRows(float dp) {
-        if (scroll == null) scroll = new Glide(Spring.smooth(), SMOOTH_MS, 1f / Ui.density, scrollDp, v -> {
+        if (scroll == null) scroll = new Spring.Glide(Spring.smooth(), SMOOTH_MS, 1f / Ui.density, scrollDp, v -> {
             scrollDp = v;
             page.setTranslationY(-Ui.dpf(v));
             glassFollow(v);
@@ -1224,7 +1267,7 @@ final class AllApps extends FrameLayout {
         }
         if (dp == scrollAim && (scroll.moving() || scrollDp == dp)) return;
         scrollAim = dp;
-        scroll.to(dp, floorMs(Ui.dpf(Math.abs(dp - scroll.value())), true), rewindow);
+        scroll.to(dp, Ui.scrollFloorMs(this, Ui.dpf(Math.abs(dp - scroll.value())), true), rewindow);
     }
 
     /** Glass tiles sample the photograph where they stand: on the move they repaint every 6 dp, and where they stop. */
@@ -1260,7 +1303,7 @@ final class AllApps extends FrameLayout {
 
     private void slide(final Row r, float to) {
         float px = Ui.dpf(pitch);
-        if (r.glide == null) r.glide = new Glide(Spring.row(), ROW_MS, 1f / px, r.shift, v -> {
+        if (r.glide == null) r.glide = new Spring.Glide(Spring.row(), ROW_MS, 1f / px, r.shift, v -> {
             // the rows were made again meanwhile: this slide belongs to none of them
             if (r.index >= rows.size() || rows.get(r.index) != r) {
                 if (r.glide != null) r.glide.stop();
@@ -1269,24 +1312,13 @@ final class AllApps extends FrameLayout {
             r.shift = v;
             placeRow(r);
         });
-        r.glide.to(to, floorMs(Math.abs(to - r.glide.value()) * px, false), rewindow);
-    }
-
-    /** Android TV's least time for a scroll of {@code px} across the screen, or down it. */
-    private long floorMs(float px, boolean vertical) {
-        int screen = vertical ? getHeight() : getWidth();
-        return Ui.scrollFloorMs(px, getResources().getDisplayMetrics().densityDpi, screen > 0 ? screen : Ui.dp(vertical ? 540 : 960));
+        r.glide.to(to, Ui.scrollFloorMs(this, Math.abs(to - r.glide.value()) * px, false), rewindow);
     }
 
     // ---- keys ---------------------------------------------------------------------------------
 
-    private static boolean isArrow(int code) {
-        return code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
-                || code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN;
-    }
-
     /**
-     * Whether this press or repeat moves (§8.3.2): every separate press does; a held key steps on
+     * Whether this press or repeat moves: every separate press does; a held key steps on
      * {@link Ui#holdStep}'s ladder whatever the remote's repeat rate, and the repeats between go.
      */
     private boolean step(KeyEvent e) {
@@ -1336,7 +1368,7 @@ final class AllApps extends FrameLayout {
     }
 
     /**
-     * The rows (§8.3.2): no wrap; Left and Right along the row, a fresh press at its end giving 10 dp;
+     * The rows: no wrap; Left and Right along the row, a fresh press at its end giving 10 dp;
      * Up and Down to the same place on screen in the next row, or exactly back where the last move up
      * or down came from; from the first row up to the header button nearest above, from the last down
      * to the dock's nearest folder. A held key never leaves the rows.
@@ -1476,15 +1508,17 @@ final class AllApps extends FrameLayout {
         }
     }
 
-    /** A fresh press with nowhere to go: the tile gives that far and comes back (§8.3.3). */
+    /** A fresh press with nowhere to go: the tile gives that far and comes back. */
     private void nudge(Row r, int col, float x, float y) {
         final Tile t = tiles.get(r.id + "|" + r.items.get(col).tag);
         if (t != null) give.start(t.cell, x, y, () -> place(t));
     }
 
     /**
-     * Back (§8.3.2): from the header the page closes; from the dock to the rows' tile; from a lower
+     * Back: from the header the page closes; from the dock to the rows' tile; from a lower
      * row, or a first row slid along, to the first row's start of view; then the page closes.
+     * With no favorites yet the page starts on the first row of apps, and Back counts from there:
+     * Favorites' ghost above it is already past the start.
      */
     private void back() {
         if (zone == HEAD || rows.isEmpty()) {
@@ -1495,11 +1529,19 @@ final class AllApps extends FrameLayout {
             fromDock();
             return;
         }
-        Row top = rows.get(0);
+        Row first = rows.get(0);
+        int start = first.id.equals(Categories.FAV) && !first.items.get(0).real() ? Math.max(0, firstApps()) : 0;
+        Row top = rows.get(start);
         srcFrom = null;
-        if (rowAt > 0) focusTile(top, top.col);
-        else if (top.first > 0) focusTile(top, 0);
+        if (rowAt > start) focusTile(top, top.col);
+        else if (rowAt == start && top.first > 0) focusTile(top, 0);
         else close();
+    }
+
+    /** The first row that starts with an app or a folder, or -1 when none does. */
+    private int firstApps() {
+        for (int k = 0; k < rows.size(); k++) if (rows.get(k).items.get(0).real()) return k;
+        return -1;
     }
 
     /** Channel and page keys: a row up or down, at the same place on screen. */
@@ -1562,7 +1604,7 @@ final class AllApps extends FrameLayout {
         else land();
     }
 
-    /** The open folder shows what it holds now; once it holds nothing it closes, and its tile is gone (§8.3.4). False then. */
+    /** The open folder shows what it holds now; once it holds nothing it closes, and its tile is gone. False then. */
     private boolean reopenSheet() {
         String tag = sheetTag;
         Folders.Folder f = tag == null ? null : Folders.all(act).get(tag.substring(7));
@@ -1598,15 +1640,28 @@ final class AllApps extends FrameLayout {
     private void askName(String title, String text, List<String> suggestions, final Ask.Done done) {
         askFor = findFocus();
         ask.show(title, text, act.getString(R.string.type_a_name_then_ok), suggestions, got -> {
-            askFor = null;
+            // before the change rebuilds the page around wherever the focus is
+            asked();
             done.got(got);
-            // the card let go of the focus wherever Android put it: back onto the page
             if (findFocus() == null) land();
         });
+        focusable();
+    }
+
+    /**
+     * The name card has gone (a name given, or none): the rows take focus again, on the tile it was
+     * asked from, since the card's field let its focus go to whatever Android found first.
+     */
+    private void asked() {
+        View b = askFor;
+        askFor = null;
+        focusable();
+        if (b != null && b.isShown()) b.requestFocus();
     }
 
     private void closeAsk() {
         ask.cancel();
+        focusable();
         View back = askFor;
         askFor = null;
         if (back != null && back.isShown()) back.requestFocus();
@@ -1649,7 +1704,7 @@ final class AllApps extends FrameLayout {
     }
 
     /**
-     * Hold OK on an app (§8.3.6): Move; into a folder or a row; out of this row and its rename; and,
+     * Hold OK on an app: Move; into a folder or a row; out of this row and its rename; and,
      * outside a kids' profile, Hide, App info and Uninstall. Each through the stores' own calls.
      */
     private void appMenu(final Tile t) {
@@ -1692,7 +1747,7 @@ final class AllApps extends FrameLayout {
                 closeMenu();
                 host.open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + a.pkg)), card);
             }));
-            if (removable(a.pkg)) items.add(new AppMenu.Item(R.drawable.ic_trash, act.getString(R.string.uninstall), () -> {
+            if (HomeActivity.removable(act, a.pkg)) items.add(new AppMenu.Item(R.drawable.ic_trash, act.getString(R.string.uninstall), () -> {
                 closeMenu();
                 // Android asks to confirm; home, then the page, follow once the app is gone
                 host.open(new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + a.pkg)), card);
@@ -1837,7 +1892,7 @@ final class AllApps extends FrameLayout {
         showMenu(from, a.label, items);
     }
 
-    /** An empty row's ghost (§8.3.4): the apps not in it yet, A to Z; the one chosen is added by hand. */
+    /** An empty row's ghost: the apps not in it yet, A to Z; the one chosen is added by hand. */
     private void addApps(Tile t) {
         final Row r = t.row;
         if (r.cat == null || r.id.equals(Categories.ALL)) return;
@@ -1859,15 +1914,7 @@ final class AllApps extends FrameLayout {
         if (!items.isEmpty()) showMenu(t.cell.card, act.getString(R.string.add_apps_to, r.title), items);
     }
 
-    private boolean removable(String pkg) {
-        try {
-            return (act.getPackageManager().getApplicationInfo(pkg, 0).flags & ApplicationInfo.FLAG_SYSTEM) == 0;
-        } catch (PackageManager.NameNotFoundException e) {
-            return false;
-        }
-    }
-
-    // ---- Move (§8.3.5) ------------------------------------------------------------------------
+    // ---- Move ---------------------------------------------------------------------------------
 
     /**
      * Move, from a tile's menu: it jiggles, Left and Right carry it along its row and the others make
@@ -2054,7 +2101,7 @@ final class AllApps extends FrameLayout {
         return l;
     }
 
-    /** An empty row's ghost tile (§8.3.4): a dashed outline at 35 % white, a plus, and "Add apps". */
+    /** An empty row's ghost tile: a dashed outline at 35 % white, a plus, and "Add apps". */
     private static Tiles.Painter ghost(final String caption) {
         return (c, w, h) -> {
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -2081,7 +2128,7 @@ final class AllApps extends FrameLayout {
         };
     }
 
-    /** The hidden apps, folded into one tile (§8.3.1): the hide glyph and how many there are. */
+    /** The hidden apps, folded into one tile: the hide glyph and how many there are. */
     private static Tiles.Painter hiddenArt(final Context ctx, final int n) {
         final String caps = ctx.getResources().getQuantityString(R.plurals.n_apps_caps, n, n);
         return (c, w, h) -> {
@@ -2114,75 +2161,7 @@ final class AllApps extends FrameLayout {
         super.onDetachedFromWindow();
     }
 
-    /**
-     * One value on Aura's retargetable spring ({@link Spring.Mover}) that never moves quicker than
-     * Android TV's own rows ({@link Ui#scrollFloorMs}): from rest, a move the floor gives longer than its
-     * spring gets a calm spring of that length, at most GLIDE_MAX_MS, anything farther first jumping to
-     * where a glide that long begins. Mid-flight it's only retargeted, keeping its speed.
-     */
-    private static final class Glide {
-        private final Spring spring;
-        private final long springMs;
-        private final float minChange;
-        private final Spring.Sink sink;
-        private Spring.Mover mover;
-        private boolean slow;
-
-        Glide(Spring spring, long springMs, float minChange, float start, Spring.Sink sink) {
-            this.spring = spring;
-            this.springMs = springMs;
-            this.minChange = minChange;
-            this.sink = sink;
-            mover = new Spring.Mover(spring, minChange, start, sink);
-        }
-
-        /** Heads for {@code to}, taking at least {@code floorMs}; {@code settled} runs once it rests there. */
-        void to(float to, long floorMs, Runnable settled) {
-            if (!mover.moving()) {
-                float from = mover.value();
-                if (floorMs > springMs) {
-                    float start = from;
-                    long ms = floorMs;
-                    if (ms > GLIDE_MAX_MS) {
-                        start = to - (to - from) * GLIDE_MAX_MS / ms;
-                        ms = GLIDE_MAX_MS;
-                    }
-                    mover = new Spring.Mover(new Spring(ms / 1000.0, 0), minChange, start, sink);
-                    slow = true;
-                    if (start != from) sink.at(start);
-                } else if (slow) {
-                    mover = new Spring.Mover(spring, minChange, from, sink);
-                    slow = false;
-                }
-            }
-            mover.to(to);
-            if (mover.moving()) mover.then(settled);
-            else if (settled != null) settled.run();
-        }
-
-        float value() {
-            return mover.value();
-        }
-
-        float target() {
-            return mover.target();
-        }
-
-        boolean moving() {
-            return mover.moving();
-        }
-
-        void stop() {
-            mover.stop();
-        }
-
-        /** There at once. */
-        void jump(float v) {
-            mover.jump(v);
-        }
-    }
-
-    /** A nudge at an edge (§8.3.3): out and back over 280 ms, added to the view's place by whoever places it. */
+    /** A nudge at an edge: out and back over 280 ms, added to the view's place by whoever places it. */
     static final class Give {
         private final ValueAnimator anim = ValueAnimator.ofFloat(0f, 1f);
         View view;
@@ -2223,7 +2202,7 @@ final class AllApps extends FrameLayout {
         }
     }
 
-    /** The rows' window between the header and the dock: clipped there, and on HIGH its last 12 dp fade into the dock (§8.3.7). */
+    /** The rows' window between the header and the dock: clipped there, and on HIGH its last 12 dp fade into the dock. */
     private static final class Viewport extends FrameLayout {
         Viewport(Context c) {
             super(c);
@@ -2234,6 +2213,15 @@ final class AllApps extends FrameLayout {
                 setVerticalFadingEdgeEnabled(true);
                 setFadingEdgeLength(Ui.dp(12));
             }
+        }
+
+        /** The rows end here, above and below: nothing scrolled past draws over the header or the dock. */
+        @Override
+        protected void dispatchDraw(Canvas canvas) {
+            int saved = canvas.save();
+            canvas.clipRect(0, 0, getWidth(), getHeight());
+            super.dispatchDraw(canvas);
+            canvas.restoreToCount(saved);
         }
 
         @Override

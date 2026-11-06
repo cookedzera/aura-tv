@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * All apps' folder dock (§8.3.1): a glass tray along the foot of the page holding your folders on
+ * All apps' folder dock: a glass tray along the foot of the page holding your folders on
  * the rows' six columns, as the tvOS 26 Home holds apps in its dock. Folders come in your own order;
  * more than six slide inside the tray. On HIGH the tray reaches 6 dp further toward an end tile that
  * has focus. The folders are Aura's own ({@link Folders}); no app sits on the dock by itself, as Aura
@@ -292,7 +292,7 @@ final class FolderDock extends FrameLayout {
 
     /**
      * HIGH: the tray reaches 6 dp further toward a focused tile at either end of it, pivoted at its far
-     * end over 140 ms, and back when the focus moves on (§8.3.1, measured on tvOS). LOW leaves it be.
+     * end over 140 ms, and back when the focus moves on (measured on tvOS). LOW leaves it be.
      */
     private void stretch(int i) {
         if (Ui.light) return;

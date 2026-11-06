@@ -117,6 +117,8 @@ public class ShelfTest {
         w.setAccessible(true);
         w.setBoolean(null, true);
         TopShelf.clearCache();
+        // the problem log's count is the process's: an earlier test's entries aren't this one's
+        Trouble.clear(c);
         ActivityController<HomeActivity> ac = Robolectric.buildActivity(HomeActivity.class).setup();
         HomeActivity a = ac.get();
         run(3500);

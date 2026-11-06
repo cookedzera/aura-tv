@@ -8,7 +8,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
-import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -142,8 +141,7 @@ final class Ask extends FrameLayout {
         field.post(() -> {
             // shut again before this ran: a keyboard now would take the remote over home
             if (!shown) return;
-            InputMethodManager imm = Compat.svc(getContext(), InputMethodManager.class);
-            if (imm != null) imm.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT);
+            Compat.keyboard(field, true);
         });
     }
 
@@ -164,8 +162,7 @@ final class Ask extends FrameLayout {
     private void hide() {
         if (!shown) return;
         shown = false;
-        InputMethodManager imm = Compat.svc(getContext(), InputMethodManager.class);
-        if (imm != null) imm.hideSoftInputFromWindow(field.getWindowToken(), 0);
+        Compat.keyboard(field, false);
         field.clearFocus();
         animate().alpha(0f).setDuration(180).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(() -> {
             if (!shown) setVisibility(GONE);

@@ -1132,4 +1132,6 @@
     <string name="dock_hint">Make a folder: hold OK on an app, then Add to folder, New folder</string>
     <plurals name="n_folders"><item quantity="one">%1$d folder</item><item quantity="other">%1$d folders</item></plurals>
     <string name="none_granted">None granted</string>
+    <string name="usage_access">Usage access</string>
+    <string name="privacy_spotlight_help">Its answer names the photographs, which load from Microsoft\'s image servers.</string>
 </resources>

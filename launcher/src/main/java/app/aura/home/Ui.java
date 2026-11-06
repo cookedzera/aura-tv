@@ -30,8 +30,6 @@ final class Ui {
     static final TimeInterpolator DECEL = new DecelerateInterpolator(2f);
     /** Focus coming in (ease-out) and going (ease-in-out): the same curves as EMPHASIZED and SOFT. */
     static final TimeInterpolator EASE_DECEL = EMPHASIZED, EASE_STANDARD = SOFT;
-    static final TimeInterpolator EASE_LG_IN = new PathInterpolator(0.2f, 0f, 0.05f, 1f);
-    static final TimeInterpolator EASE_LG_OUT = new PathInterpolator(0.1f, 0.6f, 0.15f, 1f);
     /** A control taking focus: up to ×1.12 and back to ×1.08 over {@link #CTRL_POP} ms, as a fraction of the 0.08 rise. */
     static final TimeInterpolator CTRL_POP_CURVE = new Lut(0f, .27f, .77f, 1.27f, 1.50f, 1.47f, 1.45f, 1.33f, 1.24f, 1.12f, 1.10f, 1f);
 
@@ -42,27 +40,23 @@ final class Ui {
     static final int PRESS_DOWN = 100, PRESS_UP = 250;
     /** Panels and sheets: content focusable at 230 ms and settled at 360; LOW cross-fades in 200 with focus at 180. Every close is 150. */
     static final int SHEET_CONTENT_AT = 230, DUR_PANEL = 360, LOW_SHEET_IN = 200, LOW_SHEET_FOCUS_AT = 180, CLOSE = 150;
-    /** Small panels on TV terms: in 250 ms over a short travel, out in 150. */
-    static final int PANEL_IN = 250, PANEL_OUT = 150;
-    static final int CC_OPEN = 400, LOW_CC_OPEN = 220, OVERLAY_IN = 250, OVERLAY_OUT = 150;
-    static final int DUR_TAB = 150, DUR_SCENE = 600, LOW_SCENE = 400, DELAY_SETTLE = 250;
+    static final int CC_OPEN = 400, LOW_CC_OPEN = 220;
 
     static final float FOCUS_SCALE_APP = 1.20f, FOCUS_SCALE_CONTENT = 1.10f, FOCUS_SCALE_CONTROL = 1.08f,
-            FOCUS_SCALE_ROW = 1.08f, FOCUS_SCALE_WIDE_ROW = 1.04f, FOCUS_SCALE_HERO = 1.06f;
+            FOCUS_SCALE_ROW = 1.08f, FOCUS_SCALE_WIDE_ROW = 1.04f;
     /** A press shrinks to this share of the focused scale. */
     static final float PRESS_FACTOR = 0.95f;
     /** dp: a focused item leans this far toward the way focus travelled; an app's label rides this far down as the tile grows. */
     static final float FOCUS_NUDGE = 2f, LABEL_OFFSET = 7f;
 
-    static final float SCRIM_CC = 0.22f, SCRIM_MODAL = 0.35f, DIM_MENU = 0.6f, DIM_OTHER_ROWS = 0.6f, LOW_MENU_ROWS = 0.55f;
+    static final float DIM_MENU = 0.6f, DIM_OTHER_ROWS = 0.6f, LOW_MENU_ROWS = 0.55f;
     /** Every window over a playing app: opaque glass, nothing sampled from the video behind it. */
     static final int GLASS_OVERLAY = 0xEB161617;
 
     // Type (sp), weight Medium by default and Semibold for emphasis; radii and safe area (dp).
-    static final float DISPLAY = 38f, TITLE = 28f, HEADING = 24f, HEADLINE = 19f, CALLOUT = 15.5f, BODY = 16f,
-            CAPTION = 12.5f, FLOOR = 11.5f;
-    static final float R_TILE = 13f, R_CONTROL = 15f, R_MENU = 24f, R_PANEL = 24f, R_TRAY = 24f;
-    static final float SAFE_X = 40f, SAFE_Y = 30f, TEXT_SAFE_X = 48f, TEXT_SAFE_Y = 27f;
+    static final float HEADING = 24f, HEADLINE = 19f, CALLOUT = 15.5f, CAPTION = 12.5f, FLOOR = 11.5f;
+    static final float R_TILE = 13f, R_PANEL = 24f, R_TRAY = 24f;
+    static final float TEXT_SAFE_Y = 27f;
 
     /** The share of a focus-in duration to use when the last move was {@code dtMs} ago: fast runs shorten it. */
     static float speedIn(long dtMs) {
@@ -87,6 +81,12 @@ final class Ui {
     static long scrollFloorMs(float px, int densityDpi, int screenPx) {
         double decel = Math.ceil(Math.ceil(Math.abs(px) * 25.0 / Math.max(1, densityDpi)) / 0.3356);
         return (long) Math.max(decel, 30.0 * Math.abs(px) / Math.max(1, screenPx));
+    }
+
+    /** The same for a scroll of {@code px} across {@code v}, or down it. */
+    static long scrollFloorMs(View v, float px, boolean vertical) {
+        int screen = vertical ? v.getHeight() : v.getWidth();
+        return scrollFloorMs(px, v.getResources().getDisplayMetrics().densityDpi, screen > 0 ? screen : dp(vertical ? 540 : 960));
     }
 
     /** Linear interpolation through evenly spaced samples; values above 1 overshoot. */

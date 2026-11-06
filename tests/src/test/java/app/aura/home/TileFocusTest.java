@@ -246,7 +246,7 @@ public class TileFocusTest {
         Assert.assertEquals("TalkBack names the tile", "Netflix", String.valueOf(one.card.getContentDescription()));
         Assert.assertTrue(one.card.requestFocus());
         run(800);
-        Assert.assertEquals("the view itself never fades (PC13)", 1f, one.label.getAlpha(), 0f);
+        Assert.assertEquals("the view itself never fades", 1f, one.label.getAlpha(), 0f);
         Assert.assertEquals("shown by its colour", 255, one.label.getCurrentTextColor() >>> 24);
         Assert.assertTrue("keeps its soft shadow", one.label.getShadowRadius() > 0f);
         Assert.assertEquals("7 dp down at x1.20", Ui.dpf(Ui.LABEL_OFFSET), one.label.getTranslationY(), 0.05f);

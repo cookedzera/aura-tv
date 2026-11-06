@@ -126,14 +126,16 @@ final class Card extends View {
     /** Where in the window the last card to lose focus was, and when: the next one leans away from it. */
     private static long leftAt = Long.MIN_VALUE / 2;
     private static float leftX, leftY;
-    /** An app tile's rim and shadow light up over this as it rises (§8.3.3); a logo that lands late fades in as long. */
+    /** An app tile's rim and shadow light up over this as it rises; a logo that lands late fades in as long. */
     private static final int LIGHT_IN = 150;
     /** The glass's colour filter at 65 strengths of focus, shared by every card: none is made as a card lights. */
     private static final ColorMatrixColorFilter[] PANES = new ColorMatrixColorFilter[65];
     /** It let its picture go ({@link #release}), or shows another tile's until its own lands ({@link #standIn}). */
     private boolean released, stale;
-    /** No room for its picture last time: its colour until it's let go again. */
+    /** No room for its picture last time, and when: its colour for {@link #STARVED_MS}, then it's painted again. */
     private boolean starved;
+    private long starvedAt;
+    private static final long STARVED_MS = 5_000;
     private boolean attached;
     /** What its pictures add to {@link #HELD} while it's attached. */
     private int counted;
@@ -364,7 +366,7 @@ final class Card extends View {
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         // tiles at rest cast no shadow (the focused one's comes with its rise); the switcher's cards,
-        // which don't rise, keep a slight one on HIGH, and LOW casts none at all (PC6)
+        // which don't rise, keep a slight one on HIGH, and LOW casts none at all
         setElevation(lift || Ui.light ? 0f : Ui.dpf(3));
         // glass repaints with the photograph's drift, like the other glass
         if (glass != null) glass.addMirror(this);
@@ -435,7 +437,7 @@ final class Card extends View {
      * let its own go, or one showing another tile's in its place.
      */
     boolean wantsArt() {
-        if (!(deferred || released) || starved) return false;
+        if (!(deferred || released) || starved && SystemClock.uptimeMillis() - starvedAt < STARVED_MS) return false;
         if (bitmap != null || ready != null) return stale;
         return size() != null;
     }
@@ -497,9 +499,13 @@ final class Card extends View {
         account();
     }
 
-    /** No room for its picture (a 1 GB TV out of memory): its colour until it's let go again, and the caches make space. */
+    /**
+     * No room for its picture (a 1 GB TV out of memory): its colour for a few seconds, the caches making
+     * space, then it's painted again. One on screen is never let go, so waiting for that would leave it bare.
+     */
     void starve() {
         starved = true;
+        starvedAt = SystemClock.uptimeMillis();
         ready = null;
         stale = false;
         noRoom();
@@ -818,7 +824,7 @@ final class Card extends View {
             float s = (1f + (focusedScale() - 1f) * risen) * pressed;
             setScaleX(s);
             setScaleY(s);
-            // a real shadow, worked out by the GPU every frame, is HIGH's alone (PC6); a press lowers it
+            // a real shadow, worked out by the GPU every frame, is HIGH's alone; a press lowers it
             float sunk = Ui.clamp((1f - pressed) / (1f - Ui.PRESS_FACTOR), 0f, 1f);
             setTranslationZ(Ui.light ? 0f : Ui.dpf(18) * Math.max(0f, risen) * (1f - 0.55f * sunk));
         } else {

@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit;
 import static org.robolectric.Shadows.shadowOf;
 
 /**
- * Phase 1A: home answers the vendors' Home categories and reads its apps again only once the app
+ * Home answers the vendors' Home categories and reads its apps again only once the app
  * it replaced has settled; a home left alone stops moving (light mode's stack, HIGH's glints) and
  * draws nothing beneath a video; and it measures itself for Problem reports.
  */

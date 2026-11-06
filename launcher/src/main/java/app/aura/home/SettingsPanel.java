@@ -429,8 +429,7 @@ final class SettingsPanel {
     private void keyboardFor(View v) {
         v.post(() -> {
             if (v.getVisibility() != View.VISIBLE || !v.hasFocus()) return;
-            InputMethodManager imm = Compat.svc(act, InputMethodManager.class);
-            if (imm != null) imm.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT);
+            Compat.keyboard(v, true);
         });
     }
 
@@ -1737,17 +1736,10 @@ final class SettingsPanel {
         if (Adb.on(act) && Adb.unguarded(act) && Compat.granted(act, android.Manifest.permission.WRITE_SECURE_SETTINGS)) {
             add(act.getString(R.string.turn_network_debugging_off), confirmAdbOff ? act.getString(R.string.press_ok_again) : act.getString(R.string.closes_the_open_door), "adb:off", this::adbOff);
         }
-        // Fire TV hides them behind its own name in About, not the build number
-        boolean fire = Trouble.fireTv(act), dev = Adb.devOptionsOn(act);
-        add(act.getString(R.string.developer_options), dev ? act.getString(fire ? R.string.adb_debugging_is_here : R.string.usb_debugging_is_here)
-                : act.getString(fire ? R.string.off_fire_press_name_7 : R.string.off_about_press_build_7), "adb:dev", () -> {
-            try {
-                // not switched on yet: the About page, where pressing Build seven times does it
-                host.open(new Intent(dev ? Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS : Settings.ACTION_DEVICE_INFO_SETTINGS), panel);
-            } catch (RuntimeException e) {
-                host.open(new Intent(Settings.ACTION_SETTINGS), panel);
-            }
-        });
+        boolean dev = Adb.devOptionsOn(act);
+        String devPage = TrustPages.devPage(act, dev);
+        add(act.getString(R.string.developer_options), TrustPages.devSays(act, dev, Trouble.fireTv(act), devPage), "adb:dev",
+                () -> host.open(new Intent(devPage), panel));
         Intent xray = new Intent().setClassName("com.amazon.ssm", "com.amazon.ssm.ControlPanel");
         if (Compat.resolves(act, xray)) {
             add(act.getString(R.string.system_xray), act.getString(R.string.cpu_memory_and_network_overlay), "adb:xray",

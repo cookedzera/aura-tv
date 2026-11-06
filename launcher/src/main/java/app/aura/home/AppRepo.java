@@ -63,18 +63,21 @@ final class AppRepo {
         /** Its banner, null when it has none; read back from Aura's saved copy (or the app) if it was let go. */
         Drawable banner() {
             Drawable d = banner;
-            return d != null || !bannerGone ? d : readBack(true);
+            if (d != null) return d;
+            // read again after the word: a read-back landing in between puts the picture back before clearing it
+            return bannerGone ? readBack(true) : banner;
         }
 
         /** Its icon, null when it has none; read back from Aura's saved copy (or the app) if it was let go. */
         Drawable icon() {
             Drawable d = icon;
-            return d != null || !iconGone ? d : readBack(false);
+            if (d != null) return d;
+            return iconGone ? readBack(false) : icon;
         }
 
-        /** It has a banner, held now or let go for a while. */
+        /** It has a banner, held now or let go for a while; read again after the word, as {@link #banner()} does. */
         boolean hasBanner() {
-            return banner != null || bannerGone;
+            return banner != null || bannerGone || banner != null;
         }
 
         /** Its banner or icon was let go and isn't back yet. */

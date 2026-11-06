@@ -37,8 +37,8 @@ import static org.junit.Assert.*;
 import static org.robolectric.Shadows.shadowOf;
 
 /**
- * Settings: a "Press OK again" doesn't outlive a trip through From your phone, and what every
- * rebuild used to read afresh (the phone photos' index, whether a category row is empty) is kept
+ * Settings: a "Press OK again" doesn't outlive a trip through From your phone, and what a
+ * rebuild reads (the phone photos' index, whether a category row is empty) is kept
  * yet follows each change.
  */
 @RunWith(RobolectricTestRunner.class)
@@ -99,6 +99,10 @@ public class SettingsFixesTest {
         Field w = HomeActivity.class.getDeclaredField("warm");
         w.setAccessible(true);
         w.setBoolean(null, true);
+        // the apps a test fills in place are the process's cache too: each test starts with none
+        Field cache = HomeActivity.class.getDeclaredField("cache");
+        cache.setAccessible(true);
+        cache.set(null, null);
     }
 
     /** The photo index is read once and kept, and every change to it is seen at once. */

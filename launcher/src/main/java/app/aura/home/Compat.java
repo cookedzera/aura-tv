@@ -14,6 +14,7 @@ import android.media.tv.TvInputManager;
 import android.net.ConnectivityManager;
 import android.net.wifi.WifiManager;
 import android.os.Build;
+import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 
 import java.util.HashMap;
@@ -93,6 +94,14 @@ final class Compat {
         if (Build.VERSION.SDK_INT >= 23) return c.getSystemService(k);
         String name = NAMES.get(k);
         return name == null ? null : (T) (k == WifiManager.class ? c.getApplicationContext() : c).getSystemService(name);
+    }
+
+    /** The TV's keyboard up for {@code v}, or put away; nothing when there's no keyboard service. */
+    static void keyboard(View v, boolean show) {
+        InputMethodManager imm = svc(v.getContext(), InputMethodManager.class);
+        if (imm == null) return;
+        if (show) imm.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT);
+        else imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
     }
 
     /**

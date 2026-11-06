@@ -1132,4 +1132,6 @@
     <string name="dock_hint">Crie uma pasta: segure OK num app e escolha Adicionar a uma pasta, Nova pasta</string>
     <plurals name="n_folders"><item quantity="one">%1$d pasta</item><item quantity="other">%1$d pastas</item></plurals>
     <string name="none_granted">Nenhuma concedida</string>
+    <string name="usage_access">Acesso ao uso</string>
+    <string name="privacy_spotlight_help">A resposta indica as fotos, que vêm dos servidores de imagens da Microsoft.</string>
 </resources>

@@ -271,7 +271,7 @@ final class Updater {
         }
     }
 
-    private static String hex(byte[] b) {
+    static String hex(byte[] b) {
         StringBuilder sb = new StringBuilder();
         for (byte x : b) sb.append(String.format(java.util.Locale.ROOT, "%02x", x));
         return sb.toString();

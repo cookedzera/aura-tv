@@ -9,6 +9,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.PermissionInfo;
 import android.os.Build;
 import android.provider.Settings;
+import android.text.TextUtils;
 
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -46,14 +47,17 @@ final class TrustPages {
             R.string.perm_normal, R.string.perm_normal, R.string.perm_normal, R.string.perm_normal, R.string.perm_normal,
             R.string.perm_normal, R.string.perm_normal, R.string.perm_normal, R.string.perm_normal,
             R.string.perm_normal, R.string.perm_normal};
+    /** Usage access as an app-op: setup allows it besides the permission, and Android honours either. */
+    static final String USAGE_OP = "GET_USAGE_STATS";
     /**
-     * What setup grants with "pm grant", which Aura can take back the same way over its debugging
-     * link: debugging's own permissions anywhere, and from Android 6 the ones Android asks about.
+     * What setup grants with "pm grant" (usage access with "appops set" too), which Aura can take back
+     * over its debugging link: debugging's own permissions anywhere, and from Android 6 the ones
+     * Android asks about.
      */
-    private static final String[] GRANTED_BY_SETUP = {"WRITE_SECURE_SETTINGS", "DUMP", "READ_LOGS", "PACKAGE_USAGE_STATS"},
+    private static final String[] GRANTED_BY_SETUP = {"WRITE_SECURE_SETTINGS", "DUMP", "READ_LOGS", "PACKAGE_USAGE_STATS", USAGE_OP},
             ASKED_BY_ANDROID = {"ACCESS_FINE_LOCATION", "READ_TV_LISTINGS", "RECORD_AUDIO", "BLUETOOTH_CONNECT"};
 
-    /** One permission Android says Aura holds: its full name, Android's own words for it, and its description. */
+    /** One permission Android says Aura holds (or usage access's app-op): its full name, Android's own words for it, and its description. */
     static final class Perm {
         final String name, label, about;
 
@@ -69,16 +73,22 @@ final class TrustPages {
         }
     }
 
-    /** How the TV's debugging stood as the page was opened, and whether it's a Fire TV (which names it differently). */
+    /**
+     * How the TV's debugging stood as the page was opened, whether it's a Fire TV (which names it
+     * differently), whether Developer options are on, and the page their row opens.
+     */
     static final class Door {
-        final boolean on, port, wireless, mayShut, fire;
+        final boolean on, port, wireless, mayShut, fire, dev;
+        final String page;
 
-        Door(boolean on, boolean port, boolean wireless, boolean mayShut, boolean fire) {
+        Door(boolean on, boolean port, boolean wireless, boolean mayShut, boolean fire, boolean dev, String page) {
             this.on = on;
             this.port = port;
             this.wireless = wireless;
             this.mayShut = mayShut;
             this.fire = fire;
+            this.dev = dev;
+            this.page = page;
         }
     }
 
@@ -148,22 +158,20 @@ final class TrustPages {
                 "api.open-meteo.com\ngeocoding-api.open-meteo.com\nget.geojs.io\n\n" + act.getString(R.string.help_city));
         group(R.string.photo_sources);
         pref(act.getString(R.string.fresh_hd_photographs), Prefs.DAILY, "daily", "pv:daily", act.getString(R.string.where_the_walls_photographs_come));
-        pref("Windows Spotlight", Prefs.SRC_SPOTLIGHT, "sources", "pv:spotlight", "fd.api.iris.microsoft.com");
-        pref("Bing", Prefs.SRC_BING, "sources", "pv:bing", "www.bing.com\nbing.npanuhin.me");
-        pref("Wikimedia Commons", Prefs.SRC_WIKIMEDIA, "sources", "pv:wikimedia", "commons.wikimedia.org\nupload.wikimedia.org");
-        pref("Wallhaven", Prefs.SRC_WALLHAVEN, "sources", "pv:wallhaven", "wallhaven.cc\nw.wallhaven.cc");
-        String unsplash = "api.unsplash.com\nimages.unsplash.com";
-        // never asked without your own key
-        if (Gallery.unsplashKey(act).isEmpty()) fact("Unsplash", onOff(false), "pv:unsplash", unsplash);
-        else pref("Unsplash", Prefs.SRC_UNSPLASH, "sources", "pv:unsplash", unsplash);
+        // with Fresh HD photographs off none is asked, whatever its own switch says
+        boolean daily = Prefs.on(act, Prefs.DAILY);
+        source(daily, "Windows Spotlight", Prefs.SRC_SPOTLIGHT, "sources", "pv:spotlight", "fd.api.iris.microsoft.com\n\n" + act.getString(R.string.privacy_spotlight_help));
+        source(daily, "Bing", Prefs.SRC_BING, "sources", "pv:bing", "www.bing.com\nbing.npanuhin.me");
+        source(daily, "Wikimedia Commons", Prefs.SRC_WIKIMEDIA, "sources", "pv:wikimedia", "commons.wikimedia.org\nupload.wikimedia.org");
+        source(daily, "Wallhaven", Prefs.SRC_WALLHAVEN, "sources", "pv:wallhaven", "wallhaven.cc\nw.wallhaven.cc");
+        // nor Unsplash without your own key
+        source(daily && !Gallery.unsplashKey(act).isEmpty(), "Unsplash", Prefs.SRC_UNSPLASH, "sources", "pv:unsplash", "api.unsplash.com\nimages.unsplash.com");
         // TVmaze, or TMDB once it has your key: the one not in use is never asked
         group(R.string.tonights_pick);
         String maze = "api.tvmaze.com\nstatic.tvmaze.com", tmdb = "api.themoviedb.org\nimage.tmdb.org";
         boolean key = Picks.tmdb(act);
-        if (key) fact("TVmaze", onOff(false), "pv:tvmaze", maze);
-        else pref("TVmaze", Prefs.PICKS, "picks", "pv:tvmaze", maze);
-        if (key) pref("TMDB", Prefs.PICKS, "picks", "pv:tmdb", tmdb);
-        else fact("TMDB", onOff(false), "pv:tmdb", tmdb);
+        source(!key, "TVmaze", Prefs.PICKS, "picks", "pv:tvmaze", maze);
+        source(key, "TMDB", Prefs.PICKS, "picks", "pv:tmdb", tmdb);
         group(R.string.new_today_on_your_apps);
         pref("TVmaze", Prefs.STACK_NEW, "cards", "pv:fresh", maze);
         // the aerials stream on Android 7 and later only
@@ -184,7 +192,7 @@ final class TrustPages {
         fact("Cloudflare", "", "pv:speed", "speed.cloudflare.com");
         if (Build.VERSION.SDK_INT >= 28) {
             group(R.string.block_ads);
-            fact(Shield.name(act), onOff(Shield.on(act)), "pv:dns", Shield.host(act) + "\n\n" + act.getString(R.string.help_shield));
+            fact(Shield.name(act), onOff(Shield.on(act)), "pv:dns", filterHosts(Shield.host(act)) + "\n\n" + act.getString(R.string.help_shield));
         }
         group(R.string.continue_watching);
         fact(act.getString(R.string.apps), "", "pv:apps", act.getString(R.string.privacy_apps_help));
@@ -212,6 +220,30 @@ final class TrustPages {
     private void fact(String label, String value, String tag, String help) {
         s.rowHelp.put(tag, help);
         s.add(label, value, tag, () -> { });
+    }
+
+    /** A source of photos or picks: its own switch while it may be asked, else Off. */
+    private void source(boolean asked, String who, String key, String applied, String tag, String help) {
+        if (asked) pref(who, key, applied, tag, help);
+        else fact(who, onOff(false), tag, help);
+    }
+
+    /**
+     * Every filter Block ads may ask: Find the fastest tries them all, as does a switch-on whose
+     * filter doesn't answer. Those under one domain share a line, as the sentence beside the list
+     * has five; one you typed yourself comes first.
+     */
+    private static String filterHosts(String chosen) {
+        List<String> lines = new ArrayList<>();
+        boolean known = false;
+        for (String[] f : Shield.FILTERS) {
+            String parent = f[0].substring(f[0].indexOf('.') + 1), line = f[0];
+            for (String[] g : Shield.FILTERS) if (g != f && g[0].endsWith("." + parent)) line = "*." + parent;
+            if (!lines.contains(line)) lines.add(line);
+            known |= f[0].equals(chosen);
+        }
+        if (!known) lines.add(0, chosen);
+        return TextUtils.join("\n", lines);
     }
 
     private String onOff(boolean on) {
@@ -282,6 +314,11 @@ final class TrustPages {
             } catch (PackageManager.NameNotFoundException | RuntimeException e) {
                 // Android wouldn't say this time: the special accesses below still are
             }
+            // usage access allowed by its app-op alone has no permission row to show it
+            boolean usage = false;
+            for (Perm p : out) usage |= p.shortName().equals("PACKAGE_USAGE_STATS");
+            if (!usage && Habits.granted(app)) out.add(new Perm(USAGE_OP, app.getString(R.string.usage_access),
+                    app.getString(R.string.smart_stack_today) + " · " + app.getString(R.string.perm_setup)));
             String listeners = Settings.Secure.getString(app.getContentResolver(), "enabled_notification_listeners");
             android.app.admin.DevicePolicyManager dpm = Compat.svc(app, android.app.admin.DevicePolicyManager.class);
             final boolean keys = HomeKeys.on(app), media = listeners != null && listeners.contains(app.getPackageName() + "/"),
@@ -326,16 +363,32 @@ final class TrustPages {
         // a permission's name, and nothing a shell would read as more
         if (!p.name.matches("[A-Za-z0-9_.]+")) return;
         final Context app = act.getApplicationContext();
+        final boolean logs = p.shortName().equals("READ_LOGS");
         new SafeThread(() -> {
-            List<String> out = Adb.run(app, "pm revoke " + app.getPackageName() + " " + p.name);
-            final String said = out == null ? null : out.get(0);
+            // kept before Android may restart Aura: the profile button never grants it back on its own
+            if (logs) Prefs.device(app).edit().putBoolean(ProfileButton.REVOKED, true).commit();
+            List<String> out = Adb.run(app, revokeCommands(app.getPackageName(), p.name));
+            // a log reader already running keeps reading once the permission is gone
+            if (logs) ProfileButton.stop();
+            boolean took = out != null;
+            for (int i = 0; took && i < out.size(); i++) took = !out.get(i).contains("Exception") && !out.get(i).contains("Error");
+            final boolean reached = out != null, ok = took;
             act.runOnUiThread(() -> {
-                boolean ok = said != null && !said.contains("Exception") && !said.contains("Error");
-                s.host.hud(ok ? R.drawable.ic_check : R.drawable.ic_info, said == null ? act.getString(R.string.couldnt_reach_the_tvs_debugging)
+                s.host.hud(ok ? R.drawable.ic_check : R.drawable.ic_info, !reached ? act.getString(R.string.couldnt_reach_the_tvs_debugging)
                         : ok ? act.getString(R.string.name_removed, p.label) : act.getString(R.string.android_didnt_allow_that_change));
                 readPermissions();
             });
         }, "revoke").start();
+    }
+
+    /**
+     * What takes {@code name} back. Usage access is also the app-op setup allowed, which Android
+     * honours without the permission: it goes back first, as revoking may restart Aura.
+     */
+    static String[] revokeCommands(String pkg, String name) {
+        String usage = "android.permission.PACKAGE_USAGE_STATS";
+        if (!name.equals(usage) && !name.equals(USAGE_OP)) return new String[]{"pm revoke " + pkg + " " + name};
+        return new String[]{"appops set " + pkg + " " + USAGE_OP + " default", "pm revoke " + pkg + " " + usage};
     }
 
     // ---- accessibility ------------------------------------------------------------------------
@@ -381,13 +434,24 @@ final class TrustPages {
                 s.adbOff();
             });
         }
-        s.add(act.getString(R.string.developer_options), d == null ? "" : act.getString(d.fire ? R.string.adb_debugging_is_here : R.string.usb_debugging_is_here), "nd:dev", () -> {
-            try {
-                s.host.open(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS), s.panel);
-            } catch (RuntimeException e) {
-                s.host.open(new Intent(Settings.ACTION_SETTINGS), s.panel);
-            }
-        });
+        s.add(act.getString(R.string.developer_options), d == null ? "" : devSays(act, d.dev, d.fire, d.page), "nd:dev",
+                () -> s.host.open(new Intent(d != null ? d.page : devPage(act, Adb.devOptionsOn(act))), s.panel));
+    }
+
+    /**
+     * The page Developer options are on, or About while they're off (pressing Build seven times there
+     * switches them on); the TV's Settings when this TV has no such page. Checked first, as opening
+     * one closes Settings and swallows any failure.
+     */
+    static String devPage(Context c, boolean dev) {
+        String page = dev ? Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS : Settings.ACTION_DEVICE_INFO_SETTINGS;
+        return HomeRole.real(c, new Intent(page)) ? page : Settings.ACTION_SETTINGS;
+    }
+
+    /** What the Developer options row says: how to switch them on (Fire TV hides them behind its own name in About), or what OK opens. */
+    static String devSays(Context c, boolean dev, boolean fire, String page) {
+        if (!dev) return c.getString(fire ? R.string.off_fire_press_name_7 : R.string.off_about_press_build_7);
+        return c.getString(page.equals(Settings.ACTION_SETTINGS) ? R.string.android_settings : fire ? R.string.adb_debugging_is_here : R.string.usb_debugging_is_here);
     }
 
     /** How the TV's debugging stands, asked behind the screen: port 5555 is tried on the TV itself. */
@@ -397,10 +461,11 @@ final class TrustPages {
         final Context app = act.getApplicationContext();
         new SafeThread(() -> {
             ContentResolver r = app.getContentResolver();
+            boolean dev = Adb.devOptionsOn(app);
             final Door d = new Door(Settings.Global.getInt(r, Settings.Global.ADB_ENABLED, 0) != 0,
                     Adb.probeLocalPort(400, Adb.PORT) == Adb.PORT,
                     Build.VERSION.SDK_INT >= 30 && Settings.Global.getInt(r, "adb_wifi_enabled", 0) != 0,
-                    Compat.granted(app, android.Manifest.permission.WRITE_SECURE_SETTINGS), Trouble.fireTv(app));
+                    Compat.granted(app, android.Manifest.permission.WRITE_SECURE_SETTINGS), Trouble.fireTv(app), dev, devPage(app, dev));
             act.runOnUiThread(() -> {
                 doorReading = false;
                 door = d;
@@ -444,7 +509,7 @@ final class TrustPages {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] buf = new byte[64 * 1024];
             for (int n; (n = in.read(buf)) > 0; ) md.update(buf, 0, n);
-            return hex(md.digest());
+            return Updater.hex(md.digest());
         } catch (Exception e) {
             return "";
         }
@@ -456,16 +521,10 @@ final class TrustPages {
         try {
             android.content.pm.Signature[] sig = c.getPackageManager().getPackageInfo(c.getPackageName(), PackageManager.GET_SIGNATURES).signatures;
             if (sig == null || sig.length == 0) return "";
-            return hex(MessageDigest.getInstance("SHA-256").digest(sig[0].toByteArray()));
+            return Updater.hex(MessageDigest.getInstance("SHA-256").digest(sig[0].toByteArray()));
         } catch (Exception e) {
             return "";
         }
-    }
-
-    private static String hex(byte[] b) {
-        StringBuilder sb = new StringBuilder(b.length * 2);
-        for (byte x : b) sb.append(Character.forDigit((x >> 4) & 0xF, 16)).append(Character.forDigit(x & 0xF, 16));
-        return sb.toString();
     }
 
     /** "3f2a9b1c…e4d2c0a1": enough to tell two apart in a row. */

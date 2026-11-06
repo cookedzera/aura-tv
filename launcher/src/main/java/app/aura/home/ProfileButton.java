@@ -33,6 +33,8 @@ final class ProfileButton {
     private static long lastAt;
     private static boolean grantTried;
     private static volatile long retryMs = 1000;
+    /** Set once READ_LOGS is revoked on the Permissions page: from then on only setup grants it, never this class on its own. */
+    static final String REVOKED = "logs_revoked";
 
     private ProfileButton() { }
 
@@ -40,7 +42,7 @@ final class ProfileButton {
         return Compat.granted(c, "android.permission.READ_LOGS");
     }
 
-    /** Starts listening if Aura may read the log (granting {@code READ_LOGS} over local ADB if needed). */
+    /** Starts listening if Aura may read the log (granting {@code READ_LOGS} over local ADB if needed, unless it was revoked). */
     static synchronized void start(Context ctx) {
         if (proc != null) return;
         // from Android 13 every read of the log asks the viewer first, in a system window over
@@ -48,7 +50,7 @@ final class ProfileButton {
         if (android.os.Build.VERSION.SDK_INT >= 33) return;
         final Context c = ctx.getApplicationContext();
         if (!granted(c)) {
-            if (!grantTried && Adb.on(c)) {
+            if (!grantTried && Adb.on(c) && !Prefs.device(c).getBoolean(REVOKED, false)) {
                 grantTried = true;
                 new SafeThread(() -> {
                     Adb.run(c, "pm grant " + c.getPackageName() + " android.permission.READ_LOGS");

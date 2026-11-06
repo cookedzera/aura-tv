@@ -120,12 +120,19 @@ class Pad extends GlassFrame {
                 || code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_BUTTON_A;
     }
 
+    static boolean isArrow(int code) {
+        return code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
+                || code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN;
+    }
+
     @Override
     public boolean onKeyDown(int code, KeyEvent e) {
         if (isConfirm(code)) {
             if (e.getRepeatCount() == 0) {
                 e.startTracking();
                 pressed = true;
+                // a hold whose long press moved the focus away (Standby's quiet screen) never had its release here
+                longFired = false;
                 lift.press(true);
             }
             return true;

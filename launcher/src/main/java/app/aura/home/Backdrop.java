@@ -613,7 +613,14 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         if (s == null) return;
         float w = getWidth(), h = getHeight();
         if (w == 0 || h == 0) return;
-        position(s, w, h, Ui.clamp((driftNow(now) - s.drift0) / (float) DRIFT_MS, 0f, 1f), 1f - intro, parallax, s.m);
+        // a copy carrying the shade holds still through the intro: the shade lies on the screen, and
+        // the intro's settle would carry it along with the photograph
+        position(s, w, h, drift(s, now), s.baked ? 0f : 1f - intro, parallax, s.m);
+    }
+
+    /** How far through its drift {@code s} is. */
+    private float drift(Slide s, long now) {
+        return Ui.clamp((driftNow(now) - s.drift0) / (float) DRIFT_MS, 0f, 1f);
     }
 
     /** Where {@code s} lies on a {@code w}x{@code h} screen, {@code t} of the way through its drift. */
@@ -786,11 +793,13 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         final Scrim bake = shaded() ? shade : null;
         final int vw = viewW(), vh = viewH();
         final float px = parallaxTo;
+        // Light mode turned on mid-drift: the drift stands still where it was, and the shade lies there
+        final float t = drift(s, SystemClock.uptimeMillis());
         io.execute(() -> {
             Bitmap made = null;
             try {
                 Bitmap soft = s.soft != null ? s.soft : soften(s.sharp);
-                made = steady(s, soft, d, bake, vw, vh, px);
+                made = steady(s, soft, d, bake, vw, vh, px, t);
                 if (soft != s.soft) soft.recycle();
             } catch (Throwable e) {
                 Trouble.caught("photo (resting copy)", e);
@@ -1095,7 +1104,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             float d = steadyDefocus;
             if (d > 0f) {
                 s.soft = soften(b);
-                Bitmap st = s.anim == null ? steady(s, s.soft, d, bake, vw, vh, px) : null;
+                Bitmap st = s.anim == null ? steady(s, s.soft, d, bake, vw, vh, px, 0f) : null;
                 if (st != null) {
                     s.steady = st;
                     s.mixed = d;
@@ -1279,17 +1288,18 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     /**
      * The resting copy: {@code soft} mixed over the sharp copy at {@code d} and, given {@code bake},
      * that shade and its grain over it as they'll lie on a {@code vw}x{@code vh} screen, the
-     * photograph held where path framed it (Light mode), {@code px} aside. Baked, it's a hardware
-     * bitmap on Android 9 and later, with no copy left in the app's memory. Null without room.
+     * photograph held {@code t} of the way through its drift (Light mode holds it still), {@code px}
+     * aside. Baked, it's a hardware bitmap on Android 9 and later, with no copy left in the app's
+     * memory. Null without room.
      */
-    private Bitmap steady(Slide s, Bitmap soft, float d, Scrim bake, int vw, int vh, float px) {
+    private Bitmap steady(Slide s, Bitmap soft, float d, Scrim bake, int vw, int vh, float px, float t) {
         Bitmap out = mix(s.sharp, soft, d);
         if (out == null || bake == null) {
             if (out != null) out.prepareToDraw();
             return out;
         }
         Matrix m = new Matrix(), inv = new Matrix();
-        position(s, vw, vh, 0f, 0f, px, m);
+        position(s, vw, vh, t, 0f, px, m);
         m.preScale(s.sw / (float) out.getWidth(), s.sh / (float) out.getHeight());
         if (!m.invert(inv)) {
             out.recycle();

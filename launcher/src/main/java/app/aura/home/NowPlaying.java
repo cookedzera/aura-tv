@@ -236,18 +236,9 @@ final class NowPlaying extends FrameLayout {
      */
     private void follow() {
         if (!open || controller == null) return;
-        MediaWatch.Playing p = MediaWatch.now(act);
-        if (p == null || !p.playing || p.controller == null || p.controller.getSessionToken().equals(controller.getSessionToken())) return;
-        try {
-            p.controller.registerCallback(watch, handler);
-        } catch (RuntimeException e) {
-            return;
-        }
-        try {
-            controller.unregisterCallback(watch);
-        } catch (RuntimeException ignored) {
-        }
-        controller = p.controller;
+        MediaController to = MediaWatch.moveTo(act, controller, watch, handler);
+        if (to == null) return;
+        controller = to;
         show();
     }
 
