@@ -129,6 +129,11 @@ final class Welcome extends FrameLayout {
     }
 
     void open() {
+        open(0);
+    }
+
+    /** Opened on page {@code start}: 4 is "Make Aura your home", for a TV that said yes and kept Home. */
+    void open(int start) {
         setVisibility(VISIBLE);
         setAlpha(0f);
         animate().alpha(1f).setDuration(700).setStartDelay(0).setInterpolator(Ui.SOFT).start();
@@ -140,7 +145,7 @@ final class Welcome extends FrameLayout {
             post(() -> finishSetup(null));
             return;
         }
-        show(0, 0);
+        show(start, 0);
     }
 
     private void finish() {
@@ -736,8 +741,9 @@ final class Welcome extends FrameLayout {
         setupButton.setText(setupDone ? act.getString(R.string.start_watching) : act.getString(R.string.try_again));
         refreshSetup();
         focus(targets.indexOf(setupButton));
-        // Google TV's own home screen is still there, behind Aura: asked once whether to switch it off
-        if (setupDone && Adb.on(act) && Safety.googleTvHomeOn(act) && !retireAsked) {
+        // the TV's own home screen is still there, behind Aura (Google TV's, Android TV's, a maker's):
+        // once setup has gone through, asked once whether to switch it off
+        if (setupDone && Adb.on(act) && Safety.tvHomeOn(act) && !retireAsked) {
             retireAsked = true;
             postDelayed(() -> {
                 if (page == 5) show(9, 1);
@@ -755,9 +761,11 @@ final class Welcome extends FrameLayout {
      */
     private View retireAsk() {
         LinearLayout col = column(Gravity.CENTER_HORIZONTAL);
-        col.addView(kicker(act.getString(R.string.google_tv_home)), wrap(0));
-        col.addView(title(act.getString(R.string.switch_off_google_tvs_home)), wrap(6));
-        TextView body = line(act.getString(R.string.retire_body));
+        boolean gtv = Safety.GOOGLE_TV_HOME.equals(Safety.tvHome(act));
+        String name = Safety.tvHomeName(act);
+        col.addView(kicker(gtv ? act.getString(R.string.google_tv_home) : name.toUpperCase(java.util.Locale.getDefault())), wrap(0));
+        col.addView(title(gtv ? act.getString(R.string.switch_off_google_tvs_home) : act.getString(R.string.switch_off_name_q, name)), wrap(6));
+        TextView body = line(gtv ? act.getString(R.string.retire_body) : act.getString(R.string.retire_body_tv, name));
         body.setSingleLine(false);
         body.setGravity(Gravity.CENTER_HORIZONTAL);
         body.setMaxWidth(Ui.dp(620));
@@ -789,13 +797,15 @@ final class Welcome extends FrameLayout {
         retireStatus.setText(act.getString(R.string.switching_it_off));
         final Context app = act.getApplicationContext();
         new SafeThread(() -> {
-            Boolean took = Safety.retireGoogleHome(app, true);
+            final boolean gtv = Safety.GOOGLE_TV_HOME.equals(Safety.tvHome(app));
+            final String name = Safety.tvHomeName(app);
+            Boolean took = Safety.retireTvHome(app, true);
             act.runOnUiThread(() -> {
                 retireBusy = false;
                 if (page != 9) return;
                 if (took != null && took) {
                     finish();
-                    host.homeHint(act.getString(R.string.google_tvs_home_is_off));
+                    host.homeHint(gtv ? act.getString(R.string.google_tvs_home_is_off) : act.getString(R.string.tv_home_is_off, name));
                     return;
                 }
                 retireStatus.setText(took == null ? act.getString(R.string.aura_lost_the_connection_to)

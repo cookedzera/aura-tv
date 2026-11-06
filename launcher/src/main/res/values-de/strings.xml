@@ -1058,4 +1058,26 @@
     <plurals name="n_apps_on"><item quantity="one">%1$d App wieder an</item><item quantity="other">%1$d Apps wieder an</item></plurals>
     <string name="db_acr">Erkennt, was auf dem Bildschirm läuft, um Werbung auszurichten (ACR).</string>
     <string name="db_partnerrows">Setzt gesponserte Reihen des Herstellers auf den eigenen Startbildschirm des Fernsehers.</string>
+    <string name="retire_tv_home_row">%1$s ausschalten</string>
+    <string name="retire_tv_home_sub">Home öffnet immer Aura · gibt Speicher frei</string>
+    <string name="bring_back_tv_home_row">%1$s zurückholen</string>
+    <string name="bring_back_tv_home_sub">Der eigene Startbildschirm des Fernsehers, wie er war</string>
+    <string name="retire_tv_home_confirm">Drücke nochmal OK, um %1$s auszuschalten. Aura bleibt dein Startbildschirm mit allen Einstellungen; Zurückholen macht es jederzeit rückgängig.</string>
+    <string name="tv_home_retired">%1$s ist aus · Home öffnet immer Aura</string>
+    <string name="tv_home_back">%1$s ist zurück</string>
+    <string name="switch_off_name_q">%1$s ausschalten?</string>
+    <string name="retire_body_tv">Aura ist jetzt dein Startbildschirm, aber %1$s läuft dahinter weiter, belegt Speicher und holt sich auf manchen Fernsehern die Home-Taste zurück. Ausgeschaltet öffnet Home immer Aura und der Speicher ist frei für deine Apps.</string>
+    <string name="tv_home_is_off">%1$s ist aus · Einstellungen, Auf diesem Fernseher einrichten holt ihn zurück</string>
+    <string name="setup_card_todo">Noch nicht erledigt. Damit öffnet Home Aura, und Speicher freigeben und Werbeblocker gehen.</string>
+    <string name="setup_card_done">Verbunden. Speicher freigeben, der eigene Startbildschirm des Fernsehers und Auras Extras sind hier.</string>
+    <string name="setup_card_start">Hier starten</string>
+    <string name="setup_card_done_pill">✓ Erledigt</string>
+    <string name="inputs_title">Eingänge</string>
+    <string name="screen_off">Bildschirm aus</string>
+    <string name="input_live">Aktiv</string>
+    <string name="input_standby">Im Standby</string>
+    <string name="input_nothing">Nichts angeschlossen</string>
+    <string name="input_channels">TV-Sender</string>
+    <string name="n_live">%1$d aktiv</string>
+    <plurals name="n_sources"><item quantity="one">%1$d Quelle</item><item quantity="other">%1$d Quellen</item></plurals>
 </resources>

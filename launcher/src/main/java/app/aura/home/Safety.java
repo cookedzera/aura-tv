@@ -103,6 +103,12 @@ final class Safety {
             } catch (PackageManager.NameNotFoundException ignored) {
             }
         }
+        // a home taken off for this user can't be seen any more: it's put back by name
+        String retired = Prefs.device(c).getString(RETIRED, null);
+        if (retired != null && retired.matches("[A-Za-z0-9_.]+")) {
+            cmds.add(0, "pm install-existing " + retired);
+            cmds.add(1, "pm enable " + retired);
+        }
         if (home != null) cmds.add("cmd package set-home-activity " + home);
         if (!cmds.isEmpty()) Adb.run(c, cmds.toArray(new String[0]));
     }
@@ -169,6 +175,81 @@ final class Safety {
         for (String s : out) if ((s.contains("Failure") || s.contains("Exception")) && !s.contains(GOOGLE_TV_SETUP)) ok = false;
         // only once the TV took it: a failed call changed nothing, so nothing to take over from
         if (ok) HomeKeys.setTakeover(c, true);
+        return ok;
+    }
+
+    /** The TV's own home that Aura switched off, remembered: taken off for this user, it can't be found any more. */
+    private static final String RETIRED = "retired_home";
+
+    /**
+     * The package of the TV's own home screen that can be switched off, or null. Google TV's, else
+     * whatever system home the TV came with (Android TV's, a maker's). Never Fire TV's: Amazon's
+     * home is also where its settings live.
+     */
+    static String tvHome(Context c) {
+        if (Trouble.fireTv(c)) return null;
+        if (hasGoogleTvHome(c)) return GOOGLE_TV_HOME;
+        String retired = Prefs.device(c).getString(RETIRED, null);
+        if (retired != null) return retired;
+        String home = original(c);
+        return home == null ? null : home.substring(0, home.indexOf('/'));
+    }
+
+    /** That home is there and switched on. */
+    static boolean tvHomeOn(Context c) {
+        String pkg = tvHome(c);
+        if (pkg == null) return false;
+        try {
+            return c.getPackageManager().getApplicationInfo(pkg, 0).enabled;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        }
+    }
+
+    /** Its name, as the TV calls it ("Android TV Home"). */
+    static String tvHomeName(Context c) {
+        String pkg = tvHome(c);
+        if (pkg == null) return "";
+        PackageManager pm = c.getPackageManager();
+        try {
+            return String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, PackageManager.GET_UNINSTALLED_PACKAGES)));
+        } catch (PackageManager.NameNotFoundException e) {
+            return pkg;
+        }
+    }
+
+    /**
+     * Switches the TV's own home screen off, or back on, over ADB: Home then only ever opens Aura,
+     * and the memory it held comes back. Disabled where the TV allows it; where it refuses (some
+     * makers protect their launcher), taken off for this user only, the app staying on the TV, so
+     * Bring back (or {@link #restoreHome}, should Aura leave) puts it back exactly. Off the main
+     * thread. Null when debugging couldn't be reached, else whether it took.
+     */
+    static Boolean retireTvHome(Context c, boolean retire) {
+        String pkg = tvHome(c);
+        if (pkg == null || !pkg.matches("[A-Za-z0-9_.]+")) return false;
+        if (pkg.equals(GOOGLE_TV_HOME)) return retireGoogleHome(c, retire);
+        String me = c.getPackageName() + "/" + HomeActivity.class.getName();
+        if (!retire) {
+            List<String> out = Adb.run(c, "pm install-existing " + pkg, "pm enable " + pkg);
+            if (out == null || out.isEmpty()) return null;
+            boolean ok = !out.get(out.size() - 1).contains("Failure") && !out.get(out.size() - 1).contains("Exception");
+            if (ok) Prefs.device(c).edit().remove(RETIRED).apply();
+            return ok;
+        }
+        List<String> out = Adb.run(c, "am force-stop " + pkg, "pm disable-user --user 0 " + pkg);
+        if (out == null || out.isEmpty()) return null;
+        boolean ok = out.get(out.size() - 1).contains("disabled-user");
+        if (!ok) {
+            out = Adb.run(c, "pm uninstall -k --user 0 " + pkg);
+            if (out == null || out.isEmpty()) return null;
+            ok = out.get(out.size() - 1).contains("Success");
+        }
+        if (ok) {
+            Prefs.device(c).edit().putString(RETIRED, pkg).apply();
+            HomeKeys.setTakeover(c, true);
+            if (android.os.Build.VERSION.SDK_INT >= 24) Adb.run(c, "cmd package set-home-activity " + me);
+        }
         return ok;
     }
 

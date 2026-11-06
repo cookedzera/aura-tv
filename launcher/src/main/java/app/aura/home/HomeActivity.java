@@ -434,8 +434,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             // Android said yes, yet Home still opens another launcher: the Home button service takes it
             // from here. Noted first, or make() would ask again, get another yes, and go round forever.
             HomeRole.choiceIgnored(this);
-            String m = HomeRole.make(this);
-            if (m != null) hud(R.drawable.ic_info, m);
+            if (!Compat.granted(this, android.Manifest.permission.WRITE_SECURE_SETTINGS) && !(HomeKeys.on(this) && HomeKeys.live)) {
+                // Aura can't switch its Home button on by itself yet: the welcome's ways to hand Home
+                // over (on this TV, from a computer, by hand), rather than a hint and Android's settings
+                openWelcome(4);
+            } else {
+                String m = HomeRole.make(this);
+                if (m != null) hud(R.drawable.ic_info, m);
+            }
         } else {
             homeHint(getString(R.string.press_home_on_the_remote));
         }
@@ -5913,6 +5919,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     /** The one-time welcome over the frosted wall; built now, dropped when done. */
     private void openWelcome() {
+        openWelcome(0);
+    }
+
+    private void openWelcome(int start) {
         if (welcome != null || isDestroyed()) return;
         if (settings.isOpen()) closeSettings();
         if (switcher.isOpen()) closeSwitcher();
@@ -5962,7 +5972,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
         });
         root.addView(welcome, match());
-        welcome.open();
+        welcome.open(start);
         handler.postDelayed(() -> {
             if (welcome != null && welcome.isOpen()) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
         }, 800);

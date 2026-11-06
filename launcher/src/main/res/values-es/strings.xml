@@ -1058,4 +1058,26 @@
     <plurals name="n_apps_on"><item quantity="one">%1$d app activada de nuevo</item><item quantity="other">%1$d apps activadas de nuevo</item></plurals>
     <string name="db_acr">Reconoce lo que se ve en pantalla para dirigir anuncios (ACR).</string>
     <string name="db_partnerrows">Pone filas patrocinadas del fabricante en el inicio propio de la TV.</string>
+    <string name="retire_tv_home_row">Desactivar %1$s</string>
+    <string name="retire_tv_home_sub">Inicio abre siempre Aura · libera su memoria</string>
+    <string name="bring_back_tv_home_row">Recuperar %1$s</string>
+    <string name="bring_back_tv_home_sub">La pantalla de inicio propia de la TV, como estaba</string>
+    <string name="retire_tv_home_confirm">Pulsa OK otra vez para desactivar %1$s. Aura sigue siendo tu inicio con todos sus ajustes; Recuperar lo deshace cuando quieras.</string>
+    <string name="tv_home_retired">%1$s está desactivado · Inicio abre siempre Aura</string>
+    <string name="tv_home_back">%1$s ha vuelto</string>
+    <string name="switch_off_name_q">¿Desactivar %1$s?</string>
+    <string name="retire_body_tv">Aura ya es tu inicio, pero %1$s sigue funcionando detrás, ocupando memoria, y en algunas TV recupera el botón Inicio. Desactivado, Inicio abre siempre Aura y esa memoria queda libre para tus apps.</string>
+    <string name="tv_home_is_off">%1$s está desactivado · Ajustes, Configurar en esta TV lo recupera</string>
+    <string name="setup_card_todo">Aún sin hacer. Hace que Inicio abra Aura y activa Liberar memoria y el bloqueo de anuncios.</string>
+    <string name="setup_card_done">Conectado. Liberar memoria, el inicio propio de la TV y los extras de Aura están aquí.</string>
+    <string name="setup_card_start">Empieza aquí</string>
+    <string name="setup_card_done_pill">✓ Hecho</string>
+    <string name="inputs_title">Entradas</string>
+    <string name="screen_off">Pantalla apagada</string>
+    <string name="input_live">Activa</string>
+    <string name="input_standby">En espera</string>
+    <string name="input_nothing">Nada conectado</string>
+    <string name="input_channels">Canales de TV</string>
+    <string name="n_live">%1$d activas</string>
+    <plurals name="n_sources"><item quantity="one">%1$d fuente</item><item quantity="other">%1$d fuentes</item></plurals>
 </resources>

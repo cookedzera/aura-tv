@@ -1060,4 +1060,26 @@
     <plurals name="n_apps_on"><item quantity="one">%1$d app back on</item><item quantity="other">%1$d apps back on</item></plurals>
     <string name="db_acr">Watches what is on screen to target ads (ACR).</string>
     <string name="db_partnerrows">Puts the TV maker\'s sponsored rows on the TV\'s own home screen.</string>
+    <string name="retire_tv_home_row">Switch off %1$s</string>
+    <string name="retire_tv_home_sub">Home always opens Aura · frees its memory</string>
+    <string name="bring_back_tv_home_row">Bring back %1$s</string>
+    <string name="bring_back_tv_home_sub">The TV\'s own home screen, as it was</string>
+    <string name="retire_tv_home_confirm">Press OK again to switch off %1$s. Aura stays your home and keeps every setting; Bring back undoes it any time.</string>
+    <string name="tv_home_retired">%1$s is off · Home always opens Aura</string>
+    <string name="tv_home_back">%1$s is back</string>
+    <string name="switch_off_name_q">Switch off %1$s?</string>
+    <string name="retire_body_tv">Aura is your home now, but %1$s still runs behind it, keeping memory busy, and on some TVs it takes the Home button back. Switched off, Home always opens Aura and that memory is free for your apps.</string>
+    <string name="tv_home_is_off">%1$s is off · Settings, Set up on this TV brings it back</string>
+    <string name="setup_card_todo">Not done yet. Makes Home open Aura, and unlocks Free up memory and ad blocking.</string>
+    <string name="setup_card_done">Connected. Free up memory, the TV\'s own home and Aura\'s extras are here.</string>
+    <string name="setup_card_start">Start here</string>
+    <string name="setup_card_done_pill">✓ Done</string>
+    <string name="inputs_title">Inputs</string>
+    <string name="screen_off">Screen off</string>
+    <string name="input_live">Live</string>
+    <string name="input_standby">On standby</string>
+    <string name="input_nothing">Nothing plugged in</string>
+    <string name="input_channels">TV channels</string>
+    <string name="n_live">%1$d live</string>
+    <plurals name="n_sources"><item quantity="one">%1$d source</item><item quantity="other">%1$d sources</item></plurals>
 </resources>

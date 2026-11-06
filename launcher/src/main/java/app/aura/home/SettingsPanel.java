@@ -159,10 +159,26 @@ final class SettingsPanel {
             return true;
         });
         right.addView(city, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(40)));
-        scroll = new ScrollView(a);
+        // rows fade in and out by themselves at the list's top and bottom edges: Android's own
+        // fading edge, with rows allowed past the padding, drew a hard line and sliced the row there
+        scroll = new ScrollView(a) {
+            @Override
+            protected int computeScrollDeltaToGetChildRectOnScreen(android.graphics.Rect r) {
+                // a focused row is always brought clear of the faded edge
+                android.graphics.Rect m = new android.graphics.Rect(r);
+                m.top -= Ui.dp(EDGE);
+                m.bottom += Ui.dp(EDGE);
+                return super.computeScrollDeltaToGetChildRectOnScreen(m);
+            }
+
+            @Override
+            protected void onScrollChanged(int l, int t, int oldl, int oldt) {
+                super.onScrollChanged(l, t, oldl, oldt);
+                fadeEdges();
+            }
+        };
         scroll.setVerticalScrollBarEnabled(false);
-        scroll.setVerticalFadingEdgeEnabled(true);
-        scroll.setFadingEdgeLength(Ui.dp(24));
+        scroll.setVerticalFadingEdgeEnabled(false);
         scroll.setClipToPadding(false);
         // room on every side for a focused row to grow into, so it's never clipped
         scroll.setPadding(Ui.dp(14), Ui.dp(8), Ui.dp(14), Ui.dp(8));
@@ -175,6 +191,7 @@ final class SettingsPanel {
         };
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setClipChildren(false);
+        rows.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> fadeEdges());
         scroll.addView(rows, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         right.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         // tall enough that the whole main list fits without scrolling: no row is ever cut at an edge
@@ -965,6 +982,8 @@ final class SettingsPanel {
             Ui.fit(title, act.getString(R.string.settings), Ui.dp(300), 52, 30);
             Weather.Now w = Weather.now(act);
             note.setText(act.getString(R.string.changes_apply_at_once_everything));
+            // the one setting that makes the others work, first and set apart (not in a kids' profile)
+            if (!Profiles.kids(act)) addSetupCard();
             // only while Android still sends Home to another launcher: Android asks, or (Google TV,
             // Fire TV, which keep Home whatever is chosen) the Home button service takes it over
             if (!HomeRole.held(act)) {
@@ -1018,7 +1037,6 @@ final class SettingsPanel {
             // Private DNS arrived with Android 9: older TVs don't get the row at all
             if (android.os.Build.VERSION.SDK_INT >= 28) add(act.getString(R.string.block_ads), Shield.on(act) ? act.getString(R.string.on_value, Shield.name(act)) : act.getString(R.string.off), "shield", () -> go("shield"));
             add(act.getString(R.string.animations), animLabel(), "anim", this::cycleAnim);
-            add(act.getString(R.string.set_up_on_this_tv), Adb.on(act) ? Adb.unguarded(act) ? act.getString(R.string.connected_open_to_your_wi) : act.getString(R.string.connected) : act.getString(R.string.no_computer_needed), "tv", () -> go("tv"));
             add(act.getString(R.string.android_settings), "", "android", () -> host.open(new Intent(Settings.ACTION_SETTINGS), panel));
             section("AURA");
             add(act.getString(R.string.your_setup), act.getString(R.string.save_to_your_phone_or), "backup", this::openBackup);
@@ -1587,12 +1605,19 @@ final class SettingsPanel {
             go("debloat");
         });
         if (Adb.on(act)) add(act.getString(R.string.switch_everything_on), setupNote.isEmpty() ? act.getResources().getQuantityString(R.plurals.n_extras, Adb.setup(act).length, Adb.setup(act).length) : setupNote, "adb:setup", this::adbSetup);
-        if (Adb.on(act) && Safety.hasGoogleTvHome(act)) {
-            if (Safety.googleTvHomeOn(act)) {
-                add(act.getString(R.string.retire_google_tv_home), confirmRetire ? act.getString(R.string.press_ok_again_voice_search) : act.getString(R.string.voice_search_side_panel_accounts),
+        // the TV's own home screen, switched off (or back on): Google TV's in its own words, any other by its name
+        String tvHome = Adb.on(act) ? Safety.tvHome(act) : null;
+        if (tvHome != null) {
+            boolean gtv = tvHome.equals(Safety.GOOGLE_TV_HOME);
+            String name = Safety.tvHomeName(act);
+            if (Safety.tvHomeOn(act)) {
+                add(gtv ? act.getString(R.string.retire_google_tv_home) : act.getString(R.string.retire_tv_home_row, name),
+                        confirmRetire ? act.getString(gtv ? R.string.press_ok_again_voice_search : R.string.press_ok_again)
+                                : act.getString(gtv ? R.string.voice_search_side_panel_accounts : R.string.retire_tv_home_sub),
                         "adb:gtv", () -> retireGoogleHome(true));
             } else {
-                add(act.getString(R.string.bring_back_google_tv_home), act.getString(R.string.restores_voice_search_side_panel), "adb:gtv", () -> retireGoogleHome(false));
+                add(gtv ? act.getString(R.string.bring_back_google_tv_home) : act.getString(R.string.bring_back_tv_home_row, name),
+                        act.getString(gtv ? R.string.restores_voice_search_side_panel : R.string.bring_back_tv_home_sub), "adb:gtv", () -> retireGoogleHome(false));
             }
         }
         // newer TVs without plain network debugging: wireless debugging, paired with a code typed on the phone
@@ -1836,16 +1861,18 @@ final class SettingsPanel {
         confirmRetire = false;
         final android.content.Context app = act.getApplicationContext();
         new SafeThread(() -> {
-            Boolean took = Safety.retireGoogleHome(app, retire);
+            final boolean gtv = Safety.GOOGLE_TV_HOME.equals(Safety.tvHome(app));
+            final String name = Safety.tvHomeName(app);
+            Boolean took = Safety.retireTvHome(app, retire);
             act.runOnUiThread(() -> {
                 if (took == null) {
                     host.hud(R.drawable.ic_info, act.getString(R.string.couldnt_reach_the_tvs_debugging));
                 } else if (!took) {
                     host.hud(R.drawable.ic_info, act.getString(R.string.android_didnt_allow_that_change));
                 } else if (retire) {
-                    host.hud(R.drawable.ic_check, act.getString(R.string.google_tv_home_retired_bring));
+                    host.hud(R.drawable.ic_check, gtv ? act.getString(R.string.google_tv_home_retired_bring) : act.getString(R.string.tv_home_retired, name));
                 } else {
-                    host.hud(R.drawable.ic_check, act.getString(R.string.google_tv_home_is_back));
+                    host.hud(R.drawable.ic_check, gtv ? act.getString(R.string.google_tv_home_is_back) : act.getString(R.string.tv_home_back, name));
                 }
                 if (page.equals("tv")) {
                     build();
@@ -1857,7 +1884,8 @@ final class SettingsPanel {
 
     private String adbNote() {
         if (confirmRetire) {
-            return act.getString(R.string.voice_search_google_assistant_in);
+            return Safety.GOOGLE_TV_HOME.equals(Safety.tvHome(act)) ? act.getString(R.string.voice_search_google_assistant_in)
+                    : act.getString(R.string.retire_tv_home_confirm, Safety.tvHomeName(act));
         }
         String s = adbState.isEmpty() && Adb.on(act) ? Adb.unguarded(act) ? Adb.OPEN_DOOR : Adb.OK : adbState;
         switch (s) {
@@ -2444,6 +2472,78 @@ final class SettingsPanel {
     /** One choice: its name on the left, its value on the right; OK changes it. */
     private void add(String label, String value, String tag, Runnable run) {
         add(label, value, tag, null, run);
+    }
+
+    private static final int EDGE = 36;
+
+    /**
+     * Rows near the list's top or bottom edge fade with how far they still are inside it, and are gone
+     * by the time they'd meet the edge: no hard line, no sliced row. An edge with nothing beyond it
+     * (the list's very top or end) doesn't fade.
+     */
+    private void fadeEdges() {
+        if (scroll == null || rows == null) return;
+        int h = scroll.getHeight(), y = scroll.getScrollY();
+        if (h <= 0) return;
+        int max = Math.max(0, rows.getHeight() + scroll.getPaddingTop() + scroll.getPaddingBottom() - h);
+        float e = Ui.dpf(EDGE);
+        for (int i = 0; i < rows.getChildCount(); i++) {
+            View c = rows.getChildAt(i);
+            float top = rows.getTop() + c.getTop() - y, bottom = top + c.getHeight();
+            float a = 1f;
+            if (y > 0) a = Math.min(a, top / e);
+            if (y < max) a = Math.min(a, (h - bottom) / e);
+            c.setAlpha(Math.max(0f, Math.min(1f, a)));
+        }
+    }
+
+    /**
+     * Set up on this TV, first in Settings and set apart: the one step that makes Home, ad blocking
+     * and freeing memory work, said plainly, with whether it's done.
+     */
+    private void addSetupCard() {
+        boolean done = Adb.on(act);
+        Pad p = new Pad(act, null, 18, 0f);
+        p.plainColor = done ? 0x1F34C759 : 0x402F7BFF;
+        p.edgeLight = false;
+        p.focusScale = 1.03f;
+        p.setTag("tv");
+        LinearLayout r = new LinearLayout(act);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setPadding(Ui.dp(16), 0, Ui.dp(14), 0);
+        LinearLayout text = new LinearLayout(act);
+        text.setOrientation(LinearLayout.VERTICAL);
+        TextView name = p.tint(Ui.text(act, 15, Ui.semibold, 0xFFFFFFFF), 1f);
+        name.setText(act.getString(R.string.set_up_on_this_tv));
+        text.addView(name);
+        TextView sub = p.tint(Ui.text(act, 11, Ui.regular, 0xFFFFFFFF), 0.75f);
+        sub.setSingleLine(false);
+        sub.setMaxLines(2);
+        // a TV that let Aura in without asking is open to anything on the Wi-Fi: said here too
+        sub.setText(act.getString(!done ? R.string.setup_card_todo : Adb.unguarded(act) ? R.string.connected_open_to_your_wi : R.string.setup_card_done));
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sl.topMargin = Ui.dp(2);
+        text.addView(sub, sl);
+        r.addView(text, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView pill = Ui.text(act, 10.5f, Ui.semibold, done ? 0xFF34C759 : 0xFFFFFFFF);
+        pill.setText(act.getString(done ? R.string.setup_card_done_pill : R.string.setup_card_start));
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setCornerRadius(Ui.dpf(10));
+        bg.setColor(done ? 0x2634C759 : 0xFF2F7BFF);
+        pill.setBackground(bg);
+        pill.setPadding(Ui.dp(10), Ui.dp(3), Ui.dp(10), Ui.dp(3));
+        LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pl.leftMargin = Ui.dp(10);
+        r.addView(pill, pl);
+        p.addView(r, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        p.onClick = () -> go("tv");
+        p.setOnFocusChangeListener((v, has) -> {
+            if (has) explain("tv");
+        });
+        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(58));
+        l.topMargin = Ui.dp(4);
+        l.bottomMargin = Ui.dp(6);
+        rows.addView(p, l);
     }
 
     /** The same, led by a small picture (a photo's thumbnail). */

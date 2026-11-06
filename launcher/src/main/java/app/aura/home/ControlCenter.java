@@ -47,7 +47,7 @@ import java.util.Set;
 
 /**
  * Control Center as a modular board on frosted glass, iOS 18 style: round toggles, a tall volume
- * slider, an inputs switcher, the sky and your day, with the time set large beside it.
+ * slider, the inputs (all of them on a sheet), memory and your day, with the time set large beside it.
  */
 final class ControlCenter {
     interface Host {
@@ -90,7 +90,6 @@ final class ControlCenter {
     private final WifiSheet wifiSheet;
     private final BtSheet btSheet;
     private final List<View> modules = new ArrayList<>(), focusables = new ArrayList<>();
-    private FrameLayout sky;
 
     /**
      * What's playing (null: nothing): a wide card with the cover takes Tonight's pick's place while
@@ -141,7 +140,8 @@ final class ControlCenter {
 
     /** The column's own title: shown in the Aura style, where the column has the clock. */
     private TextView headTitle;
-    private final TextView time, date, info, phase, eventName, eventTime, other, todayValue, boostValue;
+    private final TextView time, date, info, todayValue, boostValue, inName, inState, inCount;
+    private final ImageView inIcon;
     private final Pad vpnPill, nowCard;
     private final TextView vpnText, nowState, nowTitle, nowBy;
     private final ImageView nowArt;
@@ -152,16 +152,16 @@ final class ControlCenter {
     private final ImageView[] noteIcons = new ImageView[3];
     private final TextView[] noteKicks = new TextView[3], noteTitles = new TextView[3], noteBodies = new TextView[3];
     private final List<MediaWatch.Note> notesShown = new ArrayList<>();
-    private final TextView wifiCap, btCap, sleepCap, photoCap;
-    private final Round wifi, bt, sleep, photo;
+    private final TextView wifiCap, btCap, sleepCap, screenOffCap;
+    private final Round wifi, bt, sleep, screenOff;
     private final Slider volume;
-    private final FrameLayout inputs;
-    private final LinearLayout segments;
+    /** The inputs tile: the source that's live, large; OK lays every source out on a sheet. */
+    private final Pad inputs;
+    private final InputSheet inputSheet;
+    private final List<InputSheet.Source> sources = new ArrayList<>();
     private final Pad picture, sound, boost, settings, standby;
     private final Ring ring;
-    private final SkyArc arc;
     private final AudioManager audio;
-    private String segmentsSig;
     private final Pad pick;
     private final ImageView pickPoster;
     private final TextView pickName, pickLine, pickAbout, pickKicker;
@@ -332,31 +332,41 @@ final class ControlCenter {
         ncap.setText(act.getString(R.string.notifications));
         notesBox.addView(ncap);
         for (int k = 0; k < noteRows.length; k++) {
-            Pad row = new Pad(a, null, 14, 0f);
+            // a card as on Apple TV: the app's round icon, its name and how long ago in a quiet line,
+            // then the title and the text in clear type
+            Pad row = new Pad(a, null, 20, 0f);
             row.plainColor = MODULE;
+            row.edgeLight = false;
             row.focusScale = 1.03f;
             LinearLayout rr = new LinearLayout(a);
             rr.setGravity(Gravity.CENTER_VERTICAL);
-            rr.setPadding(Ui.dp(10), 0, Ui.dp(12), 0);
+            rr.setPadding(Ui.dp(14), 0, Ui.dp(16), 0);
             ImageView ic = new ImageView(a);
-            ic.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            rr.addView(ic, new LinearLayout.LayoutParams(Ui.dp(22), Ui.dp(22)));
+            ic.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            ic.setClipToOutline(true);
+            ic.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override
+                public void getOutline(View v, android.graphics.Outline o) {
+                    o.setOval(0, 0, v.getWidth(), v.getHeight());
+                }
+            });
+            rr.addView(ic, new LinearLayout.LayoutParams(Ui.dp(34), Ui.dp(34)));
             LinearLayout col = new LinearLayout(a);
             col.setOrientation(LinearLayout.VERTICAL);
-            TextView kick = row.tint(Ui.caps(a, 6, 0xFFFFFFFF, 0.2f), 0.55f);
-            kick.setShadowLayer(0, 0, 0, 0);
+            TextView kick = row.tint(Ui.text(a, 9.5f, Ui.medium, 0xFFFFFFFF), 0.6f);
             kick.setSingleLine(true);
+            kick.setEllipsize(android.text.TextUtils.TruncateAt.END);
             col.addView(kick);
-            TextView t = row.tint(Ui.text(a, 11, Ui.semibold, 0xFFFFFFFF), 1f);
+            TextView t = row.tint(Ui.text(a, 12.5f, Ui.semibold, 0xFFFFFFFF), 1f);
             t.setSingleLine(true);
             t.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            col.addView(t);
-            TextView b = row.tint(Ui.text(a, 9.5f, Ui.regular, 0xFFFFFFFF), 0.7f);
+            col.addView(t, lp(0, 1));
+            TextView b = row.tint(Ui.text(a, 10.5f, Ui.regular, 0xFFFFFFFF), 0.75f);
             b.setSingleLine(true);
             b.setEllipsize(android.text.TextUtils.TruncateAt.END);
             col.addView(b);
             LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            cl.leftMargin = Ui.dp(10);
+            cl.leftMargin = Ui.dp(12);
             rr.addView(col, cl);
             row.addView(rr, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             row.setVisibility(View.GONE);
@@ -368,8 +378,8 @@ final class ControlCenter {
             noteKicks[k] = kick;
             noteTitles[k] = t;
             noteBodies[k] = b;
-            LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(48));
-            rl.topMargin = Ui.dp(6);
+            LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(64));
+            rl.topMargin = Ui.dp(8);
             notesBox.addView(row, rl);
         }
         notesBox.setVisibility(View.GONE);
@@ -423,8 +433,8 @@ final class ControlCenter {
         wifi = new Round(a, R.drawable.ic_wifi, BLUE);
         bt = new Round(a, R.drawable.ic_bluetooth, BLUE);
         sleep = new Round(a, R.drawable.ic_moon, ORANGE);
-        photo = new Round(a, R.drawable.ic_photo, VIOLET);
-        Round[] rounds = {wifi, bt, sleep, photo};
+        screenOff = new Round(a, R.drawable.ic_screen_off, VIOLET);
+        Round[] rounds = {wifi, bt, sleep, screenOff};
         TextView[] caps = new TextView[4];
         for (int k = 0; k < 4; k++) {
             int x = (k % 2) * half, y = (k / 2) * half;
@@ -447,54 +457,52 @@ final class ControlCenter {
         wifiCap = caps[0];
         btCap = caps[1];
         sleepCap = caps[2];
-        photoCap = caps[3];
-        photoCap.setText(act.getString(R.string.photo_mode));
+        screenOffCap = caps[3];
+        screenOffCap.setText(act.getString(R.string.screen_off));
 
         // 1x2: volume
         volume = place(new Slider(a), 2, 0, 1, 2);
         focusables.add(volume);
 
-        // 1x2: the sky
-        sky = place(module(a), 3, 0, 1, 2);
-        LinearLayout sc = column(a, 13);
-        phase = Ui.caps(a, 7, 0xFFFFC98A, 0.2f);
-        sc.addView(phase);
-        arc = new SkyArc(a);
-        LinearLayout.LayoutParams al = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(40));
-        al.topMargin = Ui.dp(12);
-        sc.addView(arc, al);
-        eventName = Ui.caps(a, 7, 0x99FFFFFF, 0.2f);
-        sc.addView(eventName, lp(0, 14));
-        eventTime = Ui.text(a, 17, Ui.heavy, 0xFFFFFFFF);
-        eventTime.setLetterSpacing(-0.02f);
-        sc.addView(eventTime, lp(0, 3));
-        other = Ui.text(a, 9.5f, Ui.medium, 0x99FFFFFF);
-        sc.addView(other, lp(0, 8));
-        sky.addView(sc);
-
-
-        // 2x1: inputs
-        inputs = place(module(a), 0, 2, 2, 1);
-        TextView il = Ui.caps(a, 7, 0x8CFFFFFF, 0.24f);
+        // 1x2: the inputs, where the sky was. The source that's live, large; OK opens them all on a sheet
+        inputs = place(new Pad(a, null, 26, 0f), 3, 0, 1, 2);
+        inputs.plainColor = MODULE;
+        inputs.focusScale = 1.05f;
+        LinearLayout ic2 = column(a, 13);
+        TextView il = inputs.tint(Ui.caps(a, 7, 0xFFFFFFFF, 0.24f), 0.55f);
         il.setText(act.getString(R.string.inputs));
-        FrameLayout.LayoutParams ill = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ill.leftMargin = Ui.dp(14);
-        ill.topMargin = Ui.dp(10);
-        inputs.addView(il, ill);
-        segments = new LinearLayout(a);
-        segments.setClipChildren(false);
-        FrameLayout.LayoutParams sl = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(52));
-        sl.leftMargin = Ui.dp(8);
-        sl.rightMargin = Ui.dp(8);
-        sl.topMargin = Ui.dp(25);
-        inputs.addView(segments, sl);
+        ic2.addView(il);
+        inIcon = inputs.tint(new ImageView(a), 1f);
+        LinearLayout.LayoutParams iil = new LinearLayout.LayoutParams(Ui.dp(26), Ui.dp(26));
+        iil.topMargin = Ui.dp(18);
+        ic2.addView(inIcon, iil);
+        inName = inputs.tint(Ui.text(a, 15, Ui.semibold, 0xFFFFFFFF), 1f);
+        inName.setSingleLine(true);
+        inName.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        Ui.shrinkToWidth(inName, 11f);
+        ic2.addView(inName, lp(0, 10));
+        inState = inputs.tint(Ui.text(a, 10, Ui.medium, 0xFFFFFFFF), 0.7f);
+        inState.setSingleLine(true);
+        ic2.addView(inState, lp(0, 2));
+        inCount = inputs.tint(Ui.text(a, 9.5f, Ui.medium, 0xFFFFFFFF), 0.55f);
+        inCount.setSingleLine(true);
+        // the count sits at the tile's foot
+        ic2.addView(new View(a), new LinearLayout.LayoutParams(1, 0, 1f));
+        ic2.addView(inCount);
+        inputs.addView(ic2, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        inputs.onClick = this::showInputs;
+        inputs.setVisibility(View.GONE);
+        inputSheet = new InputSheet(a, h.backdrop(), (intent, from) -> launch(intent, from));
+        FrameLayout.LayoutParams isl = new FrameLayout.LayoutParams(Ui.dp(side), Ui.dp(side), Gravity.END | Gravity.CENTER_VERTICAL);
+        isl.rightMargin = Ui.dp(96);
+        panel.addView(inputSheet, isl);
 
-        picture = place(button(a, R.drawable.ic_picture, act.getString(R.string.picture)), 2, 2, 1, 1);
-        sound = place(button(a, R.drawable.ic_volume, act.getString(R.string.sound)), 3, 2, 1, 1);
+        picture = place(button(a, R.drawable.ic_picture, act.getString(R.string.picture)), 0, 2, 1, 1);
+        sound = place(button(a, R.drawable.ic_volume, act.getString(R.string.sound)), 1, 2, 1, 1);
 
         // 1x1: memory, with a ring; OK shows recent apps, where they're closed (a "boost" that kills
         // apps from a launcher is refused by Android 11 and later anyway)
-        boost = place(new Pad(a, null, 26, 0f), 0, 3, 1, 1);
+        boost = place(new Pad(a, null, 26, 0f), 2, 2, 1, 1);
         boost.plainColor = MODULE;
         boost.focusScale = 1.06f;
         LinearLayout bc = new LinearLayout(a);
@@ -507,7 +515,7 @@ final class ControlCenter {
         boost.addView(bc, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         // 1x1: your day
-        FrameLayout today = place(module(a), 1, 3, 1, 1);
+        FrameLayout today = place(module(a), 3, 2, 1, 1);
         LinearLayout tc = new LinearLayout(a);
         tc.setOrientation(LinearLayout.VERTICAL);
         tc.setGravity(Gravity.CENTER);
@@ -519,19 +527,17 @@ final class ControlCenter {
         tc.addView(tcap, fill(lp(0, 4), tcap, 7f));
         today.addView(tc, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        settings = place(button(a, R.drawable.ic_settings, act.getString(R.string.settings)), 2, 3, 1, 1);
-        standby = place(button(a, R.drawable.ic_power, act.getString(R.string.standby)), 3, 3, 1, 1);
-        focusables.addAll(Arrays.asList(picture, sound, boost, settings, standby, pick, vpnPill, nowCard));
+        settings = place(button(a, R.drawable.ic_settings, act.getString(R.string.settings)), 0, 3, 2, 1);
+        standby = place(button(a, R.drawable.ic_power, act.getString(R.string.standby)), 2, 3, 2, 1);
+        focusables.addAll(Arrays.asList(inputs, picture, sound, boost, settings, standby, pick, vpnPill, nowCard));
         focusables.addAll(Arrays.asList(noteRows));
 
         wifi.onClick = this::showWifi;
         bt.onClick = this::showBt;
         sleep.onClick = this::cycleSleep;
         sleep.onLongClick = host::quietScreen;
-        photo.onClick = () -> {
-            host.closeCc(true);
-            host.photoMode();
-        };
+        // the screen dark, the sound on (as Standby's hold does): easier found as its own button
+        screenOff.onClick = host::quietScreen;
         picture.onClick = () -> host.guarded(() -> launch(new Intent("android.settings.DISPLAY_SETTINGS"), picture));
         sound.onClick = () -> host.guarded(() -> {
             Intent s = new Intent(Settings.ACTION_SOUND_SETTINGS);
@@ -793,7 +799,7 @@ final class ControlCenter {
             if (noteIcons[k].getDrawable() != icon) noteIcons[k].setImageDrawable(icon);
             // an app that gave no time (or a clock not yet set after a restart) shows just its name
             boolean dated = n.when > 0 && now - n.when >= 0 && now - n.when < 30L * 86_400_000L;
-            noteKicks[k].setText((dated ? app + "  ·  " + Habits.ago(now - n.when) : app).toUpperCase(Locale.getDefault()));
+            noteKicks[k].setText(dated ? app + "  ·  " + Habits.ago(now - n.when) : app);
             noteTitles[k].setText(n.title);
             noteBodies[k].setText(n.text);
             noteBodies[k].setVisibility(n.text.isEmpty() ? View.GONE : View.VISIBLE);
@@ -898,7 +904,7 @@ final class ControlCenter {
         panel.removeCallbacks(delayedBt);
         // readings are kept warm while the home screen idles; opening only refreshes them once the
         // board has settled, so no system lookups land on the first frames of the animation
-        if (segmentsSig == null) {
+        if (inputsSig == null) {
             refresh();
         } else {
             volume.sync(); // the remote's volume keys may have moved it while the board was closed
@@ -927,8 +933,9 @@ final class ControlCenter {
             m.animate().alpha(1f).translationY(0f).setStartDelay(60 + order * 30L).setDuration(460)
                     .setInterpolator(Ui.EMPHASIZED).start();
         }
-        if (inputs && segments.getChildCount() > 0) segments.getChildAt(0).requestFocus();
-        else wifi.requestFocus();
+        wifi.requestFocus();
+        // the TV's own Inputs button: straight to the sheet of sources
+        if (inputs && !sources.isEmpty()) panel.postDelayed(this::showInputs, 300);
     }
 
     void close(boolean animate, Runnable done) {
@@ -996,6 +1003,10 @@ final class ControlCenter {
     }
 
     boolean back() {
+        if (inputSheet.isOpen()) {
+            hideInputs();
+            return true;
+        }
         if (btSheet.isOpen()) {
             hideBt(true);
             return true;
@@ -1028,7 +1039,6 @@ final class ControlCenter {
         }
         if (focused == volume && (dir == View.FOCUS_UP || dir == View.FOCUS_DOWN)) return false;
         List<View> all = new ArrayList<>(focusables);
-        for (int i = 0; i < segments.getChildCount(); i++) all.add(segments.getChildAt(i));
         if (focused == null || !all.contains(focused)) {
             wifi.requestFocus();
             return true;
@@ -1127,16 +1137,7 @@ final class ControlCenter {
             c.set(Calendar.MINUTE, 0);
             c.set(Calendar.SECOND, 0);
             c.set(Calendar.MILLISECOND, 0);
-            long rise = Sun.next(c.getTimeInMillis(), true), set = rise > 0 ? Sun.next(rise, false) : -1;
-            boolean up = Sun.isUp(now);
-            // by day this is the same sunset the home screen shows, to the minute
-            long next = up && set > now ? set : Sun.next(now, !up), after = next > 0 ? Sun.next(next, up) : -1;
             long today = Habits.todayMs(act);
-            java.text.DateFormat tf = DateFormat.getTimeFormat(act);
-            final String ph = Sun.label(Sun.phase(now));
-            final String evName = up ? act.getString(R.string.sunset) : act.getString(R.string.sunrise);
-            final String evTime = next > 0 ? tf.format(new Date(next)).toUpperCase(Locale.getDefault()) : "–";
-            final String oth = after > 0 ? (up ? "↑ " : "↓ ") + tf.format(new Date(after)).toUpperCase(Locale.getDefault()) : "";
             final String day = today >= 0 ? compact(today) : "–";
             int fresh = Gallery.walls(act).size();
             Weather.Now wx = Weather.now(act);
@@ -1148,12 +1149,6 @@ final class ControlCenter {
             preparePick();
             act.runOnUiThread(() -> {
                 if (shownPick == null) showPick(); // first time: no need to wait for the next opening
-                arc.set(rise, set, now);
-                phase.setText(ph);
-                eventName.setText(evName);
-                // the sky module is one unit wide: times shrink to fit rather than run off its edge
-                Ui.fit(eventTime, evTime, Ui.dp(span(1) - 26), 17, 11);
-                Ui.fit(other, oth, Ui.dp(span(1) - 26), 9.5f, 7.5f);
                 todayValue.setText(day);
                 info.setText(line);
             });
@@ -1232,28 +1227,90 @@ final class ControlCenter {
         List<TvInputInfo> list = new ArrayList<>();
         for (TvInputInfo info : tim.getTvInputList()) {
             // hiding an input in the TV's settings arrived in Android 7
-            if (info.isPassthroughInput() && (android.os.Build.VERSION.SDK_INT < 24 || !info.isHidden(act))) list.add(info);
+            if (android.os.Build.VERSION.SDK_INT >= 24 && info.isHidden(act)) continue;
+            if (info.isPassthroughInput() || builtInTuner(info)) list.add(info);
         }
-        inputs.setVisibility(list.isEmpty() ? View.GONE : View.VISIBLE);
+        // Sony and TCL sets can answer with no inputs at all for a while after switching on: asked
+        // again a few times before Control Center settles for none
+        if (list.isEmpty() && Compat.justBooted() && inputRetries < 5) {
+            inputRetries++;
+            inputs.postDelayed(this::buildSegments, 2000);
+        }
+        // HDMI first, then the TV's own tuners (antenna, cable, satellite), then the rest
         java.util.Collections.sort(list, (x, y) -> {
-            int tx = x.getType() == TvInputInfo.TYPE_HDMI ? 0 : 1, ty = y.getType() == TvInputInfo.TYPE_HDMI ? 0 : 1;
+            int tx = order(x), ty = order(y);
             return tx != ty ? tx - ty : label(x).compareTo(label(y));
         });
-        // the buttons are only rebuilt when an input, its state, or its CEC name actually changed
+        // read again only when an input, its state, or its CEC name actually changed
         StringBuilder sig = new StringBuilder();
         for (TvInputInfo info : list) sig.append(info.getId()).append('=').append(tim.getInputState(info.getId())).append(':').append(label(info)).append('|');
-        if (sig.toString().equals(segmentsSig)) return;
-        segmentsSig = sig.toString();
-        View focused = act.getCurrentFocus();
-        int had = focused != null && focused.getParent() == segments ? segments.indexOfChild(focused) : -1;
-        segments.removeAllViews();
-        for (int i = 0; i < list.size() && i < 3; i++) {
-            TvInputInfo info = list.get(i);
-            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
-            if (i > 0) p.leftMargin = Ui.dp(6);
-            segments.addView(segment(info, tim.getInputState(info.getId())), p);
+        if (sig.toString().equals(inputsSig)) return;
+        inputsSig = sig.toString();
+        sources.clear();
+        InputSheet.Source lead = null;
+        for (TvInputInfo info : list) {
+            int state = tim.getInputState(info.getId());
+            boolean tuner = !info.isPassthroughInput();
+            boolean live = !tuner && state == TvInputManager.INPUT_STATE_CONNECTED;
+            String what = tuner ? act.getString(R.string.input_channels)
+                    : state == TvInputManager.INPUT_STATE_CONNECTED ? act.getString(R.string.input_live)
+                    : state == TvInputManager.INPUT_STATE_CONNECTED_STANDBY ? act.getString(R.string.input_standby)
+                    : act.getString(R.string.input_nothing);
+            Intent open = tuner ? tunerIntent(info) : new Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(info.getId()));
+            InputSheet.Source src = new InputSheet.Source(label(info), what, glyph(info), live, open);
+            sources.add(src);
+            if (lead == null && live) lead = src;
         }
-        if (had >= 0 && had < segments.getChildCount()) segments.getChildAt(had).requestFocus();
+        if (lead == null && !sources.isEmpty()) lead = sources.get(0);
+        inputs.setVisibility(sources.isEmpty() ? View.GONE : View.VISIBLE);
+        if (lead == null) return;
+        inIcon.setImageResource(lead.glyph);
+        inName.setText(lead.name);
+        inState.setText(lead.state);
+        inCount.setText(act.getResources().getQuantityString(R.plurals.n_sources, sources.size(), sources.size()));
+    }
+
+    private int inputRetries;
+    private String inputsSig;
+
+    private static int order(TvInputInfo info) {
+        return info.getType() == TvInputInfo.TYPE_HDMI ? 0 : info.getType() == TvInputInfo.TYPE_TUNER ? 1 : 2;
+    }
+
+    private static int glyph(TvInputInfo info) {
+        return info.getType() == TvInputInfo.TYPE_HDMI ? R.drawable.ic_hdmi : info.getType() == TvInputInfo.TYPE_TUNER ? R.drawable.ic_antenna : R.drawable.ic_av;
+    }
+
+    /**
+     * The TV's own tuner (antenna, cable, satellite): a tuner input from the system itself, not a
+     * channel app (Pluto TV and the like also call themselves tuners).
+     */
+    static boolean builtInTuner(TvInputInfo info) {
+        if (info.isPassthroughInput() || info.getType() != TvInputInfo.TYPE_TUNER) return false;
+        android.content.pm.ServiceInfo si = info.getServiceInfo();
+        return si != null && si.applicationInfo != null && (si.applicationInfo.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0;
+    }
+
+    /**
+     * A tuner opens on its channels in the TV's own TV app; with none found yet, on its channel
+     * search, so there's something to watch afterwards.
+     */
+    private Intent tunerIntent(TvInputInfo info) {
+        android.net.Uri channels = TvContract.buildChannelsUriForInput(info.getId());
+        Intent watch = new Intent(Intent.ACTION_VIEW, channels);
+        Intent setup = null;
+        try {
+            setup = info.createSetupIntent();
+        } catch (RuntimeException ignored) {
+        }
+        boolean none = false;
+        try (android.database.Cursor c = act.getContentResolver().query(channels, new String[]{TvContract.Channels._ID}, null, null, null)) {
+            none = c != null && c.getCount() == 0;
+        } catch (RuntimeException ignored) {
+            // channels aren't Aura's to read on this TV: straight to the TV app, which knows
+        }
+        if (setup != null && (none || !Compat.resolves(act, watch)) && Compat.resolves(act, setup)) return setup;
+        return watch;
     }
 
     private String label(TvInputInfo info) {
@@ -1263,33 +1320,21 @@ final class ControlCenter {
         return Cec.name(act, String.valueOf(info.loadLabel(act)).replaceAll("(?i)^hdmi\\s*(\\d)", "HDMI $1"));
     }
 
-    /** One input in the switcher: port glyph, name, and a dot when something is plugged in. */
-    private Pad segment(TvInputInfo info, int state) {
-        Pad p = new Pad(act, null, 15, 0f);
-        p.plainColor = 0x14FFFFFF;
-        p.focusScale = 1.08f;
-        LinearLayout l = new LinearLayout(act);
-        l.setOrientation(LinearLayout.VERTICAL);
-        l.setGravity(Gravity.CENTER);
-        int glyph = info.getType() == TvInputInfo.TYPE_HDMI ? R.drawable.ic_hdmi : R.drawable.ic_av;
-        l.addView(p.tint(icon(act, glyph), 1f), new LinearLayout.LayoutParams(Ui.dp(17), Ui.dp(17)));
-        TextView t = p.tint(Ui.text(act, 9.5f, Ui.semibold, 0xFFFFFFFF), 0.95f);
-        t.setText(label(info));
-        l.addView(t, lp(0, 4));
-        p.addView(l, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        if (state != TvInputManager.INPUT_STATE_DISCONNECTED) {
-            View dot = new View(act);
-            GradientDrawable g = new GradientDrawable();
-            g.setShape(GradientDrawable.OVAL);
-            g.setColor(state == TvInputManager.INPUT_STATE_CONNECTED ? GREEN : ORANGE);
-            dot.setBackground(g);
-            FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(Ui.dp(5), Ui.dp(5), Gravity.TOP | Gravity.END);
-            dl.topMargin = Ui.dp(7);
-            dl.rightMargin = Ui.dp(7);
-            p.addView(dot, dl);
-        }
-        p.onClick = () -> launch(new Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(info.getId())), p);
-        return p;
+    private void showInputs() {
+        if (!isOpen || sources.isEmpty()) return;
+        board.animate().alpha(0f).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT)
+                .withEndAction(() -> {
+                    if (inputSheet.isOpen()) board.setVisibility(View.INVISIBLE);
+                }).start();
+        inputSheet.open(sources);
+    }
+
+    private void hideInputs() {
+        inputSheet.close();
+        board.animate().cancel();
+        board.setVisibility(View.VISIBLE);
+        board.setAlpha(1f);
+        inputs.requestFocus();
     }
 
     // ---- actions -----------------------------------------------------------------------------
