@@ -95,6 +95,14 @@ final class Compat {
         return name == null ? null : (T) (k == WifiManager.class ? c.getApplicationContext() : c).getSystemService(name);
     }
 
+    /**
+     * Whether an activity answers this intent. Asked of the package manager: Intent.resolveActivity
+     * hands a named component straight back, there or not.
+     */
+    static boolean resolves(Context c, android.content.Intent i) {
+        return c.getPackageManager().resolveActivity(i, 0) != null;
+    }
+
     /** Whether this app holds a permission; on 5.1 everything in the manifest is granted at install. */
     static boolean granted(Context c, String perm) {
         return c.checkCallingOrSelfPermission(perm) == PackageManager.PERMISSION_GRANTED;

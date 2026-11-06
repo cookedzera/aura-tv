@@ -164,7 +164,12 @@ final class Power {
                 b.addExtras(extras);
             }
             if (android.os.Build.VERSION.SDK_INT >= 26) {
-                b.extend(new android.app.Notification.TvExtender());
+                // published only from Android 15; before, a system-only class Android may keep from
+                // apps, which threw past the catch below and closed Aura as the timer's heads-up came
+                try {
+                    b.extend(new android.app.Notification.TvExtender());
+                } catch (RuntimeException | LinkageError ignored) {
+                }
             }
             nm.notify(NOTE_ID, b.build());
         } catch (RuntimeException ignored) {

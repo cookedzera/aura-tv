@@ -167,7 +167,7 @@ final class Welcome extends FrameLayout {
         if (code == KeyEvent.KEYCODE_BACK) {
             // the two ways of setting Home up lead back to the choice between them
             if (setupBusy || retireBusy) return true;
-            if (page > 0) show(page == 7 || page == 9 ? 5 : page == 5 || page == 6 ? 4 : page == 8 ? 0 : page == 1 ? 8 : page - 1, -1);
+            if (page > 0) show(page == 7 || page == 9 ? 5 : page == 5 || page == 6 ? 4 : page == 8 ? 0 : page == 10 ? 8 : page == 1 ? 10 : page - 1, -1);
             return true;
         }
         if (Pad.isConfirm(code)) {
@@ -217,7 +217,7 @@ final class Welcome extends FrameLayout {
             pairDrop = null;
         }
         View v = p == 0 ? hello() : p == 1 ? look() : p == 2 ? choices() : p == 3 ? ready() : p == 4 ? homeWays() : p == 5 ? onTv()
-                : p == 6 ? fromPc() : p == 8 ? style() : p == 9 ? retireAsk() : wireless();
+                : p == 6 ? fromPc() : p == 8 ? style() : p == 9 ? retireAsk() : p == 10 ? arrange() : wireless();
         if (p == 5 || p == 6) postDelayed(poll, 1200);
         pageView = v;
         stage.addView(v, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -307,12 +307,37 @@ final class Welcome extends FrameLayout {
             actions.add(() -> {
                 Prefs.of(act).edit().putString(Prefs.LAYOUT, st[0]).remove(Prefs.TILE_STYLE).apply();
                 host.applied("layout");
-                show(1, 1);
+                show(10, 1);
             });
         }
         col.addView(row, wrap(34));
         horizontal = true;
         return centred(col);
+    }
+
+    /** Category rows (Movies &amp; TV, Music, Games... filled by themselves) or one grid with folders. */
+    private View arrange() {
+        LinearLayout col = column(Gravity.CENTER_HORIZONTAL);
+        col.addView(kicker(act.getString(R.string.categories)), wrap(0));
+        col.addView(title(act.getString(R.string.how_should_apps_sit)), wrap(6));
+        TextView body = line(act.getString(R.string.rows_or_grid_about));
+        body.setSingleLine(false);
+        body.setGravity(Gravity.CENTER_HORIZONTAL);
+        body.setMaxWidth(Ui.dp(560));
+        col.addView(body, wrap(8));
+        LinearLayout list = column(Gravity.START);
+        boolean on = Categories.on(act);
+        way(list, (on ? "✓  " : "") + act.getString(R.string.layout_category_rows_recommended), () -> arranged(true));
+        way(list, (!on ? "✓  " : "") + act.getString(R.string.layout_one_grid_folders), () -> arranged(false));
+        col.addView(list, wrap(26));
+        horizontal = false;
+        return centred(col);
+    }
+
+    private void arranged(boolean rows) {
+        Prefs.of(act).edit().putBoolean(Categories.ROWS, rows).putBoolean(Categories.ASKED, true).apply();
+        host.applied("apps");
+        show(1, 1);
     }
 
     private View look() {
@@ -473,7 +498,7 @@ final class Welcome extends FrameLayout {
     };
 
     private boolean devOn() {
-        return android.provider.Settings.Global.getInt(act.getContentResolver(), android.provider.Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 0;
+        return Adb.devOptionsOn(act);
     }
 
     private boolean usbOn() {
@@ -526,11 +551,13 @@ final class Welcome extends FrameLayout {
         col.addView(kicker(act.getString(R.string.on_this_tv)), wrap(0));
         col.addView(title(act.getString(R.string.three_steps_once)), wrap(6));
         col.addView(line(act.getString(R.string.each_one_ticks_itself_off)), wrap(6));
+        // Fire TV words it its own way: the device's name in About, and ADB debugging
+        boolean fire = Trouble.fireTv(act);
         col.addView(stepRow(0, act.getString(R.string.turn_on_developer_options),
-                act.getString(R.string.settings_system_about_press_ok),
+                act.getString(fire ? R.string.fire_about_press_name : R.string.settings_system_about_press_ok),
                 button(act.getString(R.string.open_about), false, () -> openSettings(android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS))), wrap(24));
-        col.addView(stepRow(1, act.getString(R.string.turn_on_usb_debugging),
-                act.getString(R.string.in_developer_options_switch_on_2),
+        col.addView(stepRow(1, act.getString(fire ? R.string.turn_on_adb_debugging : R.string.turn_on_usb_debugging),
+                act.getString(fire ? R.string.fire_switch_on_adb_debugging : R.string.in_developer_options_switch_on_2),
                 button(act.getString(R.string.developer_options), false, () -> openSettings(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))), wrap(14));
         setupButton = button(setupDone ? act.getString(R.string.start_watching) : act.getString(R.string.connect), true, this::connect);
         col.addView(stepRow(2, act.getString(R.string.let_aura_in),
@@ -619,10 +646,11 @@ final class Welcome extends FrameLayout {
     private void openSettings(String action) {
         HomeKeys.letTvHomePass();
         try {
-            act.startActivity(new android.content.Intent(action).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            // Fire TV answers Android's settings links with a stand-in that bounces to Amazon's home
+            act.startActivity(HomeActivity.fireSettings(act, new android.content.Intent(action).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)));
         } catch (RuntimeException e) {
             try {
-                act.startActivity(new android.content.Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+                act.startActivity(HomeActivity.fireSettings(act, new android.content.Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)));
             } catch (RuntimeException again) {
                 // no settings app this one can open: the welcome stays where it is
             }

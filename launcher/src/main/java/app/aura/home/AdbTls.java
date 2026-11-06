@@ -277,6 +277,37 @@ final class AdbTls {
     // ---- pairing -------------------------------------------------------------------------------
 
     /**
+     * The TLS session's exported keying material, which the pairing code is bound to. Android 12
+     * publishes it; Android 11's TLS library (Conscrypt) has it unpublished, where Android lets an
+     * app reach it. Without either, pairing was called anyway and stopped dead on Android 11, the
+     * TV saying "pairing" forever.
+     */
+    private static byte[] keyingMaterial(SSLSocket s, String label, int length) throws IOException {
+        if (android.os.Build.VERSION.SDK_INT >= 31) return android.net.ssl.SSLSockets.exportKeyingMaterial(s, label, null, length);
+        java.lang.reflect.Method m = conscryptExport();
+        if (m == null) throw new IOException("this Android can't bind a pairing code to TLS");
+        try {
+            return (byte[]) m.invoke(null, s, label, null, length);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            throw new IOException(e);
+        }
+    }
+
+    private static java.lang.reflect.Method conscryptExport() {
+        try {
+            return Class.forName("com.android.org.conscrypt.Conscrypt")
+                    .getMethod("exportKeyingMaterial", SSLSocket.class, String.class, byte[].class, int.class);
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Whether pairing by code can work here at all: Android 12 and later, or Android 11 that lets Aura reach it. */
+    static boolean canPair() {
+        return android.os.Build.VERSION.SDK_INT >= 31 || android.os.Build.VERSION.SDK_INT == 30 && conscryptExport() != null;
+    }
+
+    /**
      * Pairs with the TV's wireless debugging at {@code at}, using the code it shows. Afterwards the
      * TV knows Aura's key, as after "Always allow". Throws when the code is wrong or the TV went away.
      */
@@ -286,7 +317,7 @@ final class AdbTls {
         plain.setSoTimeout(15_000);
         try (SSLSocket s = wrap(plain, at, key)) {
             // the password is the code, bound to this very TLS session
-            byte[] ekm = android.net.ssl.SSLSockets.exportKeyingMaterial(s, "adb-label\0", null, 64);
+            byte[] ekm = keyingMaterial(s, "adb-label\0", 64);
             byte[] codeBytes = code.getBytes(StandardCharsets.US_ASCII), pw = Arrays.copyOf(codeBytes, codeBytes.length + ekm.length);
             System.arraycopy(ekm, 0, pw, codeBytes.length, ekm.length);
             Spake2 spake = new Spake2(true, CLIENT, SERVER, pw, new SecureRandom());

@@ -197,6 +197,11 @@ final class Habits {
         return out;
     }
 
+    /** When each app was last opened from Aura, for a category row sorted by Recently used. */
+    static synchronized Map<String, Long> lastOpened(Context c) {
+        return read(c.getSharedPreferences("aura_usage", Context.MODE_PRIVATE).getString("recent", "{}"));
+    }
+
     /** An app was just opened from Aura: remembered for the switcher even across restarts. */
     static synchronized void opened(Context c, String pkg) {
         if (pkg == null || isSystemNoise(pkg)) return;

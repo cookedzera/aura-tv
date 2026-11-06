@@ -399,7 +399,7 @@ final class Adb {
             AdbTls.pair(at, code, key(dir(c)), name());
         } catch (Denied e) {
             return DENIED;
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException | LinkageError e) {
             return FAILED;
         }
         Prefs.device(c).edit().putBoolean("adb_paired", true).apply();
@@ -412,9 +412,23 @@ final class Adb {
         return OFF;
     }
 
-    /** Whether this TV has wireless debugging (Android 11+) to pair with, should network debugging be missing. */
+    /**
+     * Whether this TV has wireless debugging to pair with, should network debugging be missing:
+     * Android 11 has it, but pairing needs a TLS call Android 11 may keep from apps (see AdbTls).
+     */
     static boolean wireless() {
-        return Build.VERSION.SDK_INT >= 30;
+        return AdbTls.canPair();
+    }
+
+    /**
+     * Whether this TV's Developer options are on. Fire OS 5 and 6 always show them yet leave
+     * Android's flag at 0, and debugging that's on means they're on anywhere.
+     */
+    static boolean devOptionsOn(Context c) {
+        android.content.ContentResolver r = c.getContentResolver();
+        return android.provider.Settings.Global.getInt(r, android.provider.Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 0
+                || android.provider.Settings.Global.getInt(r, android.provider.Settings.Global.ADB_ENABLED, 0) != 0
+                || Trouble.fireTv(c) && Build.VERSION.SDK_INT < 28;
     }
 
     /** Whether Android let Aura in last time. */
@@ -471,7 +485,7 @@ final class Adb {
         List<String[]> s = new ArrayList<>();
         if (Build.VERSION.SDK_INT >= 24) s.add(new String[]{c.getString(R.string.home), "cmd package set-home-activity " + p + "/" + HomeActivity.class.getName()});
         // Google TV and Fire TV keep Home for their own launcher regardless: the Home button service takes it
-        if (HomeRole.stubborn(c) && !HomeKeys.on(c)) s.add(new String[]{c.getString(R.string.home_button), HomeKeys.enableCommand(c)});
+        if (HomeRole.keepsHome(c) && !HomeKeys.on(c)) s.add(new String[]{c.getString(R.string.home_button), HomeKeys.enableCommand(c)});
         // Android 13+ greys out the Accessibility switch of an app installed from a file ("restricted
         // setting"); this lifts it, so the Home button can be switched by hand later too
         if (Build.VERSION.SDK_INT >= 33) s.add(new String[]{c.getString(R.string.accessibility), "appops set " + p + " ACCESS_RESTRICTED_SETTINGS allow"});

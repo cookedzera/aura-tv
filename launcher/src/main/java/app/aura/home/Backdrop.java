@@ -280,6 +280,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     /** Drop the photos when the system is short on memory; they fade back in on return. */
     void trim(int level) {
         if (running || level < ComponentCallbacks2.TRIM_MEMORY_MODERATE) return;
+        keepStandIn();
         play(current, false);
         play(incoming, false);
         if (current != null) current.recycle();
@@ -288,8 +289,56 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         incoming = null;
         loading = false;
         generation++;
-        intro = 0f;
+        // with the small copy on screen there's no rise from black: the photograph fades in over it
+        intro = standIn != null ? 1f : 0f;
         introStart = -1;
+    }
+
+    /**
+     * What Home shows the instant it's back after Android took memory back (an HDMI input, a big
+     * app): a third-size copy of the photograph on screen (0.4 MB, not 4), kept when the photograph
+     * itself is let go, so Home comes back to its picture rather than black, the photograph fading
+     * in over it once it's decoded again.
+     */
+    private Bitmap standIn;
+    private long standInFadeAt = -1;
+    private static final long STAND_IN_FADE_MS = 280;
+
+    private void keepStandIn() {
+        if (standIn != null || current == null) return;
+        Bitmap src = current.steady != null && !current.steady.isRecycled() ? current.steady : current.sharp;
+        if (src == null || src.isRecycled()) return;
+        try {
+            standIn = Bitmap.createScaledBitmap(src, Math.max(1, src.getWidth() / 3), Math.max(1, src.getHeight() / 3), true);
+        } catch (RuntimeException | OutOfMemoryError e) {
+            standIn = null;
+        }
+        standInFadeAt = -1;
+    }
+
+    private void dropStandIn() {
+        if (standIn != null) standIn.recycle();
+        standIn = null;
+        standInFadeAt = -1;
+    }
+
+    /** The small copy, filling the screen as the photograph does; how much of it still shows (1 = all). */
+    private float drawStandIn(Canvas c) {
+        if (standIn == null) return 0f;
+        float k = Math.max(getWidth() / (float) standIn.getWidth(), getHeight() / (float) standIn.getHeight()) * 1.08f;
+        tmp.setScale(k, k);
+        tmp.postTranslate((getWidth() - standIn.getWidth() * k) / 2f, (getHeight() - standIn.getHeight() * k) / 2f);
+        paint.setAlpha(255);
+        c.drawBitmap(standIn, tmp, paint);
+        if (current == null) return 1f;
+        long now = SystemClock.uptimeMillis();
+        if (standInFadeAt < 0) standInFadeAt = now;
+        float f = (now - standInFadeAt) / (float) STAND_IN_FADE_MS;
+        if (f >= 1f) {
+            dropStandIn();
+            return 0f;
+        }
+        return 1f - f;
     }
 
     /** Releases the background loader, callbacks and bitmaps when the host window is torn down. */
@@ -297,6 +346,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         stop();
         main.removeCallbacksAndMessages(null);
         trim(ComponentCallbacks2.TRIM_MEMORY_COMPLETE);
+        dropStandIn();
         mirrors.clear();
         ticks.clear();
         listener = null;
@@ -395,10 +445,13 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     public void doFrame(long frameTimeNanos) {
         if (!running) return;
         long now = SystemClock.uptimeMillis();
-        boolean fade = incoming != null || intro < 1f || now - defocusStart < defocusMs;
+        boolean fade = incoming != null || intro < 1f || standIn != null || now - defocusStart < defocusMs;
         boolean parallax = now - parallaxStart < PARALLAX_MS;
-        long driftEvery = calm ? 500 : 66;
-        boolean drift = now - lastDrift >= driftEvery;
+        // Light mode: the photograph holds still (see path), so nothing is redrawn while nothing
+        // changes. On a slow TV each redraw of the photograph and its glass took the GPU 15 ms, and
+        // the drift's two a second landed in the middle of remote presses as stutter
+        long driftEvery = 66;
+        boolean drift = !calm && now - lastDrift >= driftEvery;
         boolean busy = fade || parallax || drift;
 
         if (busy) {
@@ -428,6 +481,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         }
         Choreographer ch = Choreographer.getInstance();
         if (fade || parallax || incoming != null) ch.postFrameCallback(this);
+        // still, only the next photograph's time is looked out for
+        else if (calm) ch.postFrameCallbackDelayed(this, 1000);
         else ch.postFrameCallbackDelayed(this, Math.max(0, lastDrift + driftEvery - SystemClock.uptimeMillis() - 4));
     }
 
@@ -500,7 +555,6 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     @Override
     protected void onDraw(Canvas c) {
         float ia = introAlpha();
-        if (current == null || ia < 1f) c.drawColor(Color.BLACK);
         // the rack-focus dimming is a colour filter on the photo itself, not an extra full-screen fill
         int level = Math.round(64 * (1f - 0.30f * defocus));
         if (level != dimLevel) {
@@ -509,8 +563,12 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             dim = level >= 64 ? null : new LightingColorFilter(Color.rgb(g, g, g), 0);
         }
         paint.setColorFilter(dim);
-        drawSlide(c, current, ia);
-        drawSlide(c, incoming, ia);
+        float under = drawStandIn(c);
+        if (under == 0f && (current == null || ia < 1f)) c.drawColor(Color.BLACK);
+        // over the small copy the photograph fades in; with nothing under it, as it always did
+        float over = under > 0f ? ia * (1f - under) : ia;
+        drawSlide(c, current, over);
+        drawSlide(c, incoming, over);
     }
 
     /**
@@ -759,6 +817,12 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         s.x1 = -Math.signum(s.x0) * (0.3f + rnd.nextFloat() * 0.5f);
         s.y0 = rnd.nextFloat() - 0.5f;
         s.y1 = rnd.nextFloat() - 0.5f;
+        // Light mode: framed once and held, so a redraw for any other reason doesn't move it either
+        if (calm) {
+            s.s1 = s.s0;
+            s.x1 = s.x0;
+            s.y1 = s.y0;
+        }
     }
 
     /**

@@ -295,6 +295,16 @@ final class SettingsPanel {
             focusTag("widgets");
             return true;
         }
+        if (page.equals("cats")) {
+            go("home");
+            focusTag("cats");
+            return true;
+        }
+        if (page.equals("cat")) {
+            go("cats");
+            focusTag("cat:" + catId);
+            return true;
+        }
         if (page.equals("sources")) {
             go("wallpaper");
             focusTag("sources");
@@ -354,7 +364,8 @@ final class SettingsPanel {
     private void go(String p) {
         confirmRetire = false;
         boolean back = p.isEmpty() || page.equals("photos") && p.equals("drop")
-                || (page.equals("widgets") || page.equals("keys")) && p.equals("home")
+                || (page.equals("widgets") || page.equals("keys") || page.equals("cats")) && p.equals("home")
+                || page.equals("cat") && p.equals("cats")
                 || page.equals("pair") && p.equals("tv")
                 || (page.equals("genres") || page.equals("tmdbphone") || page.equals("tmdbauth")) && p.equals("picks");
         page = p;
@@ -428,6 +439,19 @@ final class SettingsPanel {
                 build();
                 focusTag("layout");
             });
+            // your apps in category rows (Movies & TV, Music...) or in one grid with folders
+            add(act.getString(R.string.home_layout), Categories.on(act) ? act.getString(R.string.layout_category_rows)
+                    : act.getString(R.string.layout_one_grid), Categories.ROWS, () -> {
+                Prefs.of(act).edit().putBoolean(Categories.ROWS, !Categories.on(act)).putBoolean(Categories.ASKED, true).apply();
+                host.applied("apps");
+                build();
+                focusTag(Categories.ROWS);
+            });
+            if (Categories.on(act)) {
+                int shown = 0;
+                for (Categories.Cat k : Categories.all(act)) if (!k.hidden) shown++;
+                add(act.getString(R.string.categories), act.getResources().getQuantityString(R.plurals.n_rows, shown, shown), "cats", () -> go("cats"));
+            }
             if (tvos) add(act.getString(R.string.sidebar), Prefs.dockSidebar(act) ? act.getString(R.string.slides_in_from_the_left) : act.getString(R.string.hidden_up_for_the_top), "dockside", () -> {
                 Prefs.of(act).edit().putBoolean(Prefs.DOCK_SIDEBAR, !Prefs.dockSidebar(act)).apply();
                 host.applied("layout");
@@ -909,6 +933,21 @@ final class SettingsPanel {
             Ui.fit(title, act.getString(R.string.tmdb_account), Ui.dp(300), 52, 30);
             note.setText(act.getString(R.string.scan_the_code_sign_in));
             if (authCard != null) rows.addView(authCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
+        } else if (page.equals("cats")) {
+            Ui.fit(title, act.getString(R.string.categories), Ui.dp(300), 52, 30);
+            note.setText(act.getString(R.string.categories_note));
+            toggle(act.getString(R.string.dim_other_rows), Categories.DIM, act.getString(R.string.on), act.getString(R.string.off), "apps");
+            section(act.getString(R.string.rows_on_home));
+            for (Categories.Cat k : Categories.all(act)) {
+                final String id = k.id;
+                add(Categories.name(act, k), k.hidden ? act.getString(R.string.hidden) : act.getString(Categories.sortName(k.sort)), "cat:" + id, () -> {
+                    catId = id;
+                    confirmCatDelete = false;
+                    go("cat");
+                });
+            }
+        } else if (page.equals("cat")) {
+            buildCategory();
         } else if (page.equals("tv")) {
             buildTv();
         } else if (page.equals("keys")) {
@@ -1549,8 +1588,10 @@ final class SettingsPanel {
         if (Adb.on(act) && Adb.unguarded(act) && Compat.granted(act, android.Manifest.permission.WRITE_SECURE_SETTINGS)) {
             add(act.getString(R.string.turn_network_debugging_off), confirmAdbOff ? act.getString(R.string.press_ok_again) : act.getString(R.string.closes_the_open_door), "adb:off", this::adbOff);
         }
-        boolean dev = Settings.Global.getInt(act.getContentResolver(), Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 0;
-        add(act.getString(R.string.developer_options), dev ? act.getString(R.string.usb_debugging_is_here) : act.getString(R.string.off_about_press_build_7), "adb:dev", () -> {
+        // Fire TV hides them behind its own name in About, not the build number
+        boolean fire = Trouble.fireTv(act), dev = Adb.devOptionsOn(act);
+        add(act.getString(R.string.developer_options), dev ? act.getString(fire ? R.string.adb_debugging_is_here : R.string.usb_debugging_is_here)
+                : act.getString(fire ? R.string.off_fire_press_name_7 : R.string.off_about_press_build_7), "adb:dev", () -> {
             try {
                 // not switched on yet: the About page, where pressing Build seven times does it
                 host.open(new Intent(dev ? Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS : Settings.ACTION_DEVICE_INFO_SETTINGS), panel);
@@ -1559,9 +1600,67 @@ final class SettingsPanel {
             }
         });
         Intent xray = new Intent().setClassName("com.amazon.ssm", "com.amazon.ssm.ControlPanel");
-        if (xray.resolveActivity(act.getPackageManager()) != null) {
+        if (Compat.resolves(act, xray)) {
             add(act.getString(R.string.system_xray), act.getString(R.string.cpu_memory_and_network_overlay), "adb:xray",
                     () -> host.open(xray.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), panel));
+        }
+    }
+
+    /** The category row open in Settings, and Delete pressed once. */
+    private String catId;
+    private boolean confirmCatDelete;
+
+    /** One category row: shown or not, its order, its place on home; your own can be deleted. */
+    private void buildCategory() {
+        Categories.Cat k = Categories.find(Categories.all(act), catId);
+        if (k == null) {
+            Ui.fit(title, act.getString(R.string.categories), Ui.dp(300), 52, 30);
+            note.setText("");
+            return;
+        }
+        final String id = k.id;
+        Ui.fit(title, Categories.name(act, k), Ui.dp(300), 52, 30);
+        note.setText(act.getString(k.id.equals(Categories.ALL) ? R.string.category_all_note
+                : k.auto != null ? R.string.category_auto_note : R.string.category_own_note));
+        Runnable changed = () -> {
+            host.applied("apps");
+            build();
+        };
+        add(act.getString(R.string.show_on_home), k.hidden ? act.getString(R.string.off) : act.getString(R.string.on), "c:show", () -> {
+            Categories.setHidden(act, id, !k.hidden);
+            changed.run();
+            focusTag("c:show");
+        });
+        if (!k.id.equals(Categories.ALL)) {
+            add(act.getString(R.string.sort_by), act.getString(Categories.sortName(k.sort)), "c:sort", () -> {
+                Categories.nextSort(act, id);
+                changed.run();
+                focusTag("c:sort");
+            });
+        }
+        add(act.getString(R.string.move_up), "", "c:up", () -> {
+            Categories.move(act, id, -1);
+            changed.run();
+            focusTag("c:up");
+        });
+        add(act.getString(R.string.move_down), "", "c:down", () -> {
+            Categories.move(act, id, 1);
+            changed.run();
+            focusTag("c:down");
+        });
+        if (!Categories.builtIn(k)) {
+            add(act.getString(R.string.delete_category), confirmCatDelete ? act.getString(R.string.press_ok_again) : "", "c:del", () -> {
+                if (!confirmCatDelete) {
+                    confirmCatDelete = true;
+                    build();
+                    focusTag("c:del");
+                    return;
+                }
+                confirmCatDelete = false;
+                Categories.delete(act, id);
+                host.applied("apps");
+                go("cats");
+            });
         }
     }
 
@@ -1663,13 +1762,13 @@ final class SettingsPanel {
             case Adb.OPEN_DOOR:
                 return act.getString(R.string.careful_this_tv_let_aura);
             case Adb.OFF:
-                return act.getString(R.string.debugging_is_off_in_developer);
+                return act.getString(Trouble.fireTv(act) ? R.string.fire_debugging_no_answer : R.string.debugging_is_off_in_developer);
             case Adb.DENIED:
                 return act.getString(R.string.android_didnt_let_aura_in);
             case Adb.FAILED:
                 return act.getString(R.string.couldnt_reach_the_tvs_debugging_2);
             default:
-                return (HomeRole.stubborn(act) && !HomeRole.held(act) ? act.getString(R.string.keeps_the_home_button, HomeRole.other(act)) + " " : "")
+                return (HomeRole.keepsHome(act) && !HomeRole.held(act) ? act.getString(R.string.keeps_the_home_button, HomeRole.otherAtStart(act)) + " " : "")
                         + act.getString(R.string.aura_switches_on_its_extras);
         }
     }

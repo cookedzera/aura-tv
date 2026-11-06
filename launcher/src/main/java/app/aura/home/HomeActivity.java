@@ -431,7 +431,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (HomeRole.held(this)) {
             hud(R.drawable.ic_check, getString(R.string.home_now_opens_aura));
         } else if (result == RESULT_OK) {
-            // Android said yes, yet Home still opens another launcher: the Home button service takes it from here
+            // Android said yes, yet Home still opens another launcher: the Home button service takes it
+            // from here. Noted first, or make() would ask again, get another yes, and go round forever.
+            HomeRole.choiceIgnored(this);
             String m = HomeRole.make(this);
             if (m != null) hud(R.drawable.ic_info, m);
         } else {
@@ -2349,15 +2351,18 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      * and only moved: hiding one app or renaming a folder no longer repaints every tile.
      */
     private void populate() {
-        String keep = gridAt < cells.size() ? cells.get(gridAt).tag : null;
+        String keep = gridAt < cells.size() ? cells.get(gridAt).key() : null;
         // on the first fill the window may already have parked focus on the rail; the grid takes it
         boolean firstFill = cells.isEmpty(), hadFocus = zone == GRID && getCurrentFocus() instanceof Card;
         stopPreview();
         Map<String, Cell> old = new java.util.HashMap<>();
-        for (Cell c : cells) old.put(c.tag, c);
+        for (Cell c : cells) old.put(c.key(), c);
         // a new app size: every tile is painted again at its new size, none kept
         if (sizeGrid(Prefs.gridCols(this))) for (Cell c : old.values()) c.sig = null;
-        paged = Prefs.on(this, Prefs.GRID_PAGES);
+        // category rows, in either style: in the tvOS style the first row is the dock
+        rows = Categories.on(this);
+        rowsDim = rows && Categories.dim(this);
+        paged = !rows && Prefs.on(this, Prefs.GRID_PAGES);
         if (!paged && pageShift != 0f) {
             // pages switched off: the grid lies flat again, from the first column
             if (pageAnim != null) pageAnim.cancel();
@@ -2419,46 +2424,18 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         for (AppRepo.App a : apps) if (!foldered.contains(a.pkg) && !hidden.contains(a.pkg) && placed.add(a.pkg)) entries.add(a);
         for (Folders.Folder f : folders.values()) if (!folderApps(f).isEmpty() && placed.add(f.tag())) entries.add(f);
         List<AppRepo.App> sorted = new ArrayList<>();
-        for (Object entry : entries) {
-            if (entry instanceof Folders.Folder) {
-                final Folders.Folder f = (Folders.Folder) entry;
-                List<AppRepo.App> inside = folderApps(f);
-                StringBuilder sig = new StringBuilder("folder|").append(style).append('|').append(dock).append('|').append(f.name);
-                for (AppRepo.App a : inside) sig.append('|').append(System.identityHashCode(a));
-                Cell cell = reuse(old, f.tag(), sig.toString());
-                if (cell == null) {
-                    cell = new Cell(this, Tiles.folder(inside, !glassTiles), 0xFF9AA6BA, f.name, f.tag(), TILE_W, TILE_H);
-                    cell.sig = sig.toString();
-                    if (glassTiles) cell.card.glass = backdrop;
-                    cell.card.tvos = tvosTiles;
+        int inputs = cells.size();
+        if (rows) {
+            buildRows(old, entries, hidden, inputs);
+        } else {
+            for (Object entry : entries) {
+                if (entry instanceof Folders.Folder) {
+                    cells.add(folderCell(old, (Folders.Folder) entry, null));
+                } else {
+                    sorted.add((AppRepo.App) entry);
+                    cells.add(appCell(old, (AppRepo.App) entry, null));
                 }
-                cell.setNameMode(nameMode, false);
-                cell.card.sway = !calm;
-                cell.card.onClick = () -> openFolder(f.id);
-                cell.card.onLongClick = this::openMenu;
-                cells.add(cell);
-                continue;
             }
-            final AppRepo.App a = (AppRepo.App) entry;
-            sorted.add(a);
-            // glass panes tinted in the app's colour, its colour vivid, midnight, or the original
-            // banners; your own picture for it in any of them
-            String sig = "app|" + style + "|" + dock + "|" + System.identityHashCode(a) + "|" + a.label;
-            Cell cell = reuse(old, a.pkg, sig);
-            if (cell == null) {
-                cell = new Cell(this, artFor(a), a.color, a.label, a.pkg, TILE_W, TILE_H);
-                cell.sig = sig;
-                if (glassTiles && a.art == null) cell.card.glass = backdrop;
-                cell.card.tvos = tvosTiles;
-            }
-            cell.setNameMode(nameMode, false);
-            cell.card.sway = !calm;
-            // installed since Aura came and not opened yet: a small dot
-            cell.card.badge = a.fresh;
-            final Card card = cell.card;
-            cell.card.onClick = () -> launch(a.launch, card, a.label);
-            cell.card.onLongClick = this::openMenu;
-            cells.add(cell);
         }
         // tiles nothing kept: gone from the page
         for (Cell c : old.values()) page.removeView(c);
@@ -2470,12 +2447,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (!c.card.isFocused()) c.card.setElevation(0f);
             c.setTranslationX(cellX(i));
             c.setTranslationY(cellY(i));
+            // on category rows, tiles slid past the left edge are out of sight; everywhere else, all are
+            c.setAlpha(rows && i < colIdx.length ? rowAlpha(i) : 1f);
             if (c.getParent() == null) page.addView(c, new FrameLayout.LayoutParams(Ui.dp(TILE_W), WRAP));
-            if (c.tag.equals(keep)) at = i;
+            if (c.key().equals(keep)) at = i;
         }
         gridLabel.setText(getString(R.string.your_apps_n, sorted.size() + foldered.size()));
-        int rows = (cells.size() + COLS - 1) / COLS;
-        page.getLayoutParams().height = Ui.dp(gridY() + (paged ? Math.min(2, rows) : rows) * ROW_H + 40);
+        if (!dock) gridLabel.setVisibility(rows ? View.GONE : View.VISIBLE);
+        placeRowLabels();
+        int lines = rows ? rowInfo.size() : (cells.size() + COLS - 1) / COLS;
+        page.getLayoutParams().height = Ui.dp(gridY() + (paged ? Math.min(2, lines) * ROW_H : lines * rowH()) + 40);
         placeDock();
         int pages = paged ? (cells.size() + perPage() - 1) / perPage() : 1;
         pageDots.setCount(dock ? 0 : pages);
@@ -2491,8 +2472,270 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             appsReady = true;
             appsAt = SystemClock.uptimeMillis();
             progressSplash();
+            // updating from 7.7: home is in category rows now, said once, with the way back to one grid
+            if (rows && !Prefs.of(this).getBoolean(Categories.ASKED, false)) {
+                Prefs.of(this).edit().putBoolean(Categories.ASKED, true).apply();
+                handler.postDelayed(() -> {
+                    if (resumed && !settings.isOpen()) hud(R.drawable.ic_apps, getString(R.string.rows_new_hint));
+                }, 4000);
+            }
         }
         refreshWidgets(true);
+    }
+
+    /** A folder's tile; {@code row} its category row, or null on the grid. */
+    private Cell folderCell(Map<String, Cell> old, Folders.Folder f, String row) {
+        String style = Prefs.tileStyle(this);
+        boolean glassTiles = style.equals("glass");
+        List<AppRepo.App> inside = folderApps(f);
+        StringBuilder sig = new StringBuilder("folder|").append(style).append('|').append(dock).append('|').append(f.name);
+        for (AppRepo.App a : inside) sig.append('|').append(System.identityHashCode(a));
+        Cell cell = reuse(old, row == null ? f.tag() : row + "|" + f.tag(), sig.toString());
+        if (cell == null) {
+            cell = new Cell(this, Tiles.folder(inside, !glassTiles), 0xFF9AA6BA, f.name, f.tag(), TILE_W, TILE_H);
+            cell.sig = sig.toString();
+            if (glassTiles) cell.card.glass = backdrop;
+            cell.card.tvos = style.equals("tvos") || dock;
+        }
+        cell.row = row;
+        cell.setNameMode(Prefs.nameMode(this), false);
+        cell.card.sway = !Perf.light(this);
+        cell.card.onClick = () -> openFolder(f.id);
+        cell.card.onLongClick = this::openMenu;
+        return cell;
+    }
+
+    /** An app's tile; {@code row} its category row, or null on the grid. */
+    private Cell appCell(Map<String, Cell> old, AppRepo.App a, String row) {
+        String style = Prefs.tileStyle(this);
+        // glass panes tinted in the app's colour, its colour vivid, midnight, or the original
+        // banners; your own picture for it in any of them
+        String sig = "app|" + style + "|" + dock + "|" + System.identityHashCode(a) + "|" + a.label;
+        Cell cell = reuse(old, row == null ? a.pkg : row + "|" + a.pkg, sig);
+        if (cell == null) {
+            cell = new Cell(this, artFor(a), a.color, a.label, a.pkg, TILE_W, TILE_H);
+            cell.sig = sig;
+            if (style.equals("glass") && a.art == null) cell.card.glass = backdrop;
+            cell.card.tvos = style.equals("tvos") || dock;
+        }
+        cell.row = row;
+        cell.setNameMode(Prefs.nameMode(this), false);
+        cell.card.sway = !Perf.light(this);
+        // installed since Aura came and not opened yet: a small dot
+        cell.card.badge = a.fresh;
+        final Card card = cell.card;
+        cell.card.onClick = () -> launch(a.launch, card, a.label);
+        cell.card.onLongClick = this::openMenu;
+        return cell;
+    }
+
+    // ---- category rows ------------------------------------------------------------------------
+
+    /**
+     * Category rows ({@link Categories}): the inputs, then each row with something in it, All apps
+     * last. Each row slides on its own when focus goes past its edge; Up and Down keep the same
+     * place on screen. The tiles are the grid's, so Hold OK, Top Shelf and opening work the same.
+     */
+    private boolean rows, rowsDim;
+    private int[] rowIdx = new int[0], colIdx = new int[0];
+    private final List<RowInfo> rowInfo = new ArrayList<>();
+    private final List<TextView> rowLabels = new ArrayList<>();
+    private static final int ROW_LABEL = 28;
+
+    private static final class RowInfo {
+        final String id, title;
+        final int start, count;
+        /** The first column on screen, and where the slide is now (columns, animated). */
+        int first;
+        float shift;
+        ValueAnimator anim;
+
+        RowInfo(String id, String title, int start, int count) {
+            this.id = id;
+            this.title = title;
+            this.start = start;
+            this.count = count;
+        }
+    }
+
+    private int rowH() {
+        return rows ? ROW_H + ROW_LABEL : ROW_H;
+    }
+
+    private void buildRows(Map<String, Cell> old, List<Object> entries, List<String> hidden, int inputs) {
+        Map<String, Integer> firstBefore = new java.util.HashMap<>();
+        for (RowInfo r : rowInfo) firstBefore.put(r.id, r.first);
+        rowInfo.clear();
+        List<Integer> ri = new ArrayList<>(), ci = new ArrayList<>();
+        // the Aura style gives the inputs a row of their own; in the tvOS style they lead the dock, as on the grid
+        int lead = dock ? inputs : 0;
+        if (inputs > 0 && !dock) {
+            rowInfo.add(new RowInfo("inputs", getString(R.string.cat_inputs), 0, inputs));
+            for (int i = 0; i < inputs; i++) {
+                ri.add(0);
+                ci.add(i);
+            }
+        }
+        List<String> order = AppRepo.order(prefs), installed = new ArrayList<>();
+        for (AppRepo.App a : apps) if (!hidden.contains(a.pkg)) installed.add(a.pkg);
+        for (Categories.Cat k : Categories.all(this)) {
+            if (k.hidden) continue;
+            int start = cells.size();
+            if (k.id.equals(Categories.ALL)) {
+                for (Object e : entries) {
+                    cells.add(e instanceof Folders.Folder ? folderCell(old, (Folders.Folder) e, k.id) : appCell(old, (AppRepo.App) e, k.id));
+                }
+            } else {
+                for (String pkg : Categories.members(this, k, order, installed)) {
+                    AppRepo.App a = find(pkg);
+                    if (a != null) cells.add(appCell(old, a, k.id));
+                }
+            }
+            int n = cells.size() - start;
+            // a row with nothing in it isn't shown
+            if (n == 0) continue;
+            if (lead > 0) {
+                // the dock: the inputs first, then this row's apps
+                start = 0;
+                n += lead;
+                lead = 0;
+            }
+            RowInfo r = new RowInfo(k.id, Categories.name(this, k), start, n);
+            Integer was = firstBefore.get(k.id);
+            r.first = was == null ? 0 : Math.max(0, Math.min(was, Math.max(0, n - COLS)));
+            r.shift = r.first;
+            for (int j = 0; j < n; j++) {
+                ri.add(rowInfo.size());
+                ci.add(j);
+            }
+            rowInfo.add(r);
+        }
+        if (lead > 0) {
+            // no apps at all: the inputs alone make the dock
+            rowInfo.add(new RowInfo("inputs", getString(R.string.cat_inputs), 0, lead));
+            for (int i = 0; i < lead; i++) {
+                ri.add(0);
+                ci.add(i);
+            }
+        }
+        rowIdx = new int[ri.size()];
+        colIdx = new int[ci.size()];
+        for (int i = 0; i < ri.size(); i++) {
+            rowIdx[i] = ri.get(i);
+            colIdx[i] = ci.get(i);
+        }
+    }
+
+    /** A label above each row, where the grid's "Your apps" sits for the first. */
+    private void placeRowLabels() {
+        int n = rows ? rowInfo.size() : 0;
+        while (rowLabels.size() < n) {
+            TextView t = Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.26f);
+            page.addView(t, frame(WRAP, WRAP, Gravity.TOP | Gravity.START, 0, 0, 0, 0));
+            rowLabels.add(t);
+        }
+        for (int i = 0; i < rowLabels.size(); i++) {
+            TextView t = rowLabels.get(i);
+            if (i >= n) {
+                t.setVisibility(View.GONE);
+                continue;
+            }
+            RowInfo r = rowInfo.get(i);
+            // the tvOS dock wears no label, as on Apple TV
+            t.setVisibility(dock && i == 0 ? View.GONE : View.VISIBLE);
+            t.setText(r.id.equals(Categories.ALL) ? getString(R.string.your_apps_n, r.count) : r.title + "  ·  " + r.count);
+            t.setTranslationX(Ui.dpf(pageX()));
+            t.setTranslationY(Ui.dpf(gridY() + i * rowH() - 24));
+        }
+        dimRows(zone == GRID && gridAt < rowIdx.length ? rowIdx[gridAt] : -1);
+    }
+
+    /** Rows other than the one you're on recede a little (Settings, Home screen); all lit off the rows. */
+    private void dimRows(int on) {
+        if (!rows) return;
+        for (int i = 0; i < cells.size() && i < rowIdx.length; i++) {
+            cells.get(i).card.setDim(rowsDim && on >= 0 && rowIdx[i] != on ? 0.42f : 0f);
+        }
+        for (int i = 0; i < rowLabels.size() && i < rowInfo.size(); i++) {
+            rowLabels.get(i).setAlpha(rowsDim && on >= 0 && i != on ? 0.55f : 1f);
+        }
+    }
+
+    /** Slides a row so column {@code col} is on screen; those slid past the left edge fade out. */
+    private void revealInRow(int i) {
+        RowInfo r = rowInfo.get(rowIdx[i]);
+        int col = colIdx[i], first = r.first;
+        if (col < first) first = col;
+        else if (col >= first + COLS) first = col - COLS + 1;
+        if (first == r.first && r.anim == null) return;
+        r.first = first;
+        if (r.anim != null) r.anim.cancel();
+        final RowInfo row = r;
+        r.anim = ValueAnimator.ofFloat(r.shift, first);
+        r.anim.setDuration(420);
+        r.anim.setInterpolator(Ui.EMPHASIZED);
+        r.anim.addUpdateListener(a -> {
+            row.shift = (float) a.getAnimatedValue();
+            for (int k = row.start; k < row.start + row.count && k < cells.size(); k++) {
+                Cell c = cells.get(k);
+                c.setTranslationX(cellX(k));
+                c.setAlpha(rowAlpha(k));
+                if (c.card.glass != null) c.card.invalidate();
+            }
+            if (a.getAnimatedFraction() >= 1f) row.anim = null;
+        });
+        r.anim.start();
+    }
+
+    /**
+     * How much of tile {@code k} shows as its row slides: those past the left edge fade out; in the
+     * tvOS style those past the dock's right edge too, as the glass ends there.
+     */
+    private float rowAlpha(int k) {
+        float shift = rowInfo.get(rowIdx[k]).shift;
+        float a = Math.min(1f, 1f - (shift - colIdx[k]));
+        if (dock) a = Math.min(a, 1f - (colIdx[k] - (shift + COLS - 1)));
+        return Math.max(0f, Math.min(1f, a));
+    }
+
+    /** Up or Down from {@code slot} (columns from the row's left edge on screen) to row {@code to}. */
+    private int rowTarget(int to, int slot) {
+        RowInfo t = rowInfo.get(to);
+        return t.start + Math.max(0, Math.min(t.count - 1, t.first + slot));
+    }
+
+    private void rowsKey(int code) {
+        int r = rowIdx[gridAt], col = colIdx[gridAt];
+        RowInfo row = rowInfo.get(r);
+        int slot = col - row.first;
+        switch (code) {
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                if (col > 0) focusGrid(gridAt - 1);
+                else if (!held) enterSide();
+                break;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                if (col < row.count - 1) focusGrid(gridAt + 1);
+                else if (!held) bounce(false);
+                break;
+            case KeyEvent.KEYCODE_DPAD_UP:
+                if (r > 0) focusGrid(rowTarget(r - 1, slot));
+                else if (!held && shelf.shownFor() != null && shelf.shownFor().equals(cells.get(gridAt).tag) && !shelf.cards.isEmpty()) {
+                    shelf.cards.get(Math.min(shelf.cards.size() - 1, Math.max(0, slot) * shelf.cards.size() / COLS)).requestFocus();
+                } else if (!held && !widgets.isEmpty()) {
+                    lastCol = Math.max(0, Math.min(COLS - 1, slot));
+                    focusWidget(widgetForCol(lastCol));
+                } else if (!held && dock) {
+                    // nothing above the dock but the photograph: up to Control Center, top right
+                    topCc.requestFocus();
+                } else if (!held) {
+                    setPhoto(true);
+                }
+                break;
+            default:
+                if (r < rowInfo.size() - 1) focusGrid(rowTarget(r + 1, slot));
+                else if (!held) bounce(true);
+                break;
+        }
     }
 
     /** The tile for {@code tag} from before, taken out of {@code old}, if it was painted from {@code sig}. */
@@ -2539,6 +2782,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     private int rowOf(int i) {
+        if (rows) return i < rowIdx.length ? rowIdx[i] : 0;
         return paged ? (i % perPage()) / COLS : i / COLS;
     }
 
@@ -2551,15 +2795,21 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     private float cellX(int i) {
+        if (rows && i < colIdx.length) return Ui.dpf(pageX() + (colIdx[i] - rowInfo.get(rowIdx[i]).shift) * (TILE_W + GAP));
         return Ui.dpf(pageX() + pageOf(i) * pageW() + (i % COLS) * (TILE_W + GAP) - pageShift);
     }
 
     private float cellY(int i) {
-        return Ui.dpf(gridY() + rowOf(i) * ROW_H);
+        return Ui.dpf(gridY() + rowOf(i) * rowH());
     }
 
     /** Brings tile {@code i} into view: its page slides in, or the page scrolls to its row. */
     private void reveal(int i) {
+        if (rows && i < rowIdx.length) {
+            revealInRow(i);
+            scrollTo(scrollFor(rowIdx[i]));
+            return;
+        }
         if (!paged) {
             scrollTo(scrollFor(rowOf(i)));
             return;
@@ -2676,7 +2926,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         String action = intent.getAction();
         if (action != null && action.startsWith("android.settings.")) {
             HomeKeys.letTvHomePass();
-            intent = fireSettings(intent);
+            intent = fireSettings(this, intent);
         }
         try {
             Bundle opts = ActivityOptions.makeScaleUpAnimation(from, 0, 0, from.getWidth(), from.getHeight()).toBundle();
@@ -2684,6 +2934,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             String pkg = intent.getPackage() != null ? intent.getPackage()
                     : intent.getComponent() != null ? intent.getComponent().getPackageName() : null;
             Habits.opened(getApplicationContext(), pkg);
+            Categories.launched(getApplicationContext(), pkg);
             seen(pkg);
             if (pkg != null && recentCache != null) {
                 // first in the switcher at once, before the history catches up
@@ -3145,15 +3396,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      * Amazon's home (or with nothing at all), and keeps its real pages behind a permission only its
      * own apps hold. Its launcher does open Settings itself to any app, by name: there it goes.
      */
-    private Intent fireSettings(Intent wanted) {
-        if (!Trouble.fireTv(this)) return wanted;
-        android.content.pm.ResolveInfo ri = getPackageManager().resolveActivity(wanted, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+    static Intent fireSettings(Context c, Intent wanted) {
+        if (!Trouble.fireTv(c)) return wanted;
+        android.content.pm.ResolveInfo ri = c.getPackageManager().resolveActivity(wanted, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
         String name = ri != null && ri.activityInfo != null ? ri.activityInfo.name : null;
         if (name != null && !name.contains("Dummy") && !name.contains("CTS")) return wanted;
         Intent fire = new Intent("amazon.intent.action.MAINSETTINGS")
                 .setClassName("com.amazon.tv.launcher", "com.amazon.tv.launcher.ui.MainSettingsActivity")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        return fire.resolveActivity(getPackageManager()) != null ? fire : wanted;
+        return Compat.resolves(c, fire) ? fire : wanted;
     }
 
     /** Free space where apps keep their data, or -1 when the TV won't say. Off the main thread. */
@@ -3249,12 +3500,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      */
     private float scrollFor(int row) {
         if (row == 0 || paged) return 0;
-        int rows = (cells.size() + COLS - 1) / COLS;
+        int lines = this.rows ? rowInfo.size() : (cells.size() + COLS - 1) / COLS;
         float screen = root.getHeight() > 0 ? root.getHeight() / Ui.density : 540f;
-        float end = gridY() + (rows - 1) * ROW_H + TILE_H + 44 - screen; // last row and its name in view
+        float end = gridY() + (lines - 1) * rowH() + TILE_H + 44 - screen; // last row and its name in view
         // when everything nearly fits, stay put: a nudge of a few dp isn't worth leaving the widgets for
         if (end < 28) return 0;
-        return Math.max(0, Math.min(gridY() + row * ROW_H - FOCUS_LINE, end));
+        return Math.max(0, Math.min(gridY() + row * rowH() - FOCUS_LINE, end));
     }
 
     private ValueAnimator bounceAnim;
@@ -3475,6 +3726,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (i >= 0) {
             hideShelf();
             zone = contentZone = WIDGETS;
+            dimRows(-1);
             widgetAt = i;
             glide(Ui.dpf(pageX() + widgetX[i] + widgetW[i] / 2f), Ui.dpf((dock ? gridY() - 18 - 22 - WIDGET_H : WIDGET_Y) + WIDGET_H / 2f), glowOf(widgets.get(i)));
             return;
@@ -3483,6 +3735,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (cells.get(i).card == n) {
                 zone = contentZone = GRID;
                 gridAt = i;
+                if (rows && i < rowIdx.length) dimRows(rowIdx[i]);
                 glideToCell();
                 shelfFor(i);
                 return;
@@ -3968,6 +4221,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     focusWidget(widgetAt);
                     return true;
                 }
+                if (rows && gridAt < rowIdx.length) {
+                    rowsKey(code);
+                    return true;
+                }
                 int col = gridAt % COLS, row = rowOf(gridAt), page = pageOf(gridAt), n = cells.size();
                 switch (code) {
                     case KeyEvent.KEYCODE_DPAD_LEFT:
@@ -4039,10 +4296,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 moveEditing(1);
                 return swallow(code);
             case KeyEvent.KEYCODE_DPAD_UP:
-                if (!paged || rowOf(gridAt) > 0) moveEditing(-COLS);
+                // on category rows an app moves along its row; Hold OK, Add to puts it in another
+                if (!rows && (!paged || rowOf(gridAt) > 0)) moveEditing(-COLS);
                 return swallow(code);
             case KeyEvent.KEYCODE_DPAD_DOWN:
-                if (!paged || rowOf(gridAt) == 0) moveEditing(COLS);
+                if (!rows && (!paged || rowOf(gridAt) == 0)) moveEditing(COLS);
                 return swallow(code);
             case KeyEvent.KEYCODE_BACK:
             case KeyEvent.KEYCODE_DPAD_CENTER:
@@ -4569,6 +4827,34 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             closeMenu(card);
             chooseFolder(pkg, label, card);
         }));
+        items.add(new AppMenu.Item(R.drawable.ic_add, getString(R.string.add_to_category), () -> {
+            closeMenu(card);
+            chooseCategory(pkg, label, card);
+        }));
+        final String inRow = rows ? c.row : null;
+        if (inRow != null && !inRow.equals(Categories.ALL)) {
+            final Categories.Cat cat = Categories.find(Categories.all(this), inRow);
+            if (cat != null) {
+                final String rowName = Categories.name(this, cat);
+                items.add(new AppMenu.Item(R.drawable.ic_settings, getString(R.string.rename_row, rowName), () -> {
+                    closeMenu(card);
+                    askTag = pkg;
+                    home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+                    ask.show(getString(R.string.rename_name, rowName.toUpperCase(Locale.getDefault())), rowName,
+                            getString(R.string.type_a_name_then_ok), Folders.suggestions(this), name -> {
+                                Categories.rename(this, inRow, name);
+                                afterAsk();
+                                hud(R.drawable.ic_check, getString(R.string.renamed_to, name));
+                            });
+                }));
+                items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.remove_from_row, rowName), () -> {
+                    closeMenu(card);
+                    Categories.removeFrom(this, inRow, pkg);
+                    populate();
+                    hud(R.drawable.ic_check, getString(R.string.name_left_row, label, rowName));
+                }));
+            }
+        }
         // a kids' profile can move apps and make folders, nothing more
         if (!Profiles.kids(this)) {
             items.add(new AppMenu.Item(R.drawable.ic_picture, getString(R.string.change_its_picture), () -> {
@@ -4696,6 +4982,35 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     /** Which folder the app joins: one of yours, or a new one. */
+    /** Which category row an app goes in, or a new one, named straight away. */
+    private void chooseCategory(String pkg, String label, Card card) {
+        List<AppMenu.Item> items = new ArrayList<>();
+        for (Categories.Cat k : Categories.all(this)) {
+            if (k.id.equals(Categories.ALL)) continue;
+            final String id = k.id, name = Categories.name(this, k);
+            items.add(new AppMenu.Item(R.drawable.ic_apps, name, () -> {
+                closeMenu(card);
+                Categories.addTo(this, id, pkg);
+                populate();
+                hud(R.drawable.ic_check, getString(R.string.name_is_in_row, label, name));
+            }));
+        }
+        items.add(new AppMenu.Item(R.drawable.ic_add, getString(R.string.cat_new), () -> {
+            closeMenu(card);
+            askTag = pkg;
+            home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+            ask.show(getString(R.string.name_your_new_category), "", getString(R.string.type_a_name_then_ok), Folders.suggestions(this), name -> {
+                String id = Categories.create(this, name);
+                Categories.addTo(this, id, pkg);
+                afterAsk();
+                hud(R.drawable.ic_check, getString(R.string.name_is_in_row, label, name));
+            });
+        }));
+        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        menuBack = card;
+        menu.show(card, getString(R.string.add_name_to, label), items);
+    }
+
     private void chooseFolder(String pkg, String label, Card card) {
         List<AppMenu.Item> items = new ArrayList<>();
         for (Folders.Folder f : Folders.all(this).values()) {
@@ -4896,8 +5211,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (wiggle != null) wiggle.cancel();
         for (Cell c : cells) c.card.setRotation(0f);
         List<String> order = new ArrayList<>();
-        for (Cell c : cells) if (!c.tag.startsWith("input:")) order.add(c.tag);
-        AppRepo.saveDock(prefs, order);
+        String row = rows && gridAt < cells.size() ? cells.get(gridAt).row : null;
+        for (Cell c : cells) if (!c.tag.startsWith("input:") && (row == null || row.equals(c.row))) order.add(c.tag);
+        if (row == null || row.equals(Categories.ALL)) AppRepo.saveDock(prefs, order);
+        else Categories.reorder(this, row, order);
         hud(R.drawable.ic_check, getString(R.string.your_apps_are_arranged));
         wake();
     }
@@ -4906,6 +5223,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         int i = gridAt, j = i + d;
         // live inputs always open the grid
         if (j < live.size() || j >= cells.size()) return;
+        // on category rows, only along its own row
+        if (rows && (j >= rowIdx.length || rowIdx[j] != rowIdx[i])) return;
         cells.add(j, cells.remove(i));
         boolean cross = paged && pageOf(j) != gridPage;
         for (int k = Math.min(i, j); k <= Math.max(i, j); k++) {

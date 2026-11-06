@@ -13,6 +13,13 @@ final class Cell extends LinearLayout {
     final String tag;
     /** What the tile was painted from: one painted from the same can be kept as the grid changes. */
     String sig;
+    /** The category row it's in ({@link Categories}), or null on the grid: an app can be in two rows. */
+    String row;
+
+    /** Its key among home's tiles: the app (or folder, or input), and on category rows its row too. */
+    String key() {
+        return row == null ? tag : row + "|" + tag;
+    }
 
     Cell(Context c, Tiles.Painter painter, int color, String name, String tag, int wDp, int hDp) {
         super(c);

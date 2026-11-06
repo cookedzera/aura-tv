@@ -27,6 +27,8 @@ import java.util.Set;
  */
 final class HomeRole {
     static final int REQUEST = 41;
+    /** Android once answered yes and Home still didn't open Aura (see ignoresChoice). */
+    private static final String IGNORED = "home_choice_ignored";
     /** Launchers that keep Home whatever the role says: Google TV's, then Fire TV's. */
     private static final String[] STUBBORN = {
             "com.google.android.apps.tv.launcherx",
@@ -63,6 +65,12 @@ final class HomeRole {
             }
         }
         return null;
+    }
+
+    /** The same, opening a sentence ("The TV's own home ..."). */
+    static String otherAtStart(Context c) {
+        String s = other(c);
+        return s.isEmpty() ? s : s.substring(0, 1).toUpperCase(Locale.getDefault()) + s.substring(1);
     }
 
     /** What Home opens instead of Aura, by name: "Google TV", "Fire TV" or the TV's own. */
@@ -124,7 +132,7 @@ final class HomeRole {
             HomeKeys.setTakeover(a, true);
             return a.getString(R.string.home_now_opens_aura);
         }
-        if (stubborn(a) || !askable(a)) {
+        if (keepsHome(a) || !askable(a)) {
             HomeKeys.setTakeover(a, true);
             if (HomeKeys.set(a, true)) return a.getString(R.string.home_now_opens_aura);
             // the message first, then Android's page, where it's switched on by hand; Google TV's
@@ -150,9 +158,38 @@ final class HomeRole {
         return rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME);
     }
 
+    /**
+     * Android already counts Aura as the home app, yet Home opens another launcher (an Nvidia Shield):
+     * asking again only gets an instant yes with nothing on screen, and asking on that yes went round
+     * and round, the row flickering and the remote crawling until Home was pressed a few times.
+     * Remembered once seen, as a TV that said yes and still didn't change is the same TV next time.
+     */
+    static boolean ignoresChoice(Context c) {
+        if (held(c)) return false;
+        if (Prefs.device(c).getBoolean(IGNORED, false)) return true;
+        if (Build.VERSION.SDK_INT < 29) return false;
+        try {
+            android.app.role.RoleManager rm = c.getSystemService(android.app.role.RoleManager.class);
+            return rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME)
+                    && rm.isRoleHeld(android.app.role.RoleManager.ROLE_HOME);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** Home stays with another launcher whatever is chosen: only the Home button service gets past it. */
+    static boolean keepsHome(Context c) {
+        return stubborn(c) || ignoresChoice(c);
+    }
+
+    /** Android answered yes and Home still doesn't open Aura: from now on the Home button service does it. */
+    static void choiceIgnored(Context c) {
+        Prefs.device(c).edit().putBoolean(IGNORED, true).apply();
+    }
+
     /** Android won't hand Home over and Aura can't take it yet: the welcome walks through setting it up. */
     static boolean needsSetup(Context c) {
-        return !held(c) && (stubborn(c) || !askable(c)) && !(HomeKeys.on(c) && HomeKeys.live);
+        return !held(c) && (keepsHome(c) || !askable(c)) && !(HomeKeys.on(c) && HomeKeys.live);
     }
 
     /**
