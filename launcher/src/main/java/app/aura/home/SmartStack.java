@@ -67,6 +67,8 @@ final class SmartStack extends FrameLayout {
         String note;
         /** What OK does when it isn't opening something (a sheet in Control Center), or null. */
         Runnable action;
+        /** {@code art} was painted before the app's logo was lifted: it's painted again once it is, and never carried over. */
+        boolean partial;
     }
 
     interface Listener {
@@ -129,7 +131,7 @@ final class SmartStack extends FrameLayout {
             for (int i = 0; i < next.size(); i++) {
                 Slide old = slides.get(i), n = next.get(i);
                 // an app card's picture and every card's tone are worked out once; keep them
-                if (n.art == null && n.mark != null) n.art = old.art;
+                if (n.art == null && n.mark != null && !old.partial) n.art = old.art;
                 if (n.tone == 0) n.tone = old.tone;
                 if (n.blur == null && n.art == old.art) n.blur = old.blur;
             }
@@ -157,10 +159,33 @@ final class SmartStack extends FrameLayout {
         return slides.isEmpty() ? null : slides.get(Compat.mod(at, slides.size()));
     }
 
-    /** While focused (or covered) the stack holds still. */
+    /**
+     * While focused, covered or resting (home racked in Light mode) the stack holds still: no turn,
+     * no clock left waking it, and a flip under way goes straight to its end.
+     */
     void hold(boolean h) {
+        boolean was = held;
         held = h;
         dots.setLit(h);
+        if (h == was) return;
+        if (h) {
+            handler.removeCallbacks(advance);
+            settle();
+        } else if (running) {
+            schedule();
+        }
+    }
+
+    /** Both pages at rest, the one on show in front, and the pill on its dot. */
+    private void settle() {
+        for (int i = 0; i < pages.length; i++) {
+            Page pg = pages[i];
+            pg.animate().cancel();
+            pg.art.animate().cancel();
+            pg.settle();
+            pg.setAlpha(i == front ? 1f : 0f);
+        }
+        dots.settle();
     }
 
     /** Up on the remote: the next card now, and the clock starts again from it. */
@@ -183,6 +208,8 @@ final class SmartStack extends FrameLayout {
 
     private void schedule() {
         handler.removeCallbacks(advance);
+        // held, the clock starts again when the hold ends (see hold)
+        if (held) return;
         Slide s = current();
         handler.postDelayed(advance, s != null ? s.dwellMs : 7_000);
     }
@@ -381,7 +408,7 @@ final class SmartStack extends FrameLayout {
         }
 
         /** An app's card: its colour as a deep gradient, its white mark on the right; null when memory is short. */
-        private static Bitmap markArt(Slide s, int w, int h) {
+        private Bitmap markArt(Slide s, int w, int h) {
             Bitmap b = null;
             try {
                 b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
@@ -391,10 +418,17 @@ final class SmartStack extends FrameLayout {
                         Shader.TileMode.CLAMP));
                 c.drawRect(0, 0, w, h, p);
                 int mw = Math.round(w * 0.42f), mh = Math.round(mw * 9 / 16f);
+                s.partial = false;
                 if (s.mark != null && mw > 0 && mh > 0) {
                     c.save();
                     c.translate(w - mw - w * 0.09f, (h - mh) / 2f);
-                    s.mark.paint(c, mw, mh);
+                    // a logo not lifted yet is lifted behind the screen and left out for now; once it
+                    // lands the card is painted again, whole, into a bitmap of its own (this one may
+                    // be on screen until then)
+                    s.partial = !Tiles.paint(s.mark, c, mw, mh, () -> {
+                        s.art = null;
+                        if (bound == s) drawArt(s);
+                    });
                     c.restore();
                 }
                 return b;

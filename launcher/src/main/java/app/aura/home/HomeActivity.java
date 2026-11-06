@@ -147,6 +147,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private long createdAt, appsAt, wallAt, appsLoadMs;
     /** The last key pressed, and when home was first on show (the boot screen gone). */
     private long keyAt, homeAt;
+    /** The last key pressed, for what waits outside home for the remote to rest: Warm (on its own thread), Trouble. */
+    static volatile long lastKeyAt;
     private int appsCount;
     private long splashAt, lastStep;
     private View beforeCc;
@@ -204,14 +206,20 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     };
 
     private View[] behindCc() {
-        return new View[]{home, backdrop, bloom, scrim};
+        // Light mode keeps the bloom gone (applyLight): a panel closing mustn't bring a full-screen layer back
+        return Perf.light(this) ? new View[]{home, backdrop, scrim} : new View[]{home, backdrop, bloom, scrim};
     }
+    /** Sheens across the tile in focus since it took focus: two at most, so a home left alone stops drawing them. */
+    private int glints;
     private final Runnable glintTick = new Runnable() {
         @Override
         public void run() {
-            View f = getCurrentFocus();
+            View f = getWindow().getCurrentFocus();
             // not on the switcher's cards: a sheen across one that size repaints most of the screen for a second
-            if (!held && !photo && !ccOpen && !editing && !Backdrop.calm && !switcher.isOpen() && f instanceof Card) ((Card) f).glint();
+            if (glints < 2 && !held && !photo && !ccOpen && !editing && !Backdrop.calm && !switcher.isOpen() && f instanceof Card) {
+                ((Card) f).glint();
+                glints++;
+            }
             handler.postDelayed(this, 6500);
         }
     };
@@ -375,6 +383,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
     }
 
+    @Override
+    public void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        // home's frames, for Problem reports: a draw listener added before the window is up can be lost
+        Trouble.watchFrames(getWindow());
+    }
+
     /** A picture of an app just taken (on the capture thread): an open switcher shows it at once. */
     private final Previews.Listener shotTaken = (pkg, shot) -> runOnUiThread(() -> shotArrived(pkg, shot));
 
@@ -515,6 +530,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (settings.isOpen()) settings.refresh();
     }
 
+    /** The app list read again on return (see appsDirty) at home's first idle moment, never in the way of resuming. */
+    private final android.os.MessageQueue.IdleHandler reloadWhenIdle = () -> {
+        if (resumed && appsDirty) {
+            appsDirty = false;
+            reloadApps();
+        }
+        return false;
+    };
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -536,16 +560,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (HomeRole.waiting) handler.postDelayed(homeCheck, 800);
         // the photograph moves only while home is in front (it stops in onPause)
         backdrop.start();
-        if (appsDirty) {
-            appsDirty = false;
-            reloadApps();
-        }
+        // home resumes while the app it replaces is still pausing (resumeWhilePausing): the list waits for a quiet moment
+        if (appsDirty) Looper.myQueue().addIdleHandler(reloadWhenIdle);
         wake();
         if (awayAt > 0) TopShelf.clearCache();
         // back from an app: "jump back in" now knows what you just watched
         refreshWidgets(true);
         refreshStatus();
         handler.removeCallbacks(glintTick);
+        glints = 0;
         handler.postDelayed(glintTick, 4000);
         if (ccOpen) cc.refresh();
         else if (getCurrentFocus() == null && !cells.isEmpty()) focusGrid(gridAt);
@@ -910,6 +933,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         root.addView(bloom, match());
         scrim = new Scrim(this, false);
         root.addView(scrim, match());
+        backdrop.setShade(scrim);
 
         home = flat(this);
         home.setClipChildren(false);
@@ -1255,7 +1279,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         root.addView(menu, match());
         ask = new Ask(this, backdrop);
         root.addView(ask, match());
-        quietVeil = new View(this);
+        quietVeil = new View(this) {
+            // one flat colour: its fade needs no offscreen layer
+            @Override
+            public boolean hasOverlappingRendering() {
+                return false;
+            }
+        };
         quietVeil.setBackgroundColor(0xFF000000);
         quietVeil.setAlpha(0f);
         quietVeil.setVisibility(View.GONE);
@@ -1622,13 +1652,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private final Runnable listen = this::updateListening;
 
-    /** The line under the song, once a second while the card is on show. */
+    /** The line under the song, once a second while the card is on show (light mode: while it has focus, else every 5 s). */
     private final Runnable listenTick = new Runnable() {
         @Override
         public void run() {
             if (!resumed || listening == null) return;
             listenProgress();
-            handler.postDelayed(this, 1000);
+            handler.postDelayed(this, listenW.hasFocus() || !Perf.light(HomeActivity.this) ? 1000 : 5000);
         }
     };
 
@@ -3840,7 +3870,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private void onFocusMoved(View n) {
         if (n == null || ccOpen) return;
-        stack.hold(n == fyW); // the card you're looking at stays put
+        glints = 0;
+        // the card you're looking at stays put; in light mode, so does the stack of a home left alone
+        stack.hold(n == fyW || racked && Perf.light(this));
         int i = side.indexOf(n);
         // the tvOS style's sidebar slides in only while it has focus
         if (dock && !sideHidden) sideShown(i >= 0, true);
@@ -3875,6 +3907,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             zone = contentZone = WIDGETS;
             dimRows(-1);
             widgetAt = i;
+            // the song's clock current at once, and every second from here (light mode slows it out of focus)
+            if (n == listenW) {
+                handler.removeCallbacks(listenTick);
+                handler.post(listenTick);
+            }
             glide(Ui.dpf(pageX() + widgetX[i] + widgetW[i] / 2f), Ui.dpf((dock ? gridY() - 18 - 22 - WIDGET_H : WIDGET_Y) + WIDGET_H / 2f), glowOf(widgets.get(i)));
             return;
         }
@@ -3962,7 +3999,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (m != null) m.stop();
             MusicScene sc = scene;
             scene = null;
-            if (sc != null) sc.stop();
+            if (sc != null) {
+                sc.stop();
+                // a video stopped mid-change never says it's gone: what it covered comes back regardless
+                underVideo(false);
+            }
             return;
         }
         MediaWatch.Playing p = listening;
@@ -3997,14 +4038,19 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             root.removeView(made[0]);
             if (scene != made[0]) return;
             scene = null;
+            underVideo(false);
             // the music's player went (its app closed): the photograph's own clock and story come back
             if (photo) story.reveal(0);
         });
         scene = made[0];
         scene.onQuiet = this::quietScreen;
         // under an opaque video the photograph's drift (a new one decoded every minute and a half) was all for nothing
-        scene.onShown = backdrop::stop;
+        scene.onShown = () -> {
+            backdrop.stop();
+            underVideo(true);
+        };
         scene.onLost = () -> {
+            underVideo(false);
             if (resumed) backdrop.start();
         };
         // above the photograph and its story, which it covers
@@ -4020,6 +4066,18 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
     }
 
+    /**
+     * A scene's video fills the screen: the photograph, its light and its shading stop drawing
+     * beneath it, as under Control Center (the video's surface only clears what they drew).
+     */
+    private void underVideo(boolean on) {
+        int v = on ? View.INVISIBLE : View.VISIBLE;
+        backdrop.setVisibility(v);
+        scrim.setVisibility(v);
+        // light mode has no light at all (see applyLight)
+        if (bloom.getVisibility() != View.GONE) bloom.setVisibility(v);
+    }
+
     private boolean overlayOpen() {
         return welcome != null || settings != null && settings.isOpen() || folderPanel != null && folderPanel.isOpen()
                 || switcher != null && switcher.isOpen() || nowPlaying != null && nowPlaying.isOpen()
@@ -4029,6 +4087,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private void setRacked(boolean on) {
         racked = on;
+        // light mode: nothing turns over on a home left alone (the card in focus holds anyway)
+        if (Perf.light(this)) stack.hold(on || getCurrentFocus() == fyW);
         backdrop.setDefocus(on ? 0f : homeDefocus(), on ? 2600 : 520);
         bloom.setStrength(on ? 0.35f * glow() : glow(), on ? 2600 : 520);
     }
@@ -4042,6 +4102,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (photo == on) return;
         stack.hold(on || getCurrentFocus() == fyW); // nothing changes behind the title card
         photo = on;
+        backdrop.setPhotoMode(on);
         if (on) {
             stopPreview();
             racked = true;
@@ -4050,7 +4111,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             story.tick(Calendar.getInstance());
             story.reveal(900);
             photoMusic(true);
+            // nothing playing: a quiet moment to compile a new version of Aura, for TVs that never start its screensaver
+            MediaWatch.Playing p = MediaWatch.now(this);
+            if (p == null || !p.playing) Warm.self(this);
         } else {
+            Warm.stop();
             photoMusic(false);
             racked = false;
             backdrop.setDefocus(homeDefocus(), 520);
@@ -4074,6 +4139,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         keyAt = SystemClock.uptimeMillis();
+        lastKeyAt = keyAt;
+        backdrop.keyed(keyAt);
+        if (e.getAction() == KeyEvent.ACTION_DOWN && isArrow(e.getKeyCode())) Trouble.arrow(keyAt);
         try {
             return handleKey(e);
         } catch (RuntimeException ex) {
@@ -6125,6 +6193,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         splash = null;
         long now = SystemClock.uptimeMillis();
         homeAt = now;
+        // Android's own "Fully drawn" line in its log, for the same moment
+        reportFullyDrawn();
         Trouble.started(this, now - createdAt, appsAt > 0 ? appsAt - createdAt : -1, appsLoadMs, appsCount,
                 wallAt > 0 ? wallAt - createdAt : -1);
         // the landing never played (no frames came): the home screen its intro would fade in, shown now

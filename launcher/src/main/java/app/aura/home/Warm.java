@@ -3,6 +3,8 @@ package app.aura.home;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ResolveInfo;
+import android.os.Build;
+import android.os.SystemClock;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -14,12 +16,15 @@ import java.util.Set;
  * switched off at the wall may never reach; until then the apps you use run partly interpreted and
  * open slower. While the screensaver rests (on a TV Aura is set up on), the apps you used most this
  * week are compiled with the profiles Android gathered as you used them: one at a time, a minute
- * after the screensaver starts, stopping the moment you're back, and once a day at most.
+ * after the screensaver starts, stopping the moment you're back, and once a day at most. Aura
+ * itself is compiled once for each version, from the screensaver or from home's photograph.
  */
 final class Warm {
-    private static final long DAY = 24 * 60 * 60_000L, START_MS = 60_000;
+    private static final long DAY = 24 * 60 * 60_000L, START_MS = 60_000, QUIET_MS = 30_000;
     private static final int APPS = 6;
     private static volatile boolean resting;
+    /** This version of Aura is compiled ahead of time: nothing more for home's photograph to do. */
+    private static volatile boolean selfDone;
     private static Thread running;
 
     private Warm() { }
@@ -34,16 +39,7 @@ final class Warm {
             try {
                 // a screensaver that ends at once costs nothing
                 Thread.sleep(START_MS);
-                // Aura itself first, once for each version: Android only checks a sideloaded app's
-                // code when it's installed, and leaves compiling it for an idle night a TV switched
-                // off at the wall never has, so after every update Aura ran partly interpreted:
-                // slower to start, slower to open its pages, more dropped frames
-                if (self && resting) {
-                    List<String> out = Adb.run(c, "cmd package compile -m speed -f " + c.getPackageName());
-                    if (out != null && !out.isEmpty() && out.get(0).contains("Success")) {
-                        Prefs.device(c).edit().putInt("warm_self", version(c)).apply();
-                    }
-                }
+                if (self && resting) compileSelf(c);
                 if (System.currentTimeMillis() - Prefs.device(c).getLong("warm_at", 0) < DAY - 60 * 60_000L) return;
                 List<String> top = new ArrayList<>(Habits.recentList(c, openable(c), APPS).keySet());
                 int done = 0;
@@ -67,6 +63,46 @@ final class Warm {
         running.start();
     }
 
+    /**
+     * Home rests on its photograph with nothing playing: Aura compiles itself if this version hasn't
+     * been yet, rather than waiting for a screensaver many TVs never start. A minute in, as for the
+     * screensaver, and never with a press in the last half minute; the photograph left stops it.
+     */
+    static synchronized void self(Context ctx) {
+        final Context c = ctx.getApplicationContext();
+        resting = true;
+        // Android 5 and 6 compile every app in full as it's installed, and have no compile command
+        if (Build.VERSION.SDK_INT < 24 || running != null || selfDone || !Adb.on(c)) return;
+        running = new SafeThread(() -> {
+            try {
+                Thread.sleep(START_MS);
+                if (!selfDue(c)) selfDone = true;
+                else if (resting && SystemClock.uptimeMillis() - HomeActivity.lastKeyAt >= QUIET_MS) compileSelf(c);
+            } catch (InterruptedException ignored) {
+            } finally {
+                synchronized (Warm.class) {
+                    running = null;
+                }
+            }
+        }, "warm");
+        running.setPriority(Thread.MIN_PRIORITY);
+        running.start();
+    }
+
+    /**
+     * Aura itself, once for each version: Android only checks a sideloaded app's code when it's
+     * installed, and leaves compiling it for an idle night a TV switched off at the wall never has,
+     * so after every update Aura ran partly interpreted: slower to start, slower to open its pages,
+     * more dropped frames. Off the main thread: dex2oat takes tens of seconds.
+     */
+    private static void compileSelf(Context c) {
+        List<String> out = Adb.run(c, "cmd package compile -m speed -f " + c.getPackageName());
+        if (out != null && !out.isEmpty() && out.get(0).contains("Success")) {
+            Prefs.device(c).edit().putInt("warm_self", version(c)).apply();
+            selfDone = true;
+        }
+    }
+
     /** Aura hasn't been compiled ahead of time since this version was installed. */
     private static boolean selfDue(Context c) {
         return Prefs.device(c).getInt("warm_self", 0) != version(c);
@@ -81,7 +117,7 @@ final class Warm {
         }
     }
 
-    /** Back from the screensaver: the app being compiled finishes, the rest wait for next time. */
+    /** Back from the screensaver or home's photograph: the app being compiled finishes, the rest wait for next time. */
     static synchronized void stop() {
         resting = false;
         if (running != null) running.interrupt();

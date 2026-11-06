@@ -5,10 +5,14 @@ import android.app.ActivityManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.os.Debug;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.util.DisplayMetrics;
+import android.view.FrameMetrics;
+import android.view.ViewTreeObserver;
+import android.view.Window;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -20,6 +24,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -32,7 +37,7 @@ import java.util.Map;
  * Android's own record of why Aura stopped (Android 11+: not responding, out of memory, a native
  * crash), and what the TV's installer said about an update.
  *
- * Only what went wrong and what TV this is; nothing leaves the TV by itself. Settings → Problem
+ * Only what went wrong, what TV this is and how smoothly home draws on it; nothing leaves the TV by itself. Settings → Problem
  * reports shows the count and opens a page on the phone with the whole report, to copy or save.
  * A small file, newest last, trimmed to the last {@link #MAX_ENTRIES} entries.
  */
@@ -282,10 +287,12 @@ final class Trouble {
                     + (am.isLowRamDevice() ? ", low-RAM device" : "") + ", app limit " + am.getMemoryClass() + " MB");
         } catch (RuntimeException ignored) {
         }
+        line(b, "Native heap", (Debug.getNativeHeapAllocatedSize() >> 20) + " MB in use by Aura");
         line(b, "Cores", String.valueOf(Runtime.getRuntime().availableProcessors()));
         DisplayMetrics dm = c.getResources().getDisplayMetrics();
         line(b, "Screen", dm.widthPixels + "×" + dm.heightPixels + " at " + dm.densityDpi + " dpi");
         line(b, "Light mode", Perf.mode(c) + (Perf.light(c) ? " (on)" : " (off)"));
+        frames(b);
         line(b, "Set up", (Adb.on(c) ? "debugging connected" : "no debugging")
                 + (HomeKeys.wanted(c) ? ", Home button service wanted" + (HomeKeys.live ? " and running" : " but not running") : "")
                 + (HomeRole.held(c) ? ", Aura is the home app" : ""));
@@ -453,8 +460,10 @@ final class Trouble {
      * While the home screen is on show: a quiet check every couple of seconds that its main thread
      * still answers. One that doesn't for {@link #FREEZE_MS} is caught in the act: what it was
      * doing is noted, and how long it stayed stuck. Costs one tiny message every two seconds.
+     * Home's minutes at rest (see {@link #frames}) are only counted while it's on show, too.
      */
     static synchronized void watchMain(boolean on) {
+        if (on != watching) restClock(on);
         watching = on;
         if (!on || dog != null) return;
         final Handler main = new Handler(Looper.getMainLooper());
@@ -495,5 +504,126 @@ final class Trouble {
         }, "freeze-watch");
         dog.setPriority(Thread.MIN_PRIORITY);
         dog.start();
+    }
+
+    // ---- frames ------------------------------------------------------------------------------
+
+    /**
+     * Home left alone this long is at rest; arrow presses further apart than this are separate
+     * bursts, and a burst's frames run on this long after its last press (the slide it started).
+     */
+    private static final long REST_MS = 15_000, BURST_GAP_MS = 1_000, BURST_TAIL_MS = 600;
+    /** Frames home has drawn while on show; the count and the time when the minute being counted began (-1: none). Main thread only. */
+    private static long drawn, restMark, restFrom = -1;
+    /** Frames in the last whole minute home was left alone (-1 before there's been one), and when it ended. */
+    private static volatile long lastRest = -1, lastRestAt;
+    /** The last D-pad burst's frame times in µs, its latest 120 at most; it guards the fields after it. */
+    private static final int[] burst = new int[120];
+    private static int burstN;
+    private static long arrowAt, burstAt, burstTimed, burstEnd;
+    private static Handler mainHandler;
+    private static final ViewTreeObserver.OnDrawListener DREW = () -> {
+        if (watching) drawn++;
+    };
+
+    /** Each whole minute home is left alone, the frames it drew in it: the aim is none. */
+    private static final Runnable REST = new Runnable() {
+        @Override
+        public void run() {
+            long now = SystemClock.uptimeMillis(), from = HomeActivity.lastKeyAt + REST_MS;
+            if (now < from) {
+                mainHandler().postDelayed(this, from - now);
+                return;
+            }
+            // counting began after the last press settled: the minute was untouched throughout
+            if (restFrom >= from) {
+                lastRest = drawn - restMark;
+                lastRestAt = now;
+            }
+            restFrom = now;
+            restMark = drawn;
+            mainHandler().postDelayed(this, 60_000);
+        }
+    };
+
+    private static Handler mainHandler() {
+        if (mainHandler == null) mainHandler = new Handler(Looper.getMainLooper());
+        return mainHandler;
+    }
+
+    /** Home came on show, or went (main thread): a minute at rest counts only whole, from 15 s after it's back. */
+    private static void restClock(boolean on) {
+        mainHandler().removeCallbacks(REST);
+        restFrom = -1;
+        if (on) mainHandler().postDelayed(REST, REST_MS);
+    }
+
+    /** Counts home's frames from now on: each one it draws, and on Android 7+ how long each took. */
+    static void watchFrames(Window w) {
+        w.getDecorView().getViewTreeObserver().addOnDrawListener(DREW);
+        if (Build.VERSION.SDK_INT >= 24) {
+            try {
+                w.addOnFrameMetricsAvailableListener(new FrameTimes(), mainHandler());
+            } catch (RuntimeException | LinkageError ignored) {
+                // a window Android won't time: the counts still come
+            }
+        }
+    }
+
+    /** An arrow pressed on home (main thread): a burst begins, or goes on. */
+    static void arrow(long at) {
+        synchronized (burst) {
+            if (at - arrowAt > BURST_GAP_MS) burstAt = at;
+            arrowAt = at;
+        }
+    }
+
+    /** One frame's time from Android (main thread), kept if a D-pad burst is under way; a new burst lets the last one's go. */
+    private static void frameTook(long nanos) {
+        long now = SystemClock.uptimeMillis();
+        synchronized (burst) {
+            if (arrowAt == 0 || now - arrowAt > BURST_TAIL_MS) return;
+            if (burstTimed != burstAt) {
+                burstTimed = burstAt;
+                burstN = 0;
+            }
+            burst[burstN++ % burst.length] = (int) Math.min(Integer.MAX_VALUE, nanos / 1000);
+            burstEnd = now;
+        }
+    }
+
+    @TargetApi(24)
+    private static final class FrameTimes implements Window.OnFrameMetricsAvailableListener {
+        @Override
+        public void onFrameMetricsAvailable(Window w, FrameMetrics m, int dropped) {
+            frameTook(m.getMetric(FrameMetrics.TOTAL_DURATION));
+        }
+    }
+
+    /** Home's frames for the report: how many while left alone, and (Android 7+) how long the last D-pad burst's took. */
+    private static void frames(StringBuilder b) {
+        long now = SystemClock.uptimeMillis(), rest = lastRest;
+        line(b, "Frames at rest", rest < 0 ? "none measured yet: home hasn't been left alone for a whole minute"
+                : rest + " in the last whole minute home was left alone, " + minutes(now - lastRestAt) + " ago");
+        if (Build.VERSION.SDK_INT < 24) return;
+        int[] t;
+        long end;
+        synchronized (burst) {
+            t = Arrays.copyOf(burst, Math.min(burstN, burst.length));
+            end = burstEnd;
+        }
+        if (t.length == 0) return;
+        Arrays.sort(t);
+        line(b, "D-pad frames", "p50 " + ms(pct(t, 50)) + " ms, p90 " + ms(pct(t, 90)) + " ms over the last burst's "
+                + t.length + " frames, " + minutes(now - end) + " ago");
+    }
+
+    /** The {@code p}th percentile of sorted values, by nearest rank. */
+    private static int pct(int[] sorted, int p) {
+        return sorted[Math.max(0, (sorted.length * p + 99) / 100 - 1)];
+    }
+
+    private static String ms(int micros) {
+        return String.format(Locale.ROOT, "%.1f", micros / 1000f);
     }
 }

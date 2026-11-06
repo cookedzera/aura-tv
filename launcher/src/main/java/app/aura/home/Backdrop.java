@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.BitmapRegionDecoder;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -13,6 +14,7 @@ import android.graphics.ImageDecoder;
 import android.graphics.LightingColorFilter;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Animatable;
@@ -106,12 +108,25 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         showMs = ms;
     }
     private static final long INTRO_MS = 1_900, PARALLAX_MS = 950;
+    /** Light mode: no photograph changes within ten seconds of a press, and in photo mode each stays three minutes. */
+    private static final long QUIET_MS = 10_000, PHOTO_SHOW_MS = 180_000;
+    /** HIGH: the drift rests ten minutes after the last press outside photo mode. */
+    private static final long STILL_MS = 10 * 60_000;
+    /** Rows of a photograph decoded at a time for a 16-bit copy (see {@link #bands}): a few hundred KB at full colour. */
+    private static final int BAND = 64;
 
     private static final class Slide {
         Wallpaper wall;
+        /** {@code soft} is only an ingredient of {@code steady}, and goes once that's made (see {@link #drawSlide}). */
         Bitmap sharp, soft, blur;
-        /** Sharp and soft already mixed at the home screen's steady softness, screen-sized; null for GIFs. */
+        /** Sharp and soft already mixed at {@code mixed}, the home screen's steady softness, screen-sized; null for GIFs. */
         Bitmap steady;
+        float mixed;
+        /** Light mode: {@code steady} carries the shade and its grain, baked for a {@code bakedW}x{@code bakedH} screen. */
+        boolean baked;
+        int bakedW, bakedH;
+        /** {@code steady} is being made again on the loader, which reads {@code sharp}: freeing waits for it. */
+        boolean remaking, dropped;
         /** A GIF's frames, played by the render thread; {@code sharp} keeps its first frame for the glass. */
         Drawable anim;
         ColorFilter animFilter;
@@ -120,12 +135,18 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         int sw, sh;
         float lumaTop, lumaBottom;
         long start;
+        /** When its drift began, on the drift's own clock (see {@link Backdrop#driftNow}). */
+        long drift0;
         float alpha;
         float s0, s1, x0, x1, y0, y1;
         final Matrix m = new Matrix();
 
         /** Frees the large full-screen bitmaps as soon as the slide leaves the screen; {@code blur} stays for {@link #lastBlur}. */
         void recycle() {
+            if (remaking) {
+                dropped = true;
+                return;
+            }
             if (steady != null && steady != sharp && steady != soft) steady.recycle();
             if (soft != null && soft != sharp) soft.recycle();
             if (sharp != null) sharp.recycle();
@@ -165,6 +186,17 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     private int dimLevel = 64;
     private float defocus, defocusFrom, defocusTo;
     private long defocusStart = -10_000, defocusMs = 1;
+    /** The editorial shade above the photograph, which Light mode draws as part of it (see {@link #setShade}). */
+    private Scrim shade;
+    /** Light mode: a photograph decoded while the remote was in use, put on once it rests. */
+    private Slide pending;
+    /** Home's last key press, -1 before the first (and always in the screensaver); and photo mode. */
+    private long keyAt = -1;
+    private boolean photoMode;
+    /** How long the drift has stood still in all, and since when it stands still now (-1 while it moves). */
+    private long stillMs, stillSince = -1;
+    /** How much of the finished frame is drawn so far (see {@link #onDraw}). */
+    private float drawn;
 
     Backdrop(Context c) {
         super(c);
@@ -223,7 +255,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     /** Puts the photograph at {@code path} on next, straight away: a phone has just sent it. */
     void show(String path) {
         wanted = path;
-        if (!loading && incoming == null) nextAt = 0;
+        if (!loading && incoming == null && pending == null) nextAt = 0;
         kick();
     }
 
@@ -239,6 +271,30 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
 
     void setListener(Listener l) {
         listener = l;
+    }
+
+    /**
+     * The shade over the photograph ({@link Scrim}). In Light mode the photograph draws it itself:
+     * baked with its grain into each resting copy, so a resting frame is one opaque layer instead of
+     * three, and drawn over the sharp copy while the focus racks, the resting copy laid over it,
+     * which comes out exactly as the shade over the two would. The shade view then draws nothing;
+     * out of Light mode it draws as before.
+     */
+    void setShade(Scrim s) {
+        shade = s;
+        invalidate();
+    }
+
+    /** A press of home's remote: Light mode changes no photograph for a while after one, and a resting drift (HIGH) moves again. */
+    void keyed(long at) {
+        keyAt = at;
+        if (stillSince >= 0 && !calm) kick();
+    }
+
+    /** Photo mode keeps HIGH's drift going without presses, and in Light mode each photograph stays three minutes. */
+    void setPhotoMode(boolean on) {
+        photoMode = on;
+        if (stillSince >= 0 && !calm) kick();
     }
 
     void setIntro(boolean on) {
@@ -287,8 +343,10 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         play(incoming, false);
         if (current != null) current.recycle();
         if (incoming != null) incoming.recycle();
+        if (pending != null) pending.recycle();
         current = null;
         incoming = null;
+        pending = null;
         loading = false;
         generation++;
         // with the small copy on screen there's no rise from black: the photograph fades in over it
@@ -308,7 +366,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
 
     private void keepStandIn() {
         if (standIn != null || current == null) return;
-        Bitmap src = current.steady != null && !current.steady.isRecycled() ? current.steady : current.sharp;
+        // never a resting copy with the shade baked in: the shade is drawn over the small copy
+        Bitmap src = current.steady != null && !current.baked && !current.steady.isRecycled() ? current.steady : current.sharp;
         if (src == null || src.isRecycled()) return;
         try {
             standIn = Bitmap.createScaledBitmap(src, Math.max(1, src.getWidth() / 3), Math.max(1, src.getHeight() / 3), true);
@@ -356,7 +415,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     }
 
     void skip() {
-        if (incoming == null && !loading) nextAt = 0;
+        if (incoming == null && pending == null && !loading) nextAt = 0;
         kick();
     }
 
@@ -451,9 +510,20 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         boolean parallax = now - parallaxStart < PARALLAX_MS;
         // Light mode: the photograph holds still (see path), so nothing is redrawn while nothing
         // changes. On a slow TV each redraw of the photograph and its glass took the GPU 15 ms, and
-        // the drift's two a second landed in the middle of remote presses as stutter
+        // the drift's two a second landed in the middle of remote presses as stutter. HIGH: it drifts
+        // while home is in use and in photo mode; ten minutes after the last press anywhere else
+        // (under a panel, editing) it rests until the next one, its clock stopped with it
+        boolean still = calm || keyAt >= 0 && !photoMode && now - keyAt >= STILL_MS;
+        if (still != (stillSince >= 0)) {
+            if (still) {
+                stillSince = now;
+            } else {
+                stillMs += now - stillSince;
+                stillSince = -1;
+            }
+        }
         long driftEvery = 66;
-        boolean drift = !calm && now - lastDrift >= driftEvery;
+        boolean drift = !still && now - lastDrift >= driftEvery;
         boolean busy = fade || parallax || drift;
 
         if (busy) {
@@ -473,7 +543,21 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
                 }
             }
         }
-        if (incoming == null && !loading && now >= nextAt && current != null) {
+        // a resting copy made for another softness, Light mode switched either way, or another screen
+        fit(current);
+        fit(incoming);
+        // Light mode: no decode and no crossfade within ten seconds of a press, so neither lands in
+        // a run of them; a photograph that arrived meanwhile goes on once the remote rests
+        boolean quiet = !calm || keyAt < 0 || now - keyAt >= QUIET_MS;
+        if (pending != null && incoming == null && quiet) {
+            Slide p = pending;
+            pending = null;
+            // it asks for the crossfade's frames itself
+            begin(p);
+            return;
+        }
+        long due = nextAt + (calm && photoMode && wanted == null && !stale ? Math.max(0, PHOTO_SHOW_MS - showMs) : 0);
+        if (incoming == null && pending == null && !loading && now >= due && quiet && current != null) {
             // the list looked at again each turn (a file date or two): with a single photograph on
             // the wall nothing loaded, so nothing ever re-read it, and a source switched off (its
             // photographs removed) or new ones imported went unseen until Aura started again
@@ -484,7 +568,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         Choreographer ch = Choreographer.getInstance();
         if (fade || parallax || incoming != null) ch.postFrameCallback(this);
         // still, only the next photograph's time is looked out for
-        else if (calm) ch.postFrameCallbackDelayed(this, 1000);
+        else if (still) ch.postFrameCallbackDelayed(this, 1000);
         else ch.postFrameCallbackDelayed(this, Math.max(0, lastDrift + driftEvery - SystemClock.uptimeMillis() - 4));
     }
 
@@ -529,16 +613,24 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         if (s == null) return;
         float w = getWidth(), h = getHeight();
         if (w == 0 || h == 0) return;
-        float t = Math.min(1f, (now - s.start) / (float) DRIFT_MS);
+        position(s, w, h, Ui.clamp((driftNow(now) - s.drift0) / (float) DRIFT_MS, 0f, 1f), 1f - intro, parallax, s.m);
+    }
+
+    /** Where {@code s} lies on a {@code w}x{@code h} screen, {@code t} of the way through its drift. */
+    private static void position(Slide s, float w, float h, float t, float settle, float parallax, Matrix out) {
         float scale = s.s0 + (s.s1 - s.s0) * t;
-        float settle = 1f - intro;
         scale *= 1f + 0.10f * settle * settle;
         float maxX = (scale - 1f) * w / 2f, maxY = (scale - 1f) * h / 2f;
         float tx = Ui.clamp((s.x0 + (s.x1 - s.x0) * t) * maxX + parallax, -maxX, maxX);
         float ty = Ui.clamp((s.y0 + (s.y1 - s.y0) * t) * maxY, -maxY, maxY);
         float k = Math.max(w / s.sw, h / s.sh) * scale;
-        s.m.setScale(k, k);
-        s.m.postTranslate((w - s.sw * k) / 2f + tx, (h - s.sh * k) / 2f + ty);
+        out.setScale(k, k);
+        out.postTranslate((w - s.sw * k) / 2f + tx, (h - s.sh * k) / 2f + ty);
+    }
+
+    /** The drift's own clock: the time it stood still left out, so it moves on from where it stopped. */
+    private long driftNow(long now) {
+        return now - stillMs - (stillSince >= 0 ? now - stillSince : 0);
     }
 
     private float introAlpha() {
@@ -552,6 +644,8 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         long now = SystemClock.uptimeMillis();
         place(current, now);
         place(incoming, now);
+        fit(current);
+        fit(incoming);
     }
 
     @Override
@@ -565,12 +659,24 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             dim = level >= 64 ? null : new LightingColorFilter(Color.rgb(g, g, g), 0);
         }
         paint.setColorFilter(dim);
+        boolean shaded = shaded();
+        if (shade != null) shade.setBelow(shaded);
         float under = drawStandIn(c);
         if (under == 0f && (current == null || ia < 1f)) c.drawColor(Color.BLACK);
         // over the small copy the photograph fades in; with nothing under it, as it always did
         float over = under > 0f ? ia * (1f - under) : ia;
-        drawSlide(c, current, over);
-        drawSlide(c, incoming, over);
+        // each slide's share of the finished frame (the incoming one lies over the current one),
+        // and what's left of whatever lies under them both
+        float in = incoming != null ? incoming.alpha * over : 0f;
+        float cur = current != null ? current.alpha * over * (1f - in) : 0f;
+        drawn = 1f - cur - in;
+        drawSlide(c, current, cur, false, shaded);
+        drawSlide(c, incoming, in, false, shaded);
+        if (!shaded) return;
+        // Light mode: the shade over everything live, then the resting copies that carry their own
+        if (drawn > 0.002f) shade.drawOver(c);
+        drawSlide(c, current, cur, true, true);
+        drawSlide(c, incoming, in, true, true);
     }
 
     /**
@@ -583,48 +689,134 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     void setSteadyDefocus(float d) {
         if (d == steadyDefocus) return;
         steadyDefocus = d;
-        // the photographs on screen were pre-mixed at the old softness: mixed again, so the
-        // resting picture doesn't jump when the setting changes (new ones come mixed right)
-        for (Slide s : new Slide[]{current, incoming}) {
-            if (s == null || s.sharp == null || s.soft == null || s.anim != null) continue;
-            Bitmap old = s.steady;
-            s.steady = d > 0f ? mix(s.sharp, s.soft, d) : null;
-            if (old != null && old != s.sharp && old != s.soft) old.recycle();
-        }
+        // the photographs on screen were pre-mixed at the old softness: mixed again on the loader,
+        // so the resting picture doesn't jump when the setting changes (new ones come mixed right)
+        fit(current);
+        fit(incoming);
         invalidate();
     }
 
-    private void drawSlide(Canvas c, Slide s, float ia) {
-        if (s == null || s.sharp == null) return;
-        if (s.steady != null && s.anim == null && Math.abs(defocus - steadyDefocus) < 0.004f) {
-            tmp.set(s.m);
-            tmp.preScale(s.sw / (float) s.steady.getWidth(), s.sh / (float) s.steady.getHeight());
-            paint.setAlpha(Math.round(255 * s.alpha * ia));
-            c.drawBitmap(s.steady, tmp, paint);
+    /**
+     * Draws {@code s}'s parts, {@code w} being its share of the finished frame: with {@code baked}
+     * false the live ones (the sharp copy or a GIF, a soft copy, a resting copy without the shade),
+     * with it true a resting copy that carries the shade. For a defocus d up to the softness s the
+     * resting copy was mixed at, sharp·(1−d/s) + steady·(d/s) is exactly sharp·(1−d) + soft·d,
+     * so no soft copy needs keeping.
+     */
+    private void drawSlide(Canvas c, Slide s, float w, boolean baked, boolean shaded) {
+        if (s == null || s.sharp == null || w <= 0f) return;
+        Bitmap st = s.steady;
+        if (st != null && s.anim == null && (shaded || !s.baked) && drawable(c, st)) {
+            // at exactly the resting softness, one full-screen pass instead of two
+            float t = Math.abs(defocus - s.mixed) < 0.004f ? 1f : Ui.clamp(defocus / s.mixed, 0f, 1f);
+            if (!baked) part(c, s, s.sharp, w * (1f - t));
+            if (baked == s.baked) part(c, s, st, w * t);
             return;
         }
-        // fully defocused, the soft copy covers everything: skip the sharp fill
-        if (defocus < 0.995f || s.soft == null) {
-            int a = Math.round(255 * s.alpha * ia);
-            if (s.anim != null) {
-                // the render thread steps the GIF's frames; this only places it
-                if (a != s.animAlpha) s.anim.setAlpha(s.animAlpha = a);
-                if (dim != s.animFilter) s.anim.setColorFilter(s.animFilter = dim);
-                c.save();
-                c.concat(s.m);
-                s.anim.draw(c);
-                c.restore();
-            } else {
-                paint.setAlpha(a);
-                c.drawBitmap(s.sharp, s.m, paint);
+        if (baked) return;
+        // no resting copy to use: the sharp copy (or the GIF) with the soft one over it, as far as defocused
+        float d = s.soft != null && s.soft != s.sharp ? defocus : 0f;
+        part(c, s, s.anim != null ? null : s.sharp, w * (1f - d));
+        if (d > 0f) part(c, s, s.soft, w * d);
+    }
+
+    /**
+     * One part of a slide (null: its GIF), {@code q} being its share of the finished frame. Laid at
+     * that share of everything drawn so far, every part ends up with its own weight.
+     */
+    private void part(Canvas c, Slide s, Bitmap b, float q) {
+        if (q < 0.002f) return;
+        drawn += q;
+        int a = Math.round(255 * q / drawn);
+        if (b == null) {
+            // the render thread steps the GIF's frames; this only places it
+            if (a != s.animAlpha) s.anim.setAlpha(s.animAlpha = a);
+            if (dim != s.animFilter) s.anim.setColorFilter(s.animFilter = dim);
+            c.save();
+            c.concat(s.m);
+            s.anim.draw(c);
+            c.restore();
+            return;
+        }
+        paint.setAlpha(a);
+        if (b == s.sharp) {
+            c.drawBitmap(b, s.m, paint);
+            return;
+        }
+        tmp.set(s.m);
+        tmp.preScale(s.sw / (float) b.getWidth(), s.sh / (float) b.getHeight());
+        c.drawBitmap(b, tmp, paint);
+    }
+
+    /** A hardware bitmap can't be drawn into a software canvas (a screenshot, a test). */
+    private static boolean drawable(Canvas c, Bitmap b) {
+        return c.isHardwareAccelerated() || Build.VERSION.SDK_INT < 26 || b.getConfig() != Bitmap.Config.HARDWARE;
+    }
+
+    /** Light mode with the shade attached: the photograph carries it (see {@link #setShade}). */
+    private boolean shaded() {
+        return shade != null && calm;
+    }
+
+    /** The size the photograph fills: this view's, or before its first layout the screen's. */
+    private int viewW() {
+        return getWidth() > 0 ? getWidth() : getResources().getDisplayMetrics().widthPixels;
+    }
+
+    private int viewH() {
+        return getHeight() > 0 ? getHeight() : getResources().getDisplayMetrics().heightPixels;
+    }
+
+    /** Has {@code s}'s resting copy made again when it was made for another softness, Light mode or screen. */
+    private void fit(Slide s) {
+        if (s == null || s.steady == null || s.remaking || steadyDefocus <= 0f) return;
+        boolean bake = shaded();
+        if (s.mixed != steadyDefocus || s.baked != bake || bake && (s.bakedW != viewW() || s.bakedH != viewH())) remake(s);
+    }
+
+    /**
+     * Makes {@code s}'s resting copy again on the loader, the soft copy with it if it's gone; the
+     * slide draws with what it has meanwhile. Its sharp copy, which the loader reads, isn't freed
+     * before that's done (see {@link Slide#recycle}). No room: the slide goes without one.
+     */
+    private void remake(final Slide s) {
+        if (io.isShutdown()) return;
+        s.remaking = true;
+        final float d = steadyDefocus;
+        final Scrim bake = shaded() ? shade : null;
+        final int vw = viewW(), vh = viewH();
+        final float px = parallaxTo;
+        io.execute(() -> {
+            Bitmap made = null;
+            try {
+                Bitmap soft = s.soft != null ? s.soft : soften(s.sharp);
+                made = steady(s, soft, d, bake, vw, vh, px);
+                if (soft != s.soft) soft.recycle();
+            } catch (Throwable e) {
+                Trouble.caught("photo (resting copy)", e);
             }
-        }
-        if (defocus > 0.005f && s.soft != null) {
-            tmp.set(s.m);
-            tmp.preScale(s.sw / (float) s.soft.getWidth(), s.sh / (float) s.soft.getHeight());
-            paint.setAlpha(Math.round(255 * s.alpha * ia * defocus));
-            c.drawBitmap(s.soft, tmp, paint);
-        }
+            final Bitmap copy = made;
+            main.post(() -> {
+                s.remaking = false;
+                if (s.dropped) {
+                    if (copy != null) copy.recycle();
+                    s.recycle();
+                    return;
+                }
+                Bitmap old = s.steady;
+                s.steady = copy;
+                s.mixed = d;
+                s.baked = bake != null && copy != null;
+                s.bakedW = vw;
+                s.bakedH = vh;
+                if (old != null && old != s.sharp && old != s.soft) old.recycle();
+                if (copy != null && s.soft != null && s.soft != s.sharp) {
+                    s.soft.recycle();
+                    s.soft = null;
+                }
+                invalidate();
+            });
+        });
     }
 
     /** Draws the blurred scene as seen from a view whose top-left sits at (ox, oy) in the window. */
@@ -681,10 +873,13 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         if (f >= 0) prefs.edit().putString("daily_seen", walls.get(f).day).apply();
         final int gen = generation;
         final Wallpaper w = walls.get(idx);
+        final Scrim bake = shaded() ? shade : null;
+        final int vw = viewW(), vh = viewH();
+        final float px = parallaxTo;
         io.execute(() -> {
             Slide made;
             try {
-                made = decode(w);
+                made = decode(w, bake, vw, vh, px);
             } catch (Throwable e) {
                 // whatever happened, the answer still goes back: "loading" must never stay stuck on
                 Trouble.caught("photo", e);
@@ -708,7 +903,13 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
                 }
                 failures = 0;
                 prefs.edit().putInt("wall", idx).apply();
-                begin(s);
+                // Light mode: one that arrives while the remote is in use waits for it to rest (doFrame)
+                if (current != null && calm && keyAt >= 0 && SystemClock.uptimeMillis() - keyAt < QUIET_MS) {
+                    if (pending != null) pending.recycle();
+                    pending = s;
+                } else {
+                    begin(s);
+                }
             });
         });
     }
@@ -794,7 +995,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         lastBlur = s.blur;
         long now = SystemClock.uptimeMillis();
         s.start = now;
-        path(s);
+        s.drift0 = driftNow(now);
         boolean first = current == null;
         if (first) {
             s.alpha = 1f;
@@ -813,6 +1014,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             accentTo = s.wall.accent;
         }
         place(s, now);
+        fit(s);
         if (running) play(s, true);
         // a crossfade (or the first photograph) needs every frame from now
         kick();
@@ -853,7 +1055,11 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         return b;
     }
 
-    private Slide decode(Wallpaper w) {
+    /**
+     * Reads {@code w} into a slide, framed (see path); given {@code bake}, its resting copy carries that
+     * shade as it will lie over a {@code vw}x{@code vh} screen with the photograph {@code px} aside.
+     */
+    private Slide decode(Wallpaper w, Scrim bake, int vw, int vh, float px) {
         if (w.black) {
             Bitmap b = blackWall();
             Slide s = new Slide();
@@ -864,6 +1070,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             s.blur = blur(b);
             s.soft = b;
             s.lumaTop = s.lumaBottom = 0f;
+            path(s);
             return s;
         }
         try {
@@ -879,11 +1086,26 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
                 s.anim = gif(w.path, s.sw, s.sh);
                 if (s.anim != null) s.anim.setBounds(0, 0, s.sw, s.sh);
             }
+            path(s);
             s.blur = blur(b);
-            s.soft = soften(b);
-            if (s.anim == null && steadyDefocus > 0f) s.steady = mix(b, s.soft, steadyDefocus);
             s.lumaTop = luma(s.blur, 0f, 0f, 0.62f, 0.66f);
             s.lumaBottom = luma(s.blur, 0f, 0.6f, 1f, 1f);
+            // the soft copy is an ingredient of the resting copy (and of a GIF's defocus) and goes
+            // once that's made; the screensaver, with no resting softness, never draws it at all
+            float d = steadyDefocus;
+            if (d > 0f) {
+                s.soft = soften(b);
+                Bitmap st = s.anim == null ? steady(s, s.soft, d, bake, vw, vh, px) : null;
+                if (st != null) {
+                    s.steady = st;
+                    s.mixed = d;
+                    s.baked = bake != null;
+                    s.bakedW = vw;
+                    s.bakedH = vh;
+                    s.soft.recycle();
+                    s.soft = null;
+                }
+            }
             return s;
         } catch (IOException | RuntimeException e) {
             return null;
@@ -899,10 +1121,11 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     }
 
     /**
-     * The photograph, no larger than the screen at the drift's deepest zoom (1.2x): a 1080p
-     * photograph on a 720p TV would hold twice the memory for detail no one can see. Decoded
-     * straight at that size: the full-size picture is never held in memory, even for a moment
-     * (it was decoded whole and then shrunk, an extra 8 MB each time the photograph changed).
+     * The photograph, no larger than the screen at the drift's deepest zoom (1.2x; Light mode,
+     * which holds it still, 1.1x): a 1080p photograph on a 720p TV would hold twice the memory for
+     * detail no one can see. The decoder halves it as often as it can first, so the scale after
+     * that starts from at most twice the size kept, never from the whole picture. Kept in 16 bits,
+     * it's decoded in strips at full colour and dithered in (see {@link #bands}).
      */
     private Bitmap read(Wallpaper w) throws IOException {
         BitmapFactory.Options o = new BitmapFactory.Options();
@@ -912,22 +1135,98 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         }
         if (o.outWidth <= 0 || o.outHeight <= 0) return null;
         android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
-        float k = 1.2f * Math.max(Math.max(dm.widthPixels, dm.heightPixels) / (float) o.outWidth,
-                Math.min(dm.widthPixels, dm.heightPixels) / (float) o.outHeight);
-        o.inJustDecodeBounds = false;
+        int iw = o.outWidth, ih = o.outHeight, tw = iw, th = ih;
+        float k = (calm ? 1.1f : 1.2f) * Math.max(Math.max(dm.widthPixels, dm.heightPixels) / (float) iw,
+                Math.min(dm.widthPixels, dm.heightPixels) / (float) ih);
         if (k < 0.95f) {
-            o.inScaled = true;
-            o.inDensity = o.outWidth;
-            o.inTargetDensity = Math.max(1, Math.round(o.outWidth * k));
+            tw = Math.max(1, Math.round(iw * k));
+            th = Math.max(1, Math.round(ih * k));
         }
-        if (thrifty()) o.inPreferredConfig = Bitmap.Config.RGB_565;
-        Bitmap b;
-        try (InputStream in = open(w)) {
-            b = BitmapFactory.decodeStream(in, null, o);
+        int sample = 1;
+        while (iw / (sample * 2) >= tw && ih / (sample * 2) >= th) sample *= 2;
+        Bitmap b = thrifty() && !w.gif ? banded(w, sample, tw, th) : null;
+        if (b == null) {
+            o.inJustDecodeBounds = false;
+            o.inSampleSize = sample;
+            if (tw != iw) {
+                o.inScaled = true;
+                o.inDensity = (iw + sample - 1) / sample;
+                o.inTargetDensity = tw;
+            }
+            if (thrifty()) o.inPreferredConfig = Bitmap.Config.RGB_565;
+            try (InputStream in = open(w)) {
+                b = BitmapFactory.decodeStream(in, null, o);
+            }
         }
         // drawn through matrices only: no density of its own to scale by anywhere
         if (b != null) b.setDensity(Bitmap.DENSITY_NONE);
         return b;
+    }
+
+    /** A 16-bit photograph decoded in strips (see {@link #bands}); null where this image can't be read that way. */
+    private Bitmap banded(Wallpaper w, int sample, int tw, int th) {
+        Bitmap out = null;
+        BitmapRegionDecoder rd = null;
+        try (InputStream in = open(w)) {
+            rd = BitmapRegionDecoder.newInstance(in, false);
+            out = Bitmap.createBitmap(tw, th, Bitmap.Config.RGB_565);
+            Matrix m = new Matrix();
+            m.setScale(tw / (float) rd.getWidth(), th / (float) rd.getHeight());
+            if (bands(rd, sample, m, out)) return out;
+        } catch (IOException | RuntimeException e) {
+            // a format the strips can't be read from: decoded whole instead
+        } finally {
+            if (rd != null) rd.recycle();
+        }
+        if (out != null) out.recycle();
+        return null;
+    }
+
+    /**
+     * Draws the image {@code rd} reads into {@code into} through {@code m} (image pixels to its
+     * pixels: a scale and a shift), about {@link #BAND} decoded rows at a time, each strip decoded at
+     * full colour (every {@code sample}th pixel) and drawn through a dithering shader. A 16-bit copy
+     * made this way keeps its skies smooth: the decoder's own 16-bit output truncates, and a plain
+     * same-size copy into 16 bits takes a path that doesn't dither. False if a strip won't decode.
+     */
+    static boolean bands(BitmapRegionDecoder rd, int sample, Matrix m, Bitmap into) {
+        int iw = rd.getWidth(), ih = rd.getHeight(), w = into.getWidth(), h = into.getHeight();
+        Matrix inv = new Matrix(), local = new Matrix();
+        if (!m.invert(inv)) return false;
+        float[] v = new float[9];
+        m.getValues(v);
+        int step = Math.max(8, Math.round(BAND * sample * v[Matrix.MSCALE_Y]));
+        // a few rows and columns beyond each strip, so the filter never reaches past its edge
+        int pad = 2 * sample;
+        Canvas c = new Canvas(into);
+        Paint p = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inSampleSize = sample;
+        o.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        RectF r = new RectF();
+        Rect src = new Rect();
+        for (int y = 0; y < h; y += step) {
+            int y1 = Math.min(h, y + step);
+            r.set(0, y, w, y1);
+            inv.mapRect(r);
+            // starting on whole steps of the sample, every strip samples the same grid of the image
+            src.set(Math.max(0, ((int) Math.floor(r.left) - pad) / sample * sample),
+                    Math.max(0, ((int) Math.floor(r.top) - pad) / sample * sample),
+                    Math.min(iw, (int) Math.ceil(r.right) + pad), Math.min(ih, (int) Math.ceil(r.bottom) + pad));
+            if (src.isEmpty()) continue;
+            Bitmap band = rd.decodeRegion(src, o);
+            if (band == null) return false;
+            local.setScale(src.width() / (float) band.getWidth(), src.height() / (float) band.getHeight());
+            local.postTranslate(src.left, src.top);
+            local.postConcat(m);
+            BitmapShader sh = new BitmapShader(band, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            sh.setLocalMatrix(local);
+            p.setShader(sh);
+            c.drawRect(0, y, w, y1, p);
+            p.setShader(null);
+            band.recycle();
+        }
+        return true;
     }
 
     private boolean thrifty() {
@@ -970,12 +1269,50 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             c.drawBitmap(sharp, null, all, p);
             p.setAlpha(Math.round(255 * k));
             c.drawBitmap(soft, null, all, p);
-            out.prepareToDraw();
             return out;
         } catch (OutOfMemoryError e) {
             // without it, the two draws still work
             return null;
         }
+    }
+
+    /**
+     * The resting copy: {@code soft} mixed over the sharp copy at {@code d} and, given {@code bake},
+     * that shade and its grain over it as they'll lie on a {@code vw}x{@code vh} screen, the
+     * photograph held where path framed it (Light mode), {@code px} aside. Baked, it's a hardware
+     * bitmap on Android 9 and later, with no copy left in the app's memory. Null without room.
+     */
+    private Bitmap steady(Slide s, Bitmap soft, float d, Scrim bake, int vw, int vh, float px) {
+        Bitmap out = mix(s.sharp, soft, d);
+        if (out == null || bake == null) {
+            if (out != null) out.prepareToDraw();
+            return out;
+        }
+        Matrix m = new Matrix(), inv = new Matrix();
+        position(s, vw, vh, 0f, 0f, px, m);
+        m.preScale(s.sw / (float) out.getWidth(), s.sh / (float) out.getHeight());
+        if (!m.invert(inv)) {
+            out.recycle();
+            return null;
+        }
+        Canvas c = new Canvas(out);
+        c.concat(inv);
+        bake.bake(c, vw, vh, s.lumaTop, s.lumaBottom);
+        if (Build.VERSION.SDK_INT >= 28) {
+            try {
+                Bitmap hw = out.copy(Bitmap.Config.HARDWARE, false);
+                // off a device (a test's runtime) the "copy" comes back as an empty software bitmap
+                if (hw != null && hw.getConfig() == Bitmap.Config.HARDWARE) {
+                    out.recycle();
+                    return hw;
+                }
+                if (hw != null) hw.recycle();
+            } catch (RuntimeException | OutOfMemoryError e) {
+                // it stays in software
+            }
+        }
+        out.prepareToDraw();
+        return out;
     }
 
     static Bitmap blur(Bitmap src) {

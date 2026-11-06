@@ -42,6 +42,11 @@ final class AerialView extends FrameLayout {
     private String kind = "mix", lastUrl;
     /** This TV wouldn't play two videos at once: the last one goes before the next one loads. */
     private boolean oneAtATime;
+    /**
+     * Light mode: the H.264 copy, one video at a time from the start. Many 1–1.5 GB TVs have one or
+     * two hardware decoders, and a second held open beside the player makes it stutter.
+     */
+    private final boolean light;
     private int failures;
     private long lastFailAt;
     private boolean veilBusy;
@@ -52,7 +57,15 @@ final class AerialView extends FrameLayout {
         super(c);
         this.loop = loop;
         listener = l;
-        veil = new View(c);
+        light = Perf.light(c);
+        oneAtATime = light;
+        veil = new View(c) {
+            // one flat colour: it fades without an offscreen layer the size of the screen
+            @Override
+            public boolean hasOverlappingRendering() {
+                return false;
+            }
+        };
         veil.setBackgroundColor(0xFF000000);
         veil.setAlpha(0f);
         addView(veil, match());
@@ -85,11 +98,11 @@ final class AerialView extends FrameLayout {
                 old.release();
                 listener.lost();
                 veil(0f, 700, null);
-                startComing(nextVideo, false);
+                startComing(nextVideo, light);
             });
             return;
         }
-        startComing(v, false);
+        startComing(v, light);
     }
 
     private boolean metered() {

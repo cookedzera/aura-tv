@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.BitmapRegionDecoder;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
@@ -472,28 +473,42 @@ final class Gallery {
         o.inJustDecodeBounds = true;
         BitmapFactory.decodeByteArray(data, 0, data.length, o);
         if (o.outWidth <= 0) return null;
+        // a small TV (light mode) works in 16-bit colour here, half the memory while an app may be
+        // playing behind, and keeps each photograph at its own screen's size (never above 1080p);
+        // the home screen shows the photograph in 16-bit on such a TV anyway
+        boolean thrifty = Perf.light(c);
+        int fw = W, fh = H;
+        if (thrifty) {
+            android.util.DisplayMetrics dm = c.getResources().getDisplayMetrics();
+            fw = Math.max(1, Math.min(W, Math.max(dm.widthPixels, dm.heightPixels)));
+            fh = Math.max(1, Math.min(H, Math.min(dm.widthPixels, dm.heightPixels)));
+        }
         o.inJustDecodeBounds = false;
         o.inSampleSize = 1;
-        while (o.outWidth / (o.inSampleSize * 2) >= W && o.outHeight / (o.inSampleSize * 2) >= H) o.inSampleSize *= 2;
-        // a small TV (light mode) works in 16-bit colour here, half the memory while an app may be
-        // playing behind; the home screen shows the photograph in 16-bit on such a TV anyway
-        boolean thrifty = Perf.light(c);
-        if (thrifty) o.inPreferredConfig = Bitmap.Config.RGB_565;
-        Bitmap b, fit;
+        while (o.outWidth / (o.inSampleSize * 2) >= fw && o.outHeight / (o.inSampleSize * 2) >= fh) o.inSampleSize *= 2;
+        Bitmap fit;
         try {
-            b = BitmapFactory.decodeByteArray(data, 0, data.length, o);
-            if (b == null) return null;
-            fit = Bitmap.createBitmap(W, H, thrifty ? Bitmap.Config.RGB_565 : Bitmap.Config.ARGB_8888);
+            fit = Bitmap.createBitmap(fw, fh, thrifty ? Bitmap.Config.RGB_565 : Bitmap.Config.ARGB_8888);
+            // in 16-bit, decoded in strips at full colour and dithered in: decoded straight to 16 bits,
+            // a sky's bands would be in the file for good
+            if (!thrifty || !strips(data, o.inSampleSize, fit)) {
+                if (thrifty) o.inPreferredConfig = Bitmap.Config.RGB_565;
+                Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length, o);
+                if (b == null) {
+                    fit.recycle();
+                    return null;
+                }
+                float s = Math.max(fw / (float) b.getWidth(), fh / (float) b.getHeight());
+                Matrix m = new Matrix();
+                m.setScale(s, s);
+                m.postTranslate((fw - b.getWidth() * s) / 2f, (fh - b.getHeight() * s) / 2f);
+                new Canvas(fit).drawBitmap(b, m, new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG));
+                b.recycle();
+            }
         } catch (OutOfMemoryError e) {
             // the job shares the home screen's process: skip this one rather than take Aura down
             return null;
         }
-        float s = Math.max(W / (float) b.getWidth(), H / (float) b.getHeight());
-        Matrix m = new Matrix();
-        m.setScale(s, s);
-        m.postTranslate((W - b.getWidth() * s) / 2f, (H - b.getHeight() * s) / 2f);
-        new Canvas(fit).drawBitmap(b, m, new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG));
-        b.recycle();
         String name = "g" + Integer.toHexString(id.hashCode()) + "_" + System.currentTimeMillis() + ".jpg";
         File out = new File(dir, name), tmp = new File(dir, name + ".tmp");
         try (FileOutputStream fo = new FileOutputStream(tmp)) {
@@ -518,6 +533,24 @@ final class Gallery {
         e.put("accent", String.format(Locale.ROOT, "#%06X", AppRepo.colorOf(new BitmapDrawable(c.getResources(), fit)) & 0xFFFFFF));
         fit.recycle();
         return e;
+    }
+
+    /** The photograph cropped to fill {@code fit}, drawn in strips (see {@link Backdrop#bands}); false if it can't be read that way. */
+    private static boolean strips(byte[] data, int sample, Bitmap fit) {
+        BitmapRegionDecoder rd = null;
+        try {
+            rd = BitmapRegionDecoder.newInstance(data, 0, data.length, false);
+            int iw = rd.getWidth(), ih = rd.getHeight(), fw = fit.getWidth(), fh = fit.getHeight();
+            float s = Math.max(fw / (float) iw, fh / (float) ih);
+            Matrix m = new Matrix();
+            m.setScale(s, s);
+            m.postTranslate((fw - iw * s) / 2f, (fh - ih * s) / 2f);
+            return Backdrop.bands(rd, sample, m, fit);
+        } catch (IOException | RuntimeException e) {
+            return false;
+        } finally {
+            if (rd != null) rd.recycle();
+        }
     }
 
     // ---- network and text ----------------------------------------------------------------------
