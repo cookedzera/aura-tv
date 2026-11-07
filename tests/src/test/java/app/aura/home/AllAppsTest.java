@@ -139,6 +139,15 @@ public class AllAppsTest {
         a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_DOWN));
     }
 
+    private static boolean hasText(ViewGroup g, String text) {
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View v = g.getChildAt(i);
+            if (v instanceof TextView && text.contentEquals(((TextView) v).getText())) return true;
+            if (v instanceof ViewGroup && hasText((ViewGroup) v, text)) return true;
+        }
+        return false;
+    }
+
     private static List<String> ids(AllApps all) throws Exception {
         List<AllApps.Tab> tabs = field(all, "tabs");
         List<String> out = new ArrayList<>();
@@ -505,5 +514,70 @@ public class AllAppsTest {
         Assert.assertFalse("at rest under the glass", (boolean) (Boolean) field(backdrop, "running"));
         call(a, "closeAllApps", new Class<?>[]{});
         Assert.assertTrue("back as All Apps goes", (boolean) (Boolean) field(backdrop, "running"));
+    }
+
+    @Test
+    public void badgeGroundsAreRichNotMuddy() {
+        float[] hsv = new float[3];
+        // an olive Android placeholder green: calmed toward graphite, not a muddy olive
+        android.graphics.Color.colorToHSV(Tiles.ground(0xFF8BC34A)[0], hsv);
+        Assert.assertTrue("olive calmed: saturation " + hsv[1], hsv[1] < 0.35f);
+        // a grey icon: clean graphite
+        Assert.assertEquals(0xFF3C4048, Tiles.ground(0xFF9E9E9E)[0]);
+        // a blue icon: a rich blue, light at the top to deep at the foot
+        int[] blue = Tiles.ground(0xFF2196F3);
+        android.graphics.Color.colorToHSV(blue[0], hsv);
+        Assert.assertTrue(hsv[1] >= 0.42f && hsv[0] > 190f && hsv[0] < 220f);
+        float top = hsv[2];
+        android.graphics.Color.colorToHSV(blue[1], hsv);
+        Assert.assertTrue("deeper at the foot", hsv[2] < top);
+    }
+
+    @Test
+    public void holdingOkOnAnAppOpensItsMenuOverAllApps() throws Exception {
+        HomeActivity a = home(2, 4);
+        call(a, "openAllApps", new Class<?>[]{});
+        run(600);
+        AllApps all = field(a, "allApps");
+        Map<String, Object> grids = field(all, "grids");
+        Card[] cards = field(grids.get(Categories.ALL), "cards");
+        cards[2].onLongClick.run();
+        run(300);
+        AppMenu menu = field(a, "menu");
+        Assert.assertTrue("the app's menu", menu.isOpen());
+        Assert.assertTrue("All Apps stays under it", all.isOpen());
+        // Back closes the menu only: All Apps stays, home stays out of reach
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK));
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK));
+        run(300);
+        Assert.assertFalse(menu.isOpen());
+        Assert.assertTrue(all.isOpen());
+        View home = field(a, "home");
+        Assert.assertEquals(ViewGroup.FOCUS_BLOCK_DESCENDANTS, ((ViewGroup) home).getDescendantFocusability());
+    }
+
+    @Test
+    public void hidingAnAppFromItsMenuTakesItOutOfAllApps() throws Exception {
+        HomeActivity a = home(2, 4);
+        call(a, "openAllApps", new Class<?>[]{});
+        run(600);
+        AllApps all = field(a, "allApps");
+        Map<String, Object> grids = field(all, "grids");
+        Card[] cards = field(grids.get(Categories.ALL), "cards");
+        String pkg = ((AppRepo.App) cards[3].getTag()).pkg;
+        call(a, "allAppsMenu", new Class<?>[]{AppRepo.App.class, Card.class}, cards[3].getTag(), cards[3]);
+        AppMenu menu = field(a, "menu");
+        ViewGroup list = field(menu, "list");
+        Runnable hide = null;
+        for (int i = 0; i < list.getChildCount(); i++) {
+            View row = list.getChildAt(i);
+            if (row instanceof Pad && hasText((ViewGroup) row, c.getString(R.string.hide_from_home))) hide = ((Pad) row).onClick;
+        }
+        Assert.assertNotNull("Hide from home is offered", hide);
+        hide.run();
+        run(600);
+        Assert.assertTrue(all.isOpen());
+        List<AllApps.Tab> tabs = field(all, "tabs");
+        for (AppRepo.App x : tabs.get(0).apps) Assert.assertNotEquals(pkg, x.pkg);
     }
 }

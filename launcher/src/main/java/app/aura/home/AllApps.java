@@ -30,14 +30,17 @@ import java.util.concurrent.ExecutorService;
  * tiles. It rises from below when Down is pressed past home's last row in the tvOS style. Left and
  * Right pick a category (the apps slide out one way and the next in from the other), Down goes into
  * its apps, the grid glides on a spring to keep the row in focus in view, Up from the top row goes
- * back to the tabs, and Up from the tabs or Back closes it. On HIGH a soft light in the colour of
- * the app in focus follows it across the glass.
+ * back to the tabs, and Up from the tabs or Back closes it; holding OK on an app opens home's menu
+ * for it. On HIGH a soft light in the colour of the app in focus follows it across the glass.
  */
 final class AllApps extends FrameLayout {
     interface Host {
         Backdrop backdrop();
 
         void launch(AppRepo.App a, View from);
+
+        /** OK held on an app: home's menu for it, over the screen. */
+        void hold(AppRepo.App a, Card from);
 
         /** Up from the tabs: home asked to close the screen. */
         void close();
@@ -404,6 +407,7 @@ final class AllApps extends FrameLayout {
             // grows no further than halfway into the gap: never over its neighbours
             card.setGrowRoom(GAP / 2f);
             card.onClick = () -> host.launch(a, card);
+            card.onLongClick = () -> host.hold(a, card);
             LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             if (i % COLS > 0) cl.leftMargin = Ui.dp(GAP);
             row.addView(cell, cl);

@@ -1176,6 +1176,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
 
             @Override
+            public void hold(AppRepo.App a, Card from) {
+                allAppsMenu(a, from);
+            }
+
+            @Override
             public void close() {
                 closeAllApps();
             }
@@ -5795,8 +5800,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void closeMenu(View back) {
         if (!menu.isOpen()) return;
         menu.hide();
-        home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
-        if (back == null || !back.isShown() || !back.requestFocus()) focusGrid(gridAt);
+        // over All Apps, home stays out of reach and the focus stays in All Apps
+        home.setDescendantFocusability(allApps.isOpen() ? ViewGroup.FOCUS_BLOCK_DESCENDANTS : ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        if (back != null && back.isShown() && back.requestFocus()) return;
+        if (!allApps.isOpen()) focusGrid(gridAt);
     }
 
     // ---- folders -----------------------------------------------------------------------------
@@ -5825,11 +5832,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 closeMenu(card);
                 Categories.addTo(this, id, pkg);
                 populate();
+                // from All Apps: its tabs follow (the row may be new to them)
+                if (allApps.isOpen()) allApps.open(allAppsTabs());
                 hud(R.drawable.ic_check, getString(R.string.name_is_in_row, label, name));
             }));
         }
         items.add(new AppMenu.Item(R.drawable.ic_add, getString(R.string.cat_new), () -> {
             closeMenu(card);
+            // the name card hands the focus back to home's tiles: from All Apps, home comes back first
+            closeAllApps();
             askTag = pkg;
             home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
             ask.show(getString(R.string.name_your_new_category), "", getString(R.string.type_a_name_then_ok), Folders.suggestions(this), name -> {
@@ -5930,6 +5941,47 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (a != null) out.add(a);
         }
         return out;
+    }
+
+    /**
+     * OK held on an app in All Apps: home's own menu for it, less what only home's grid can do (move
+     * it, folders). What needs home itself (Settings, the name card) puts All Apps away first.
+     */
+    private void allAppsMenu(AppRepo.App a, Card card) {
+        if (menu.isOpen()) return;
+        final String pkg = a.pkg, label = a.label;
+        swallow(heldConfirm);
+        List<AppMenu.Item> items = new ArrayList<>();
+        items.add(new AppMenu.Item(R.drawable.ic_add, getString(R.string.add_to_category), () -> {
+            closeMenu(card);
+            chooseCategory(pkg, label, card);
+        }));
+        // a kids' profile can sort apps into rows, nothing more (as on home)
+        if (!Profiles.kids(this)) {
+            items.add(new AppMenu.Item(R.drawable.ic_picture, getString(R.string.change_its_picture), () -> {
+                closeMenu(card);
+                closeAllApps();
+                openSettings();
+                if (settings.isOpen()) settings.art(pkg, label);
+            }));
+            items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.hide_from_home), () -> {
+                closeMenu(card);
+                Prefs.hide(this, pkg, true);
+                populate();
+                allApps.open(allAppsTabs());
+                hud(R.drawable.ic_hide, getString(R.string.name_is_hidden_settings, label));
+            }));
+            items.add(new AppMenu.Item(R.drawable.ic_info, getString(R.string.app_info), () -> {
+                closeMenu(card);
+                open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + pkg)), card);
+            }));
+            if (removable(this, pkg)) items.add(new AppMenu.Item(R.drawable.ic_trash, getString(R.string.uninstall), () -> {
+                closeMenu(card);
+                open(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + pkg)), card);
+            }));
+        }
+        menuBack = card;
+        menu.show(card, label, items);
     }
 
     private void openAllApps() {
