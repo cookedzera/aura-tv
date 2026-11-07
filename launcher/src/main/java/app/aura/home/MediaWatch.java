@@ -1,6 +1,5 @@
 package app.aura.home;
 
-import android.app.NotificationManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -118,60 +117,12 @@ public class MediaWatch extends NotificationListenerService {
         String key, pkg, title, text;
         long when;
         boolean clearable;
-        /** Its app asked that an update of it not alert again. */
-        boolean alertOnce;
         android.app.PendingIntent open;
     }
 
-    /** Told (on the main thread) of each new notification worth a banner: the home screen's {@link Banner}. */
-    interface Posted {
-        void posted(Note n);
-    }
-
-    static volatile Posted onPosted;
-
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
-        posted(sbn, null);
-    }
-
-    @Override
-    public void onNotificationPosted(StatusBarNotification sbn, RankingMap rankings) {
-        posted(sbn, rankings);
-    }
-
-    private void posted(StatusBarNotification sbn, RankingMap rankings) {
         notesChanged();
-        final Posted p = onPosted;
-        if (p == null || sbn == null) return;
-        final Note n;
-        try {
-            n = note(this, sbn);
-            // a muted app, or one Android itself keeps quiet (Do Not Disturb, a silent channel), never shows one
-            if (n == null || muted(this, n.pkg) || !loud(sbn, rankings)) return;
-        } catch (RuntimeException e) {
-            return;
-        }
-        main.post(() -> {
-            try {
-                p.posted(n);
-            } catch (RuntimeException e) {
-                Trouble.caught("banner", e);
-            }
-        });
-    }
-
-    /**
-     * Whether Android itself lets it interrupt: Do Not Disturb doesn't hold it back, and its app
-     * didn't post it quietly (low importance: no sound and no peek on a phone either).
-     */
-    private static boolean loud(StatusBarNotification sbn, RankingMap rankings) {
-        Ranking r = new Ranking();
-        if (rankings == null || !rankings.getRanking(sbn.getKey(), r)) return true;
-        if (!r.matchesInterruptionFilter()) return false;
-        if (Build.VERSION.SDK_INT < 24) return !r.isAmbient();
-        int importance = r.getImportance();
-        return importance == NotificationManager.IMPORTANCE_UNSPECIFIED || importance >= NotificationManager.IMPORTANCE_DEFAULT;
     }
 
     @Override
@@ -239,7 +190,6 @@ public class MediaWatch extends NotificationListenerService {
         note.text = text != null ? text.toString().trim() : "";
         note.when = sbn.getPostTime();
         note.clearable = sbn.isClearable();
-        note.alertOnce = (n.flags & android.app.Notification.FLAG_ONLY_ALERT_ONCE) != 0;
         note.open = n.contentIntent;
         return note;
     }
@@ -252,20 +202,6 @@ public class MediaWatch extends NotificationListenerService {
             w.cancelNotification(key);
         } catch (RuntimeException ignored) {
         }
-    }
-
-    /** Apps whose banners were muted from Control Center, as this profile chose; their notifications stay listed there. */
-    static final String MUTED = "set_banners_muted";
-
-    static boolean muted(Context c, String pkg) {
-        return pkg != null && Prefs.of(c).getStringSet(MUTED, Collections.<String>emptySet()).contains(pkg);
-    }
-
-    static void mute(Context c, String pkg, boolean on) {
-        Set<String> s = new HashSet<>(Prefs.of(c).getStringSet(MUTED, Collections.<String>emptySet()));
-        if (on) s.add(pkg);
-        else s.remove(pkg);
-        Prefs.of(c).edit().putStringSet(MUTED, s).apply();
     }
 
     /**

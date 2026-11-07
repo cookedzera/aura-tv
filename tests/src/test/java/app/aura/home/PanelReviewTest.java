@@ -7,7 +7,6 @@ import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
-import android.os.Handler;
 import android.os.SystemClock;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
@@ -33,14 +32,11 @@ import org.robolectric.annotation.LooperMode;
 import org.robolectric.shadows.ShadowBluetoothAdapter;
 import org.robolectric.shadows.ShadowChoreographer;
 import org.robolectric.shadows.ShadowLooper;
-import org.robolectric.shadows.ShadowTrafficStats;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
@@ -50,9 +46,7 @@ import static org.robolectric.Shadows.shadowOf;
 /**
  * Control Center's notifications take only the rows there's room for above the screen's foot, at
  * 720p and 1080p, and count the rest; a hold whose long press moved the focus away leaves the next
- * press as any other; the live speed rests while home is behind an app and counts again once it's
- * back; a notification that can't be dismissed shows once after its hold; Play reaches the player
- * that's playing before one paused since.
+ * press as any other; Play reaches the player that's playing before one paused since.
  */
 @RunWith(RobolectricTestRunner.class)
 @LooperMode(LooperMode.Mode.PAUSED)
@@ -139,7 +133,6 @@ public class PanelReviewTest {
             run(100);
         }
         listener(null);
-        ShadowTrafficStats.restoreDefaults();
     }
 
     /** Home started and settled, Control Center not yet open. */
@@ -208,7 +201,7 @@ public class PanelReviewTest {
         Assert.assertEquals("the notifications on no row are counted", want, cap.getText().toString());
     }
 
-    /** Google TV's panel offered, Tonight's pick on, four notifications: no row past the screen's foot, nor a stop for the focus. */
+    /** The VPN pill on show, Tonight's pick on, four notifications: no row past the screen's foot, nor a stop for the focus. */
     private void notesFitTheScreen() throws Exception {
         connect(note("Episode 4 is ready", "Severance"), note("3 new films", "Added to your list"),
                 note("Download finished", "Season 2"), note("Recording tonight", "20:15 on BBC One"));
@@ -220,7 +213,7 @@ public class PanelReviewTest {
         Pad[] rows = field(cc, "noteRows");
         until(() -> rows[0].isShown());
         settle();
-        View pick = field(cc, "pick"), pill = field(cc, "googlePill"), header = field(cc, "header");
+        View pick = field(cc, "pick"), pill = field(cc, "vpnPill"), header = field(cc, "header");
         TextView info = field(cc, "info"), cap = field(cc, "notesCap");
         Assert.assertTrue("Tonight's pick on show", pick.isShown());
         pill.setVisibility(View.VISIBLE);
@@ -325,95 +318,6 @@ public class PanelReviewTest {
             Assert.assertEquals("the next press clicks", 1, clicks[i]);
             Assert.assertEquals("and doesn't stay shrunk", Ui.FOCUS_SCALE_CONTROL, v.getScaleX(), 0.002f);
         }
-    }
-
-    @Test
-    public void theLiveSpeedRestsWhileHomeIsBehindAnApp() throws Exception {
-        // a TV that counts its traffic (the simulated one says it can't, and the speed rightly stops there)
-        ShadowTrafficStats.setTotalRxBytes(5_000_000);
-        ShadowTrafficStats.setTotalTxBytes(400_000);
-        ControlCenter cc = startHome();
-        openCc();
-        run(1500);
-        Runnable tick = field(cc, "speedTick");
-        Handler h = cc.panel.getHandler();
-        Assert.assertTrue("a look each second while Control Center is open", h.hasCallbacks(tick));
-
-        // an app comes over home, which leaves Control Center open: no look after the next
-        home.windowFocusChanged(false);
-        home.pause();
-        run(1100);
-        Boolean open = field(home.get(), "ccOpen");
-        Assert.assertTrue("Control Center left open behind the app", open);
-        Assert.assertFalse("nothing counted behind the app", h.hasCallbacks(tick));
-        run(3000);
-        Assert.assertFalse(h.hasCallbacks(tick));
-
-        // home in front again: its refresh counts again
-        home.resume();
-        Assert.assertTrue("back in front, it counts again", h.hasCallbacks(tick));
-        home.windowFocusChanged(true);
-        run(2100);
-        Assert.assertTrue(h.hasCallbacks(tick));
-
-        // the focus alone going and coming back (a screensaver over home on older Android): the same
-        home.windowFocusChanged(false);
-        run(1100);
-        Assert.assertFalse(h.hasCallbacks(tick));
-        home.windowFocusChanged(true);
-        run(48);
-        Assert.assertTrue("the focus back, it counts again", h.hasCallbacks(tick));
-    }
-
-    /** The titles on the rows on show, in order of their text. */
-    private static List<String> titles(Pad[] rows, TextView[] titles) {
-        List<String> out = new ArrayList<>();
-        for (int k = 0; k < rows.length; k++) if (rows[k].isShown()) out.add(titles[k].getText().toString());
-        Collections.sort(out);
-        return out;
-    }
-
-    private static List<String> sorted(String... s) {
-        List<String> out = new ArrayList<>(Arrays.asList(s));
-        Collections.sort(out);
-        return out;
-    }
-
-    @Test
-    public void aNotificationThatCantBeDismissedShowsOnceAfterItsHold() throws Exception {
-        Notification kept = note("Recording tonight", "20:15 on BBC One");
-        kept.flags |= Notification.FLAG_NO_CLEAR;
-        connect(kept, note("Episode 4 is ready", "Severance"), note("3 new films", "Added to your list"));
-        ControlCenter cc = startHome();
-        openCc();
-        Pad[] rows = field(cc, "noteRows");
-        TextView[] titles = field(cc, "noteTitles");
-        TextView cap = field(cc, "notesCap");
-        until(() -> rows[2].isShown());
-        int k = -1;
-        for (int i = 0; i < rows.length; i++) if ("Recording tonight".contentEquals(titles[i].getText())) k = i;
-        Assert.assertTrue("on a row of its own", k >= 0);
-
-        // hold OK on it: it stays (its app keeps it up), and its row offers the mute
-        rows[k].onLongClick.run();
-        run(100);
-        String stays = c.getString(R.string.this_one_stays_until_its);
-        Assert.assertEquals(stays, titles[k].getText().toString());
-        Assert.assertEquals("never again on another row", sorted(stays, "Episode 4 is ready", "3 new films"), titles(rows, titles));
-        Assert.assertEquals("nothing pushed past the rows", c.getString(R.string.notifications), cap.getText().toString());
-
-        // read again, still there: still only the offer
-        cc.refresh();
-        settle();
-        Assert.assertEquals(sorted(stays, "Episode 4 is ready", "3 new films"), titles(rows, titles));
-        Assert.assertEquals(c.getString(R.string.notifications), cap.getText().toString());
-
-        // opened anew: a notification once more, once
-        home.get().closeCc(false);
-        run(300);
-        openCc();
-        run(100);
-        Assert.assertEquals(sorted("Recording tonight", "Episode 4 is ready", "3 new films"), titles(rows, titles));
     }
 
     private static PlaybackState state(int s) {

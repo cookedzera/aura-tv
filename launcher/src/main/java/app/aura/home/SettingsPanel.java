@@ -49,18 +49,16 @@ final class SettingsPanel {
     }
 
     final FrameLayout panel;
-    final Activity act;
+    private final Activity act;
     /** The request code for the beat glow's sound permission, answered in HomeActivity. */
     static final int BEAT_ASK = 42;
-    final Host host;
+    private final Host host;
     private final LinearLayout head, rows;
     private final ScrollView scroll;
     private final TextView title, note, help;
     private final EditText city;
-    /** Privacy, Permissions, Accessibility, Network debugging and About, under Aura. */
-    final TrustPages trust;
     /** The page on show: "" for the main list, else "apps", "widgets", "wallpaper", "drop" or "updates". */
-    String page = "";
+    private String page = "";
     private boolean confirmClear;
     /** The photo whose removal waits for a second OK. */
     private String confirmPhoto;
@@ -80,8 +78,7 @@ final class SettingsPanel {
     private String updateState = "", updateNote = "";
     // set up on this TV: the last connection's result, and how far setup got
     private String adbState = "", setupNote = "";
-    private boolean setupRunning;
-    boolean confirmAdbOff;
+    private boolean setupRunning, confirmAdbOff;
     // remote buttons: waiting for a press; the button pressed, waiting for its app; a removal waiting for a second OK
     private boolean teachingKey;
     private int[] newKey;
@@ -215,13 +212,12 @@ final class SettingsPanel {
         });
         scroll.addView(rows, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         right.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-        // the screen's full height: eleven 40 dp rows with 6 dp between, and room to grow, inside a
-        // 540 dp-tall TV screen; longer pages scroll under the faded edges
+        // tall enough that the whole main list fits without scrolling: no row is ever cut at an edge
+        // 13 rows of 35 dp with 4 dp between, and room to grow, inside a 540 dp-tall TV screen
         FrameLayout.LayoutParams rl = new FrameLayout.LayoutParams(Ui.dp(424), Ui.dp(532), Gravity.END | Gravity.CENTER_VERTICAL);
         rl.rightMargin = Ui.dp(78);
         panel.addView(right, rl);
         panel.setVisibility(View.GONE);
-        trust = new TrustPages(this);
     }
 
     /** Fills and submits the panel's text field if it's currently open. */
@@ -267,7 +263,7 @@ final class SettingsPanel {
     }
 
     /** The first row that takes focus: section labels don't. */
-    void focusFirst() {
+    private void focusFirst() {
         for (int i = 0; i < rows.getChildCount(); i++) if (rows.getChildAt(i).isFocusable() && rows.getChildAt(i).requestFocus()) return;
     }
 
@@ -422,7 +418,6 @@ final class SettingsPanel {
     private void disarm() {
         confirmRetire = confirmRemove = confirmAdbOff = confirmSignOut = confirmClear = confirmClearTrouble = confirmCatDelete = false;
         confirmProfile = confirmPhoto = confirmKey = dbConfirm = null;
-        trust.disarm();
     }
 
     /** The keyboard for a field just shown, unless it was hidden again before this ran: on a TV it would take the remote. */
@@ -438,7 +433,6 @@ final class SettingsPanel {
         if (p.equals("tv")) tvHomeCache = null;
         if (p.equals("home") || p.equals("cats")) catsEmpty.clear();
         if (p.equals("apps")) inputNames.clear();
-        if (TrustPages.owns(p)) trust.entered(p);
         boolean back = p.isEmpty() || page.equals("photos") && p.equals("drop")
                 || (page.equals("widgets") || page.equals("keys") || page.equals("cats")) && p.equals("home")
                 || page.equals("cat") && p.equals("cats")
@@ -470,14 +464,14 @@ final class SettingsPanel {
     /** Hidden inputs' names, asked of the TV once a visit to Hidden apps: each is a call into Android. */
     private final java.util.Map<String, String> inputNames = new java.util.HashMap<>();
 
-    void build() {
+    private void build() {
         String keep = focusedTag();
         final int sy = scroll.getScrollY();
         final boolean samePage = page.equals(builtPage);
         builtPage = page;
         rows.removeAllViews();
         if (!page.equals("photos")) thumbs.clear();
-        note.setMaxLines(page.equals("updates") ? 18 : TrustPages.owns(page) ? 5 : 4);
+        note.setMaxLines(page.equals("updates") ? 18 : 4);
         // the release notes have the whole column to themselves
         help.setVisibility(page.equals("updates") ? View.GONE : View.VISIBLE);
         help.setText("");
@@ -612,8 +606,14 @@ final class SettingsPanel {
             // switched by Aura where setup allowed it; elsewhere, Android's own Accessibility screen does it
             // how late the TV hands over remote releases while Aura watches the keys: some firmware adds a lot
             int lag = Prefs.device(act).getInt("keys_lag", 0);
-            add(act.getString(R.string.home_button_in_apps), HomeKeys.on(act) ? act.getString(R.string.homekeys_on) + (lag >= 150 ? " · " + act.getString(R.string.remote_ms_late, lag) : "") : act.getString(R.string.off), "homekeys",
-                    () -> toggleHomeKeys("homekeys"));
+            add(act.getString(R.string.home_button_in_apps), HomeKeys.on(act) ? act.getString(R.string.homekeys_on) + (lag >= 150 ? " · " + act.getString(R.string.remote_ms_late, lag) : "") : act.getString(R.string.off), "homekeys", () -> {
+                if (!HomeKeys.set(act, !HomeKeys.on(act))) {
+                    host.open(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS), panel);
+                    return;
+                }
+                build();
+                focusTag("homekeys");
+            });
             // where Android sends Home to another launcher, the service can send it to Aura instead
             if (HomeKeys.on(act) && !HomeRole.held(act)) {
                 add(act.getString(R.string.home_goes_to), HomeKeys.takeover(act) ? "Aura" : HomeRole.other(act), "takeover", () -> {
@@ -624,8 +624,12 @@ final class SettingsPanel {
             }
             // pictures need the service above, and Android 11
             if (android.os.Build.VERSION.SDK_INT >= 30 && HomeKeys.on(act)) {
-                add(act.getString(R.string.pictures_in_the_switcher), Previews.on(act) ? act.getString(R.string.apps_as_you_left_them) : act.getString(R.string.off), "previews",
-                        () -> togglePreviews("previews"));
+                add(act.getString(R.string.pictures_in_the_switcher), Previews.on(act) ? act.getString(R.string.apps_as_you_left_them) : act.getString(R.string.off), "previews", () -> {
+                    Previews.set(act, !Previews.on(act));
+                    host.hud(R.drawable.ic_check, Previews.on(act) ? act.getString(R.string.kept_only_on_this_tv) : act.getString(R.string.pictures_deleted));
+                    build();
+                    focusTag("previews");
+                });
             }
             if (HomeKeys.on(act)) {
                 int n = HomeKeys.keys(act).size();
@@ -667,7 +671,7 @@ final class SettingsPanel {
             });
             for (Profiles.Profile pr : Profiles.all(act)) {
                 if (Profiles.MAIN.equals(pr.id)) continue;
-                danger(act.getString(R.string.remove_name, pr.name), ("pr:del:" + pr.id).equals(confirmProfile) ? act.getString(R.string.press_ok_again) : "", "pr:del:" + pr.id, () -> {
+                add(act.getString(R.string.remove_name, pr.name), ("pr:del:" + pr.id).equals(confirmProfile) ? act.getString(R.string.press_ok_again) : "", "pr:del:" + pr.id, () -> {
                     String tag = "pr:del:" + pr.id;
                     if (!tag.equals(confirmProfile)) {
                         confirmProfile = tag;
@@ -946,7 +950,7 @@ final class SettingsPanel {
                             else if (act.getCurrentFocus() == null || act.getCurrentFocus().getParent() != rows) go("photos");
                         });
             }
-            if (list.length() > 1) danger(act.getString(R.string.remove_all), confirmClear ? act.getString(R.string.press_ok_again) : act.getResources().getQuantityString(R.plurals.n_photos, list.length(), list.length()), "clear", () -> {
+            if (list.length() > 1) add(act.getString(R.string.remove_all), confirmClear ? act.getString(R.string.press_ok_again) : act.getResources().getQuantityString(R.plurals.n_photos, list.length(), list.length()), "clear", () -> {
                 if (!confirmClear) {
                     confirmClear = true;
                     build();
@@ -989,7 +993,7 @@ final class SettingsPanel {
             Ui.fit(title, act.getString(R.string.problem_reports), Ui.dp(300), 52, 30);
             note.setText(act.getString(R.string.when_something_goes_wrong_aura));
             if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
-            if (Trouble.count(act) > 0) danger(act.getString(R.string.clear_them), confirmClearTrouble ? act.getString(R.string.press_ok_again) : "", "trouble:clear", () -> {
+            if (Trouble.count(act) > 0) add(act.getString(R.string.clear_them), confirmClearTrouble ? act.getString(R.string.press_ok_again) : "", "trouble:clear", () -> {
                 if (!confirmClearTrouble) {
                     confirmClearTrouble = true;
                     build();
@@ -1057,8 +1061,6 @@ final class SettingsPanel {
             buildTv();
         } else if (page.equals("keys")) {
             buildKeys();
-        } else if (TrustPages.owns(page)) {
-            trust.build(page);
         } else {
             Ui.fit(title, act.getString(R.string.settings), Ui.dp(300), 52, 30);
             Weather.Now w = Weather.now(act);
@@ -1119,13 +1121,13 @@ final class SettingsPanel {
             if (android.os.Build.VERSION.SDK_INT >= 28) add(act.getString(R.string.block_ads), Shield.on(act) ? act.getString(R.string.on_value, Shield.name(act)) : act.getString(R.string.off), "shield", () -> go("shield"));
             add(act.getString(R.string.animations), animLabel(), "anim", this::cycleAnim);
             add(act.getString(R.string.android_settings), "", "android", () -> host.open(new Intent(Settings.ACTION_SETTINGS), panel));
-            section(act.getString(R.string.apps_and_data));
+            section("AURA");
             add(act.getString(R.string.your_setup), act.getString(R.string.save_to_your_phone_or), "backup", this::openBackup);
             int problems = Trouble.count(act);
             add(act.getString(R.string.problem_reports), problems == 0 ? act.getString(R.string.none_lately) : act.getResources().getQuantityString(R.plurals.n_notes_read_on_your_phone, problems, problems),
                     "trouble", this::openTrouble);
             String waiting = Updater.pending(act);
-            add(act.getString(R.string.updates), waiting != null ? act.getString(R.string.aura_version_is_ready, waiting) : act.getString(R.string.version_name, version()), "updates", () -> {
+            add(act.getString(R.string.updates), waiting != null ? act.getString(R.string.aura_version_is_ready, waiting) : act.getString(R.string.version_name, Updater.installed(act)), "updates", () -> {
                 // opening it counts as seen: the red dots go
                 Updater.seen(act);
                 host.applied("update");
@@ -1139,14 +1141,7 @@ final class SettingsPanel {
                 dl.leftMargin = Ui.dp(5);
                 ((FrameLayout) rows.getChildAt(rows.getChildCount() - 1)).addView(dot, dl);
             }
-            // what Aura sends and holds, shown in the product: each row's tag is its page, so Back lands here
-            section("AURA");
-            add(act.getString(R.string.privacy), "", TrustPages.PRIVACY, () -> go(TrustPages.PRIVACY));
-            add(act.getString(R.string.permissions), "", TrustPages.PERMS, () -> go(TrustPages.PERMS));
-            add(act.getString(R.string.accessibility), act.getString(HomeKeys.on(act) ? R.string.on : R.string.off), TrustPages.A11Y, () -> go(TrustPages.A11Y));
-            add(act.getString(R.string.network_debugging), TrustPages.link(act), TrustPages.DEBUGGING, () -> go(TrustPages.DEBUGGING));
-            add(act.getString(R.string.about_aura), "MIT", TrustPages.ABOUT, () -> go(TrustPages.ABOUT));
-            danger(act.getString(R.string.remove_aura), confirmRemove ? act.getString(R.string.press_ok_again) : act.getString(R.string.puts_the_tv_back_first), "remove", this::removeAura);
+            add(act.getString(R.string.remove_aura), confirmRemove ? act.getString(R.string.press_ok_again) : act.getString(R.string.puts_the_tv_back_first), "remove", this::removeAura);
         }
         if (keep != null) {
             boolean kept = false;
@@ -1736,10 +1731,15 @@ final class SettingsPanel {
         if (Adb.on(act) && Adb.unguarded(act) && Compat.granted(act, android.Manifest.permission.WRITE_SECURE_SETTINGS)) {
             add(act.getString(R.string.turn_network_debugging_off), confirmAdbOff ? act.getString(R.string.press_ok_again) : act.getString(R.string.closes_the_open_door), "adb:off", this::adbOff);
         }
-        boolean dev = Adb.devOptionsOn(act);
-        String devPage = TrustPages.devPage(act, dev);
-        add(act.getString(R.string.developer_options), TrustPages.devSays(act, dev, Trouble.fireTv(act), devPage), "adb:dev",
-                () -> host.open(new Intent(devPage), panel));
+        // the page Developer options are on, or About while they're off (pressing Build seven times there
+        // switches them on); the TV's Settings when this TV has no such page. Checked first, as opening
+        // one closes Settings and swallows any failure. Fire TV hides them behind its own name in About
+        boolean dev = Adb.devOptionsOn(act), fire = Trouble.fireTv(act);
+        String want = dev ? Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS : Settings.ACTION_DEVICE_INFO_SETTINGS;
+        final String devPage = HomeRole.real(act, new Intent(want)) ? want : Settings.ACTION_SETTINGS;
+        String devSays = !dev ? act.getString(fire ? R.string.off_fire_press_name_7 : R.string.off_about_press_build_7)
+                : act.getString(devPage.equals(Settings.ACTION_SETTINGS) ? R.string.android_settings : fire ? R.string.adb_debugging_is_here : R.string.usb_debugging_is_here);
+        add(act.getString(R.string.developer_options), devSays, "adb:dev", () -> host.open(new Intent(devPage), panel));
         Intent xray = new Intent().setClassName("com.amazon.ssm", "com.amazon.ssm.ControlPanel");
         if (Compat.resolves(act, xray)) {
             add(act.getString(R.string.system_xray), act.getString(R.string.cpu_memory_and_network_overlay), "adb:xray",
@@ -1905,7 +1905,7 @@ final class SettingsPanel {
             focusTag("c:down");
         });
         if (!Categories.builtIn(k)) {
-            danger(act.getString(R.string.delete_category), confirmCatDelete ? act.getString(R.string.press_ok_again) : "", "c:del", () -> {
+            add(act.getString(R.string.delete_category), confirmCatDelete ? act.getString(R.string.press_ok_again) : "", "c:del", () -> {
                 if (!confirmCatDelete) {
                     confirmCatDelete = true;
                     build();
@@ -1930,39 +1930,8 @@ final class SettingsPanel {
         });
     }
 
-    void focusTag(String tag) {
+    private void focusTag(String tag) {
         for (int i = 0; i < rows.getChildCount(); i++) if (tag.equals(rows.getChildAt(i).getTag())) rows.getChildAt(i).requestFocus();
-    }
-
-    /** A page's title and the sentence under it. */
-    void head(String t, String n) {
-        Ui.fit(title, t, Ui.dp(300), 52, 30);
-        note.setText(n);
-    }
-
-    private String version;
-
-    /** Aura's version, asked of Android once: each redraw of the main list asked again. */
-    String version() {
-        if (version == null) version = Updater.installed(act);
-        return version;
-    }
-
-    /** The Home button service on or off, or Android's Accessibility settings where Aura may not switch it. */
-    void toggleHomeKeys(String tag) {
-        if (!HomeKeys.set(act, !HomeKeys.on(act))) {
-            host.open(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS), panel);
-            return;
-        }
-        build();
-        focusTag(tag);
-    }
-
-    void togglePreviews(String tag) {
-        Previews.set(act, !Previews.on(act));
-        host.hud(R.drawable.ic_check, Previews.on(act) ? act.getString(R.string.kept_only_on_this_tv) : act.getString(R.string.pictures_deleted));
-        build();
-        focusTag(tag);
     }
 
     // ---- from your phone ---------------------------------------------------------------------
@@ -2136,7 +2105,7 @@ final class SettingsPanel {
     }
 
     /** Debugging off for the whole TV: nothing on the Wi-Fi gets in, Aura's own link included. */
-    void adbOff() {
+    private void adbOff() {
         if (!confirmAdbOff) {
             confirmAdbOff = true;
             build();
@@ -2666,24 +2635,11 @@ final class SettingsPanel {
     }
 
     /** One choice: its name on the left, its value on the right; OK changes it. */
-    void add(String label, String value, String tag, Runnable run) {
-        row(label, value, tag, null, run, false);
-    }
-
-    private void add(String label, String value, String tag, android.graphics.Bitmap thumb, Runnable run) {
-        row(label, value, tag, thumb, run, false);
-    }
-
-    /** The same with its name in red: a row whose second OK removes something for good. */
-    void danger(String label, String value, String tag, Runnable run) {
-        row(label, value, tag, null, run, true);
+    private void add(String label, String value, String tag, Runnable run) {
+        add(label, value, tag, null, run);
     }
 
     private static final int EDGE = 36;
-    /** Settings rows: 40 dp capsules, 6 dp apart. */
-    private static final int ROW_H = 40, ROW_GAP = 6;
-    /** A destructive row's name: coral on the glass, a deeper red on the white of focus. */
-    static final int DANGER = 0xFFFF6B61, DANGER_LIT = 0xFFD70015;
 
     /**
      * Rows near the list's top or bottom edge fade with how far they still are inside it, and are gone
@@ -2798,16 +2754,17 @@ final class SettingsPanel {
         });
     }
 
-    private void row(String label, String value, String tag, android.graphics.Bitmap thumb, Runnable run, boolean danger) {
-        Pad p = new Pad(act, null, ROW_H / 2f, 0f);
+    private void add(String label, String value, String tag, android.graphics.Bitmap thumb, Runnable run) {
+        Pad p = new Pad(act, null, 16, 0f);
         p.row = true;
         p.plainColor = 0x1AFFFFFF;
         p.edgeLight = false;
+        p.focusScale = 1.03f;
         p.setTag(tag);
         LinearLayout r = new LinearLayout(act);
         r.setGravity(Gravity.CENTER_VERTICAL);
         boolean picture = thumb != null || tag.startsWith("p:");
-        r.setPadding(Ui.dp(picture ? 6 : 18), 0, Ui.dp(18), 0);
+        r.setPadding(Ui.dp(picture ? 6 : 16), 0, Ui.dp(16), 0);
         if (picture) {
             android.widget.ImageView iv = new android.widget.ImageView(act);
             iv.setTag("thumb");
@@ -2815,50 +2772,46 @@ final class SettingsPanel {
             iv.setBackgroundColor(0x14FFFFFF);
             iv.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
             iv.setClipToOutline(true);
-            // concentric with the capsule: its radius less the 6 dp inset
             iv.setOutlineProvider(new android.view.ViewOutlineProvider() {
                 @Override
                 public void getOutline(View v, android.graphics.Outline o) {
-                    o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), v.getHeight() / 2f);
+                    o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(7));
                 }
             });
-            LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(Ui.dp(50), Ui.dp(ROW_H - 12));
+            LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(Ui.dp(50), Ui.dp(28));
             tl.rightMargin = Ui.dp(12);
             r.addView(iv, tl);
         }
-        TextView name = Ui.text(act, Ui.CALLOUT, Ui.medium, danger ? DANGER : 0xFFFFFFFF);
-        if (danger) p.fillListener = f -> name.setTextColor(Ui.mix(DANGER, DANGER_LIT, f));
-        else p.tint(name, 1f);
+        TextView name = p.tint(Ui.text(act, 13.5f, Ui.semibold, 0xFFFFFFFF), 1f);
         name.setText(label);
         Ui.shrinkToWidth(name, 11f);
         r.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         if (!value.isEmpty()) {
-            TextView v = p.tint(Ui.text(act, 14, Ui.medium, 0xFFFFFFFF), 0.7f);
+            TextView v = p.tint(Ui.text(act, 12, Ui.medium, 0xFFFFFFFF), 0.7f);
             v.setText(value);
             v.setEllipsize(TextUtils.TruncateAt.END);
             v.setMaxWidth(Ui.dp(170));
             Ui.shrinkToWidth(v, 10f);
-            LinearLayout.LayoutParams vl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            vl.leftMargin = Ui.dp(10);
-            r.addView(v, vl);
+            r.addView(v);
         }
         p.addView(r, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         p.onClick = run;
         p.setOnFocusChangeListener((v, has) -> {
             if (has) explain(tag);
         });
-        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ROW_H));
-        l.topMargin = Ui.dp(ROW_GAP);
+        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(35));
+        l.topMargin = Ui.dp(4);
         rows.addView(p, l);
     }
 
     /** A quiet label over a group of rows; never focused, so the remote moves straight past it. */
-    void section(String name) {
-        TextView t = Ui.caps(act, Ui.FLOOR, 0x99FFFFFF, 0.12f);
+    private void section(String name) {
+        TextView t = Ui.caps(act, 7.5f, 0x8CFFFFFF, 0.3f);
         t.setText(name);
-        t.setPadding(Ui.dp(18), 0, 0, 0);
+        t.setPadding(Ui.dp(16), 0, 0, 0);
         LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        l.topMargin = Ui.dp(rows.getChildCount() == 0 ? 4 : 20);
+        l.topMargin = Ui.dp(rows.getChildCount() == 0 ? 2 : 16);
+        l.bottomMargin = Ui.dp(2);
         rows.addView(t, l);
     }
 
@@ -2882,8 +2835,8 @@ final class SettingsPanel {
     }
 
     private static final java.util.Map<String, Integer> HELP = new java.util.HashMap<>();
-    /** Sentences for rows made on the fly (each app on Free up memory, each trust page's row), by tag. */
-    final java.util.Map<String, String> rowHelp = new java.util.HashMap<>();
+    /** Sentences for rows made on the fly (each app on Free up memory), by tag. */
+    private final java.util.Map<String, String> rowHelp = new java.util.HashMap<>();
 
     static {
         // Settings
@@ -2906,11 +2859,6 @@ final class SettingsPanel {
         HELP.put("trouble", R.string.help_trouble);
         HELP.put("backup", R.string.help_backup);
         HELP.put("updates", R.string.help_updates);
-        HELP.put(TrustPages.PRIVACY, R.string.privacy_note);
-        HELP.put(TrustPages.PERMS, R.string.permissions_note);
-        HELP.put(TrustPages.A11Y, R.string.home_keys_about);
-        HELP.put(TrustPages.DEBUGGING, R.string.debugging_note);
-        HELP.put(TrustPages.ABOUT, R.string.about_note);
         HELP.put("remove", R.string.help_remove);
         // Home screen
         HELP.put("layout", R.string.help_layout);

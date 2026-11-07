@@ -103,7 +103,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private Scrim scrim;
     private Splash splash;
     private GlassFrame sidebar, status, tip, hud;
-    private Banner banner;
     private Widget skyW, fyW, tdW;
     /** The tvOS style: apps alone on a frosted dock low on the screen; the sidebar hidden, or sliding in when wanted. */
     private boolean dock, sideHidden, sideIn = true;
@@ -214,15 +213,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      * photograph's blurred copy directly, so it keeps drifting.
      */
     private final Runnable hideHome = () -> {
-        if (!ccOpen) return;
-        for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
-        hideApps();
+        if (ccOpen) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
     };
-
-    /** All apps, left open beneath, stops drawing too (closeCc shows it again). */
-    private void hideApps() {
-        if (allApps != null && allApps.isOpen()) allApps.setVisibility(View.INVISIBLE);
-    }
 
     private View[] behindCc() {
         // Light mode keeps the bloom gone (applyLight): a panel closing mustn't bring a full-screen layer back
@@ -659,8 +651,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     protected void onPause() {
         super.onPause();
         resumed = false;
-        if (banner != null) banner.clear();
-        if (allApps != null) allApps.pause();
         handler.removeCallbacks(focusCheck);
         handler.removeCallbacks(focusBack);
         focusBack.run();
@@ -799,7 +789,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 Previews.dropFresh();
                 Continue.trim();
                 shed();
-                if (allApps != null) allApps.trim();
             }
             return;
         }
@@ -928,11 +917,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (switcher.isOpen()) closeSwitcher();
             if (ccOpen) closeCc(false);
             if (settings.isOpen()) closeSettings();
-            boolean was = allApps != null && allApps.isOpen();
             closeOverlays();
             if (editing) stopEdit();
             wake();
-            if (!was) openAllApps();
+            focusGrid(0);
             return;
         }
         // see the first-run welcome again: am start -n app.aura.home/.HomeActivity --ez aura_welcome true
@@ -1053,29 +1041,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         home.addView(pageDots, frame(Ui.dp(WIDGET_ROW), Ui.dp(10), Gravity.BOTTOM | Gravity.START, Ui.dp(PAGE_X), 0, 0, Ui.dp(4)));
         buildSidebar();
         buildStatus();
-        // a notification's banner: above home, below every panel, and only while nothing covers home
-        banner = new Banner(this, backdrop, new Banner.Host() {
-            @Override
-            public boolean bannerRoom() {
-                return resumed && splash == null && welcome == null && !introPending && !photo && !quietScreen
-                        && !ccOpen && !editing && !overlayOpen();
-            }
-
-            @Override
-            public void bannerShown(boolean shown) {
-                boolean rest = dock ? topIn : greetingShown;
-                status.animate().alpha(shown || !rest ? 0f : 1f).setDuration(Ui.CLOSE).setStartDelay(0)
-                        .setInterpolator(Ui.EASE_STANDARD).start();
-            }
-        });
-        root.addView(banner, root.indexOfChild(home) + 1, Banner.place());
 
         // photo mode: the photograph's story and the time, as in the screensaver
         story = new Story(this, backdrop);
         story.setAlpha(0f);
         root.addView(story, match());
         cc = new ControlCenter(this, this);
-        cc.systemPanel = HomeKeys::systemPanel;
         root.addView(cc.panel, match());
         buildTopCc();
         applyLayout();
@@ -1114,7 +1085,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     findPanel.type(text);
                     return true;
                 }
-                if (allApps != null && allApps.type(text)) return true;
                 if (settings.isOpen()) closeSettings();
                 if (ccOpen) closeCc(false);
                 if (switcher.isOpen()) closeSwitcher();
@@ -2189,10 +2159,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void closeWho(boolean back) {
         if (!who.isOpen()) return;
         who.close();
-        if (backToApps()) {
-            beforeWho = null;
-            return;
-        }
         for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         stack.hold(false);
@@ -2210,7 +2176,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         boolean on = Prefs.on(this, Prefs.WEATHER);
         weatherSheet.open(on);
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        coverApps();
         stack.hold(true);
         handler.postDelayed(() -> {
             if (weatherSheet.isOpen()) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
@@ -2227,7 +2192,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void closeWeather() {
         if (!weatherSheet.isOpen()) return;
         weatherSheet.close();
-        if (backToApps()) return;
         for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         stack.hold(false);
@@ -2252,7 +2216,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         col.setPadding(0, Ui.dp(8), 0, Ui.dp(8));
         col.setClipChildren(false);
         col.setClipToPadding(false);
-        addSide(col, R.drawable.ic_apps, getString(R.string.apps), this::openAllApps, true);
+        addSide(col, R.drawable.ic_apps, getString(R.string.apps), () -> focusGrid(0), true);
         addSide(col, R.drawable.ic_search, getString(R.string.find_an_app), () -> openFind(""), false);
         addSide(col, R.drawable.ic_hdmi, getString(R.string.inputs_2), () -> openCc(true), false);
         addSide(col, R.drawable.ic_photo, getString(R.string.photo_mode), () -> setPhoto(true), false);
@@ -2777,7 +2741,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         refreshWidgets(true);
         windowMoved();
-        if (allApps != null) allApps.refresh();
     }
 
     /**
@@ -4161,11 +4124,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     private void focusGrid(int i) {
-        if (allApps != null && allApps.isOpen()) {
-            // not out of a panel open over the page (an app installed, a TV input connecting meanwhile)
-            if (!overApps()) allApps.regain();
-            return;
-        }
         if (cells.isEmpty() || ccOpen) return;
         gridAt = Math.max(0, Math.min(cells.size() - 1, i));
         reveal(gridAt);
@@ -4431,7 +4389,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private void onFocusMoved(View n) {
         if (n == null || ccOpen) return;
-        if (allApps != null && allApps.isOpen()) return;
         // waiting on the page while tiles are rebuilt: as far as home goes, nothing has moved
         if (n == parking) return;
         if (parking.isFocusable()) unpark();
@@ -4647,8 +4604,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return welcome != null || settings != null && settings.isOpen() || folderPanel != null && folderPanel.isOpen()
                 || switcher != null && switcher.isOpen() || nowPlaying != null && nowPlaying.isOpen()
                 || menu != null && menu.isOpen() || ask != null && ask.isOpen() || findPanel != null && findPanel.isOpen()
-                || weatherSheet != null && weatherSheet.isOpen() || who != null && who.isOpen()
-                || allApps != null && allApps.isOpen();
+                || weatherSheet != null && weatherSheet.isOpen() || who != null && who.isOpen();
     }
 
     private void setRacked(boolean on) {
@@ -4670,7 +4626,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         photo = on;
         backdrop.setPhotoMode(on);
         if (on) {
-            banner.clear();
             stopPreview();
             racked = true;
             backdrop.setDefocus(0f, 2000);
@@ -4798,7 +4753,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             return super.dispatchKeyEvent(e);
         }
         if (!down) {
-            if (allApps != null && allApps.isOpen() && Pad.isArrow(code)) allApps.released();
             if (held && Pad.isArrow(code)) settle();
             if (code == swallowUp) {
                 swallowUp = -1;
@@ -4884,11 +4838,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 return swallow(code);
             }
             return super.dispatchKeyEvent(e);
-        }
-        if (allApps != null && allApps.isOpen() && !ccOpen && !settings.isOpen()) {
-            int handled = allApps.key(e);
-            if (handled == AllApps.DONE) return swallow(code);
-            if (handled == AllApps.VIEW) return super.dispatchKeyEvent(e);
         }
         // Menu over Settings closes Settings, rather than stacking Control Center on top of it
         if (first && settings.isOpen() && (code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS || code == KeyEvent.KEYCODE_INFO)) {
@@ -5299,7 +5248,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             return;
         }
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        coverApps();
         stack.hold(true);
         handler.postDelayed(() -> {
             if (nowPlaying.isOpen()) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
@@ -5309,7 +5257,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void closeNowPlaying() {
         if (!nowPlaying.isOpen()) return;
         nowPlaying.close();
-        if (backToApps()) return;
         for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         stack.hold(false);
@@ -5538,7 +5485,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         switcher.close(() -> {
             Previews.dropFresh();
-            // something opened meanwhile (Who's watching, All apps, Find): it holds home and the focus, and gives them back as it closes
+            // something opened meanwhile (Who's watching, Find): it holds home and the focus, and gives them back as it closes
             if (overlayOpen()) return;
             for (View v : behindCc()) v.setVisibility(View.VISIBLE);
             home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
@@ -5913,138 +5860,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         focusTag(tag);
     }
 
-    /** All apps: made the first time it's opened (the sidebar's Apps, the remote's Apps key). */
-    private AllApps allApps;
-    private View beforeApps;
-
-    private void openAllApps() {
-        if (welcome != null || ccOpen) return;
-        if (allApps == null) {
-            allApps = new AllApps(this, new AllApps.Host() {
-                @Override
-                public List<AppRepo.App> apps() {
-                    return apps;
-                }
-
-                @Override
-                public boolean ready() {
-                    return appsReady;
-                }
-
-                @Override
-                public Tiles.Painter art(AppRepo.App a) {
-                    return artFor(a);
-                }
-
-                @Override
-                public Backdrop backdrop() {
-                    return backdrop;
-                }
-
-                @Override
-                public void launch(AppRepo.App a, View from) {
-                    HomeActivity.this.launch(a.launch, from, a.label);
-                }
-
-                @Override
-                public void open(Intent intent, View from) {
-                    HomeActivity.this.open(intent, from);
-                }
-
-                @Override
-                public void changed() {
-                    populate();
-                }
-
-                @Override
-                public void hud(int icon, String text) {
-                    HomeActivity.this.hud(icon, text);
-                }
-
-                @Override
-                public void find(String typed) {
-                    openFind(typed);
-                }
-
-                @Override
-                public void controlCenter() {
-                    openCc(false);
-                }
-
-                @Override
-                public void hiddenApps() {
-                    openSettings("apps");
-                }
-
-                @Override
-                public void closed() {
-                    afterAllApps();
-                }
-            });
-            // under Control Center, Settings, Find and the menus, which open over it
-            root.addView(allApps, root.indexOfChild(cc.panel), match());
-        }
-        if (allApps.isOpen()) return;
-        if (settings.isOpen()) closeSettings();
-        closeOverlays();
-        if (editing) stopEdit();
-        banner.clear();
-        stopPreview();
-        hideShelf();
-        handler.removeCallbacks(rack);
-        handler.removeCallbacks(goPhoto);
-        View f = getCurrentFocus();
-        beforeApps = f != null && home.findFocus() == f ? f : null;
-        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        stack.hold(true);
-        allApps.open();
-        handler.postDelayed(() -> {
-            if (allApps.isOpen() && !ccOpen) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
-        }, 400);
-    }
-
-    /** The page has closed: home draws again and takes the focus back where it was left. */
-    private void afterAllApps() {
-        // under an opaque Control Center they stay hidden: closing it brings them back
-        if (!ccOpen) for (View v : behindCc()) v.setVisibility(View.VISIBLE);
-        home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
-        stack.hold(false);
-        View back = beforeApps;
-        beforeApps = null;
-        if (ccOpen || overlayOpen()) return;
-        if (back == null || !back.isShown() || !back.requestFocus()) focusGrid(gridAt);
-        wake();
-    }
-
-    /** A panel opens over home: All apps, if it's open beneath, gives none of its tiles the focus meanwhile. */
-    private void coverApps() {
-        if (allApps != null && allApps.isOpen()) allApps.cover(true);
-    }
-
-    /** Something of home's is over All apps (or would be, were it open): Control Center, a panel, a card or a menu. */
-    private boolean overApps() {
-        return ccOpen || settings.isOpen() || findPanel.isOpen() || switcher.isOpen() || who.isOpen() || nowPlaying.isOpen()
-                || weatherSheet.isOpen() || ask.isOpen() || menu.isOpen();
-    }
-
-    /**
-     * A panel over All apps has closed. True while the page is still open: home stays hidden, still
-     * and out of focus beneath it as openAllApps left it, and the page has the focus back once
-     * nothing else covers it. False when All apps isn't open, for home to come back as usual.
-     */
-    private boolean backToApps() {
-        if (allApps == null || !allApps.isOpen()) return false;
-        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        stack.hold(true);
-        if (overApps()) return true;
-        allApps.setVisibility(View.VISIBLE);
-        for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
-        allApps.cover(false);
-        allApps.regain();
-        wake();
-        return true;
-    }
-
     private Find findPanel;
     private View beforeFind;
 
@@ -6056,7 +5871,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         hideTip();
         beforeFind = getCurrentFocus();
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        coverApps();
         stack.hold(true);
         findPanel.open(typed);
         handler.postDelayed(() -> {
@@ -6067,7 +5881,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void closeFind() {
         if (!findPanel.isOpen()) return;
         findPanel.close();
-        if (backToApps()) return;
         for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         stack.hold(false);
@@ -6107,7 +5920,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (findPanel.isOpen()) closeFind();
         if (ask.isOpen()) closeAsk();
         if (who.isOpen()) closeWho(true);
-        if (allApps != null && allApps.isOpen()) allApps.close();
     }
 
     /** Back on the name card: the name stays as it was. */
@@ -6119,7 +5931,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             pinFrom = null;
             unblockHome();
             if (before.isShown() && before.requestFocus()) return;
-            if (backToApps()) return;
             if (!ccOpen) focusGrid(gridAt);
             return;
         }
@@ -6131,9 +5942,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     /** The home screen takes focus again, unless something still covers it. */
     private void unblockHome() {
-        if (!ccOpen && !settings.isOpen() && !switcher.isOpen() && (allApps == null || !allApps.isOpen())) {
-            home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
-        }
+        if (!ccOpen && !settings.isOpen() && !switcher.isOpen()) home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
     }
 
     private void afterAsk() {
@@ -6341,11 +6150,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         beforeCc = getCurrentFocus();
         hideTip();
         ccOpen = true;
-        banner.clear();
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        coverApps();
         // the frost settles over a still home screen (scaling it would re-rasterise all its text
         // every frame); once the frost is opaque the home screen stops drawing altogether
         handler.postDelayed(hideHome, ControlCenter.FROST_MS + 30);
@@ -6362,8 +6169,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (settings.isOpen()) closeSettings();
         if (menu.isOpen()) closeMenu(null);
         for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
-        // the app's picture, not All apps left open from before it
-        hideApps();
         android.graphics.Bitmap shot = Previews.fresh(pkg);
         if (shot != null) {
             if (ccShot == null) {
@@ -6407,21 +6212,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     public void closeCc(boolean animate) {
         if (!ccOpen) return;
         ccOpen = false;
-        banner.clear();
         ccOver = null;
         if (ccShot != null) {
             ccShot.setImageDrawable(null);
             ccShot.setVisibility(View.GONE);
         }
         handler.removeCallbacks(hideHome);
-        cc.close(animate, null);
-        bloom.setStrength(glow(), animate ? 560 : 0);
-        if (backToApps()) {
-            beforeCc = null;
-            return;
-        }
         for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        cc.close(animate, null);
+        bloom.setStrength(glow(), animate ? 560 : 0);
         if (beforeCc == null || !beforeCc.isShown() || !beforeCc.requestFocus()) focusGrid(gridAt);
         beforeCc = null;
         wake();
@@ -6460,7 +6260,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (quietScreen) return;
         if (ccOpen) closeCc(false);
         quietScreen = true;
-        banner.clear();
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
         backdrop.stop();
@@ -6561,21 +6360,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         askTag = null;
         pinFrom = getCurrentFocus();
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        coverApps();
         ask.showPin(getString(R.string.for_grown_ups), pin -> {
             View before = pinFrom;
             pinFrom = null;
             unblockHome();
             if (!Profiles.pinOk(this, pin)) {
                 hud(R.drawable.ic_info, getString(R.string.thats_not_the_pin));
-                if (before != null && before.isShown() && before.requestFocus()) return;
-                backToApps();
+                if (before != null && before.isShown()) before.requestFocus();
                 return;
             }
             unlockedUntil = SystemClock.uptimeMillis() + 10 * 60_000L;
             then.run();
-            // asked over All apps for something that opened nothing over it: the page has the focus back
-            backToApps();
         });
     }
 
@@ -6601,7 +6396,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         handler.removeCallbacks(rack);
         handler.removeCallbacks(goPhoto);
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        coverApps();
         stack.hold(true);
         if (page != null) settings.open(page);
         else settings.open();
@@ -6614,7 +6408,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void closeSettings() {
         if (!settings.isOpen()) return;
         settings.close();
-        if (backToApps()) return;
         for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         stack.hold(false);

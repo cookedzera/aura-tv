@@ -3,6 +3,7 @@ package app.aura.home;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
+import android.graphics.Bitmap;
 import android.graphics.drawable.ColorDrawable;
 import android.text.TextUtils;
 import android.view.View;
@@ -37,9 +38,9 @@ import static org.junit.Assert.*;
 import static org.robolectric.Shadows.shadowOf;
 
 /**
- * Settings: a "Press OK again" doesn't outlive a trip through From your phone, and what a
- * rebuild reads (the phone photos' index, whether a category row is empty) is kept
- * yet follows each change.
+ * Settings: a "Press OK again" doesn't outlive a trip through From your phone, what a rebuild
+ * reads (the phone photos' index, whether a category row is empty) is kept yet follows each
+ * change, and the Photos page keeps only forty small thumbnails.
  */
 @RunWith(RobolectricTestRunner.class)
 @LooperMode(LooperMode.Mode.PAUSED)
@@ -165,6 +166,36 @@ public class SettingsFixesTest {
         call(s, "removeAura", new Class<?>[]{});
         armed = field(s, "confirmRemove");
         assertTrue("a single OK only asks again", armed);
+        ac.pause().stop().destroy();
+    }
+
+    /** The Photos page's thumbnails are read at the size they're shown, and only the forty last shown are kept. */
+    @Test
+    public void photoThumbnailsAreReadAtTheirShownSizeAndFortyAtMostAreKept() throws Exception {
+        File stored = Mine.thumb(c, "p1");
+        assertTrue(stored.getParentFile().isDirectory() || stored.getParentFile().mkdirs());
+        Bitmap big = Bitmap.createBitmap(320, 180, Bitmap.Config.ARGB_8888);
+        big.eraseColor(0xFF336699);
+        try (FileOutputStream out = new FileOutputStream(stored)) {
+            assertTrue(big.compress(Bitmap.CompressFormat.JPEG, 82, out));
+        }
+        Bitmap small = Mine.smallThumb(c, "p1");
+        assertNotNull(small);
+        assertEquals(160, small.getWidth());
+        assertEquals(90, small.getHeight());
+        assertEquals(Bitmap.Config.RGB_565, small.getConfig());
+
+        ActivityController<HomeActivity> ac = Robolectric.buildActivity(HomeActivity.class).setup();
+        HomeActivity a = ac.get();
+        run(1500);
+        Object s = field(a, "settings");
+        call(a, "openSettings", new Class<?>[]{});
+        run(800);
+        Map<String, Bitmap> thumbs = field(s, "thumbs");
+        for (int i = 0; i < 50; i++) thumbs.put("t" + i, small);
+        assertEquals(40, thumbs.size());
+        assertFalse("the least recently shown go first", thumbs.containsKey("t0"));
+        assertTrue(thumbs.containsKey("t49"));
         ac.pause().stop().destroy();
     }
 
