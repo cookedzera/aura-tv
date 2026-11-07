@@ -167,6 +167,54 @@ public class PanelMotionTest {
         Assert.assertEquals(View.LAYER_TYPE_NONE, header.getLayerType());
     }
 
+    /** HIGH: the board's modules come up one after another; the last is still on its way as the first has arrived. */
+    @Test
+    public void onHighTheModulesArriveOneAfterAnother() throws Exception {
+        openCc(false);
+        a.closeCc(false);
+        run(300);
+        ViewGroup board = field(cc, "board");
+        View first = null, last = null;
+        for (int i = 0; i < board.getChildCount(); i++) {
+            View m = board.getChildAt(i);
+            if (m.getVisibility() != View.VISIBLE) continue;
+            if (first == null) first = m;
+            last = m;
+        }
+        Assert.assertNotNull(first);
+        Assert.assertNotSame(first, last);
+        call(a, "openCc", new Class<?>[]{boolean.class}, false);
+        run(80);
+        Assert.assertTrue("the first module has begun: " + first.getAlpha(), first.getAlpha() > 0.05f);
+        Assert.assertTrue("the last waits its turn: " + last.getAlpha(), last.getAlpha() < 0.05f);
+        run(700);
+        for (int i = 0; i < board.getChildCount(); i++) {
+            View m = board.getChildAt(i);
+            if (m.getVisibility() != View.VISIBLE) continue;
+            Assert.assertEquals(1f, m.getAlpha(), 0.001f);
+            Assert.assertEquals(0f, m.getTranslationY(), 0.5f);
+        }
+    }
+
+    /** LOW: the board fades and drops as one; its modules are not staged on their own. */
+    @Test
+    public void onLowTheBoardArrivesWhole() throws Exception {
+        openCc(true);
+        a.closeCc(false);
+        run(300);
+        ViewGroup board = field(cc, "board");
+        call(a, "openCc", new Class<?>[]{boolean.class}, false);
+        run(16);
+        for (int i = 0; i < board.getChildCount(); i++) {
+            View m = board.getChildAt(i);
+            if (m.getVisibility() != View.VISIBLE) continue;
+            Assert.assertEquals("LOW stages nothing of its own: " + i, 1f, m.getAlpha(), 0.001f);
+            Assert.assertEquals(0f, m.getTranslationY(), 0.5f);
+        }
+        run(Ui.LOW_CC_OPEN + 50);
+        Assert.assertEquals(1f, board.getAlpha(), 0.001f);
+    }
+
     @Test
     public void aSheetHoldsTheFocusAsItComesInThenHandsItOn() throws Exception {
         openCc(true);

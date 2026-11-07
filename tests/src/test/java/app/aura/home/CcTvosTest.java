@@ -4,7 +4,9 @@ import android.app.Notification;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.view.Gravity;
 import android.view.View;
+import android.widget.TextView;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -34,6 +36,14 @@ import static org.robolectric.Shadows.shadowOf;
 public class CcTvosTest {
     private static void run(long ms) {
         for (long t = 0; t < ms; t += 50) ShadowLooper.idleMainLooper(50, TimeUnit.MILLISECONDS);
+    }
+
+    /** Control Center's notes arrive on its own thread: wait for them, then idle the board. */
+    private static void settle() throws Exception {
+        for (int i = 0; i < 10; i++) {
+            Thread.sleep(30);
+            run(50);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -80,6 +90,7 @@ public class CcTvosTest {
         call(cc, "music", new Class<?>[]{MediaWatch.Playing.class}, p);
         call(a, "openCc", new Class<?>[]{boolean.class}, false);
         run(1500);
+        settle();
         View now = field(cc, "nowCard"), notes = field(cc, "notesBox"), pick = field(cc, "pick");
         View root = a.getWindow().getDecorView();
         Bitmap shot = Bitmap.createBitmap(root.getWidth(), root.getHeight(), Bitmap.Config.ARGB_8888);
@@ -90,6 +101,19 @@ public class CcTvosTest {
         Assert.assertTrue("the song shows in Control Center (" + layout + ")", now.isShown());
         Assert.assertTrue("notifications show in Control Center (" + layout + ")", notes.isShown());
         Assert.assertFalse("never the pick beside the song", pick.isShown());
+        TextView time = field(cc, "time"), date = field(cc, "date"), title = field(cc, "headTitle"), info = field(cc, "info");
+        Assert.assertTrue("the time stays in the column (" + layout + ")", time.isShown());
+        Assert.assertTrue("and the date with it (" + layout + ")", date.isShown());
+        float sp = time.getTextSize() / time.getResources().getDisplayMetrics().scaledDensity;
+        if ("tvos".equals(layout)) {
+            Assert.assertFalse("not the large CONTROL CENTER title", title.isShown());
+            Assert.assertFalse("nor the day line: the column is time, then what's live", info.isShown());
+            Assert.assertEquals("a small clock, aligned with the board", 28f, sp, 0.5f);
+            Assert.assertEquals(Gravity.END, ((android.widget.LinearLayout.LayoutParams) time.getLayoutParams()).gravity);
+        } else {
+            Assert.assertTrue(title.isShown());
+            Assert.assertEquals("the large clock on the left", 62f, sp, 0.5f);
+        }
         ac.pause().stop().destroy();
         ws.onListenerDisconnected();
     }

@@ -24,6 +24,7 @@ import android.net.NetworkCapabilities;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.format.DateFormat;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -77,6 +78,8 @@ final class ControlCenter {
     private static final int U = 84, G = 14;
     /** How long the frost takes to turn opaque; after that the home screen beneath stops drawing. */
     static final long FROST_MS = 240;
+    /** HIGH: each module of the board this many ms after the last, as Control Center opens. */
+    private static final int CASCADE = 40;
     private static final int BLUE = 0xFF2F7BFF, ORANGE = 0xFFFF9F0A, GREEN = 0xFF30D158, VIOLET = 0xFF8E6CFF;
     private static final int MODULE = 0x1FFFFFFF;
     private static final int[] SLEEP_STEPS = {0, 15, 30, 60, 90, 120};
@@ -495,11 +498,11 @@ final class ControlCenter {
             rl.leftMargin = Ui.dp(x + (half - 60) / 2f);
             rl.topMargin = Ui.dp(y + 9);
             connect.addView(rounds[k], rl);
-            caps[k] = Ui.text(a, 10, Ui.medium, 0xD9FFFFFF);
+            caps[k] = Ui.text(a, 11, Ui.medium, 0xD9FFFFFF);
             caps[k].setGravity(Gravity.CENTER);
             caps[k].setEllipsize(android.text.TextUtils.TruncateAt.END);
             caps[k].setPadding(Ui.dp(4), 0, Ui.dp(4), 0);
-            Ui.shrinkToWidth(caps[k], 8f);
+            Ui.shrinkToWidth(caps[k], 9f);
             FrameLayout.LayoutParams cl = new FrameLayout.LayoutParams(Ui.dp(half), ViewGroup.LayoutParams.WRAP_CONTENT);
             cl.leftMargin = Ui.dp(x);
             cl.topMargin = Ui.dp(y + 75);
@@ -561,8 +564,8 @@ final class ControlCenter {
         bc.setGravity(Gravity.CENTER);
         ring = boost.tint(new Ring(a, boost), 1f);
         bc.addView(ring, new LinearLayout.LayoutParams(Ui.dp(34), Ui.dp(34)));
-        boostValue = boost.tint(Ui.text(a, 10, Ui.medium, 0xFFFFFFFF), 0.9f);
-        bc.addView(boostValue, fill(lp(0, 6), boostValue, 8f));
+        boostValue = boost.tint(Ui.text(a, 11, Ui.medium, 0xFFFFFFFF), 0.9f);
+        bc.addView(boostValue, fill(lp(0, 6), boostValue, 9f));
         boost.addView(bc, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         // 1x1: your day
@@ -573,9 +576,9 @@ final class ControlCenter {
         todayValue = Ui.text(a, 19, Ui.heavy, 0xFFFFFFFF);
         todayValue.setLetterSpacing(-0.03f);
         tc.addView(todayValue, lp(0, 0));
-        TextView tcap = Ui.text(a, 9, Ui.medium, 0x99FFFFFF);
+        TextView tcap = Ui.text(a, 10, Ui.medium, 0x99FFFFFF);
         tcap.setText(act.getString(R.string.in_apps_today));
-        tc.addView(tcap, fill(lp(0, 4), tcap, 7f));
+        tc.addView(tcap, fill(lp(0, 4), tcap, 8.5f));
         today.addView(tc, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         settings = place(button(a, R.drawable.ic_settings, act.getString(R.string.settings)), 0, 3, 2, 1);
@@ -662,12 +665,12 @@ final class ControlCenter {
         TextView t = (TextView) l.findViewWithTag("caption");
         if (t == null) {
             if (line == null || line.isEmpty()) return;
-            t = p.tint(Ui.text(p.getContext(), 7.5f, Ui.medium, 0xFFFFFFFF), 0.55f);
+            t = p.tint(Ui.text(p.getContext(), 10, Ui.medium, 0xFFFFFFFF), 0.55f);
             t.setTag("caption");
             t.setSingleLine(true);
             t.setEllipsize(android.text.TextUtils.TruncateAt.END);
             t.setGravity(Gravity.CENTER);
-            l.addView(t, fill(lp(0, 2), t, 6.5f));
+            l.addView(t, fill(lp(0, 2), t, 8.5f));
         }
         if (!android.text.TextUtils.equals(t.getText(), line)) t.setText(line);
         t.setVisibility(line == null || line.isEmpty() ? View.GONE : View.VISIBLE);
@@ -978,9 +981,9 @@ final class ControlCenter {
         l.setOrientation(LinearLayout.VERTICAL);
         l.setGravity(Gravity.CENTER);
         l.addView(p.tint(icon(c, iconRes), 1f), new LinearLayout.LayoutParams(Ui.dp(23), Ui.dp(23)));
-        TextView t = p.tint(Ui.text(c, 10, Ui.medium, 0xFFFFFFFF), 0.9f);
+        TextView t = p.tint(Ui.text(c, 11, Ui.medium, 0xFFFFFFFF), 0.9f);
         t.setText(label);
-        l.addView(t, fill(lp(0, 8), t, 7.5f));
+        l.addView(t, fill(lp(0, 8), t, 9f));
         p.addView(l, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         return p;
     }
@@ -992,15 +995,20 @@ final class ControlCenter {
         return iv;
     }
 
-    /** The tvOS style: the board hangs from the top-right corner, as on Apple TV, without the large clock beside it. */
+    /** The tvOS style: the board hangs from the top-right corner, as on Apple TV. */
     private boolean top;
 
     void top(boolean on) {
         top = on;
-        // the tvOS style keeps the board up in the top right corner, the clock already there: the
-        // column beside it carries only what's live (the song, the VPN, notifications), never the
-        // big time or Tonight's pick. It used to be hidden whole, and with it the song and notifications
-        for (View v : new View[]{headTitle, time, date, info}) v.setVisibility(on ? View.GONE : View.VISIBLE);
+        // the tvOS style keeps the board up in the top right corner: a small time and date sit at
+        // the top of the column beside it (home's clock is under the frost), then what's live (the
+        // song, the VPN, notifications). Never the large CONTROL CENTER title, the day line, or
+        // Tonight's pick. It used to hide the column's clock with them, and the column went empty.
+        headTitle.setVisibility(on ? View.GONE : View.VISIBLE);
+        info.setVisibility(on ? View.GONE : View.VISIBLE);
+        time.setVisibility(View.VISIBLE);
+        date.setVisibility(View.VISIBLE);
+        clock(on);
         if (on) pick.setVisibility(View.GONE);
         FrameLayout.LayoutParams hl = (FrameLayout.LayoutParams) header.getLayoutParams();
         hl.gravity = on ? Gravity.END | Gravity.TOP : Gravity.START | Gravity.CENTER_VERTICAL;
@@ -1010,11 +1018,11 @@ final class ControlCenter {
         hl.bottomMargin = Ui.dp(Ui.TEXT_SAFE_Y);
         header.setLayoutParams(hl);
         LinearLayout.LayoutParams vl = (LinearLayout.LayoutParams) vpnPill.getLayoutParams();
-        vl.topMargin = on ? 0 : Ui.dp(12);
+        vl.topMargin = Ui.dp(on ? 14 : 12);
         vl.bottomMargin = on ? Ui.dp(10) : 0;
         vpnPill.setLayoutParams(vl);
         LinearLayout.LayoutParams nl = (LinearLayout.LayoutParams) nowCard.getLayoutParams();
-        nl.topMargin = on ? 0 : Ui.dp(22);
+        nl.topMargin = Ui.dp(on ? 14 : 22);
         nowCard.setLayoutParams(nl);
         LinearLayout.LayoutParams xl = (LinearLayout.LayoutParams) notesBox.getLayoutParams();
         xl.topMargin = on ? Ui.dp(12) : Ui.dp(18);
@@ -1027,6 +1035,29 @@ final class ControlCenter {
             v.setLayoutParams(l);
         }
         anchor();
+    }
+
+    /**
+     * The time and date as the column shows them: large on the left in the Aura style, small and
+     * against the board's left edge in the tvOS style, sharing the board's top.
+     */
+    private void clock(boolean tvos) {
+        time.setTextSize(TypedValue.COMPLEX_UNIT_SP, tvos ? 28 : 62);
+        time.setLetterSpacing(tvos ? -0.035f : -0.045f);
+        time.setIncludeFontPadding(!tvos);
+        date.setTextSize(TypedValue.COMPLEX_UNIT_SP, tvos ? 13 : 16);
+        int g = tvos ? Gravity.END : Gravity.START;
+        time.setGravity(g);
+        date.setGravity(g);
+        LinearLayout.LayoutParams tp = (LinearLayout.LayoutParams) time.getLayoutParams();
+        tp.width = tvos ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT;
+        tp.gravity = g;
+        tp.topMargin = Ui.dp(tvos ? 0 : 4);
+        time.setLayoutParams(tp);
+        LinearLayout.LayoutParams dp = (LinearLayout.LayoutParams) date.getLayoutParams();
+        dp.width = tvos ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT;
+        dp.gravity = g;
+        date.setLayoutParams(dp);
     }
 
     /**
@@ -1072,9 +1103,10 @@ final class ControlCenter {
         // the frost is opaque by the time the home screen beneath stops drawing (FROST_MS)
         veil.setAlpha(0f);
         veil.animate().alpha(1f).setStartDelay(0).setDuration(FROST_MS).setInterpolator(Ui.SOFT).start();
-        // every control together, as tvOS brings them, the column one frame ahead of the board
+        // the column one frame ahead of the board; HIGH: the board's modules then one after another
         arrive(header, 0);
         arrive(board, Ui.light ? 0 : 16);
+        if (!Ui.light) cascade(board);
         panel.announceForAccessibility(panel.getContentDescription());
         wifi.requestFocus();
         // the TV's own Inputs button: straight to the sheet of sources, once the board is there
@@ -1100,6 +1132,31 @@ final class ControlCenter {
         a.start();
     }
 
+    /** HIGH: the board's modules come up one after another, {@link #CASCADE} ms apart; LOW arrives whole. */
+    private static void cascade(ViewGroup board) {
+        int i = 0;
+        for (int k = 0; k < board.getChildCount(); k++) {
+            View m = board.getChildAt(k);
+            if (m.getVisibility() != View.VISIBLE) continue;
+            m.animate().cancel();
+            m.setAlpha(0f);
+            m.setTranslationY(Ui.dpf(8));
+            m.animate().alpha(1f).translationY(0f).setStartDelay(40 + i * (long) CASCADE).setDuration(240)
+                    .setInterpolator(Ui.EASE_DECEL).start();
+            i++;
+        }
+    }
+
+    /** Modules left mid-cascade sit at rest, so a close or the next opening doesn't inherit their motion. */
+    private static void rest(ViewGroup board) {
+        for (int k = 0; k < board.getChildCount(); k++) {
+            View m = board.getChildAt(k);
+            m.animate().cancel();
+            m.setAlpha(1f);
+            m.setTranslationY(0f);
+        }
+    }
+
     void close(boolean animate, Runnable done) {
         isOpen = false;
         panel.removeCallbacks(delayedRefresh);
@@ -1111,6 +1168,7 @@ final class ControlCenter {
         if (wifiSheet.isOpen()) wifiSheet.close();
         if (btSheet.isOpen()) btSheet.close();
         if (inputSheet.isOpen()) inputSheet.close();
+        rest(board);
         // fading out, nothing in it takes the focus: the arrows on the home screen can't land on it
         panel.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         if (animate && !Ui.light) {
@@ -1157,6 +1215,7 @@ final class ControlCenter {
      * that opened it, its pivot on that control's centre (the board and the sheets share one place).
      */
     private void boardAway(View sheet, View from) {
+        rest(board);
         board.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         board.animate().cancel();
         board.animate().alpha(0f).scaleX(1f).scaleY(1f).translationY(0f).setStartDelay(0).setDuration(Ui.CLOSE)
@@ -1174,6 +1233,7 @@ final class ControlCenter {
 
     /** The board again as the last sheet goes, fading back in while the sheet fades out. */
     private void boardBack() {
+        rest(board);
         board.animate().cancel();
         board.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
         board.setVisibility(View.VISIBLE);
