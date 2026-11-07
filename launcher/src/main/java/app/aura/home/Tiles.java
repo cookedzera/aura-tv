@@ -177,8 +177,8 @@ final class Tiles {
      * name set beside it, in up to two lines.
      */
     private static void badge(Canvas c, AppRepo.App a, int w, int h, Paint p) {
-        int base = saturate(a.color, 1.1f, 0.5f);
-        p.setShader(new LinearGradient(0, 0, w, h, Ui.mix(base, 0xFF000000, 0.52f), Ui.mix(base, 0xFF000000, 0.80f), Shader.TileMode.CLAMP));
+        int[] ground = ground(a.color);
+        p.setShader(new LinearGradient(0, 0, w, h, ground[0], ground[1], Shader.TileMode.CLAMP));
         c.drawRect(0, 0, w, h, p);
         p.setShader(new RadialGradient(w * 0.18f, -h * 0.25f, w * 0.85f, 0x2EFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
         c.drawRect(0, 0, w, h, p);
@@ -356,6 +356,21 @@ final class Tiles {
     }
 
     /** The colour made livelier: saturation scaled, brightness at least {@code minValue}. */
+    /**
+     * A badge's ground from the app's colour, light at the top left to deep at the bottom right: its
+     * hue in a rich, held saturation; a near-grey colour on clean graphite; and yellow-greens (where
+     * darkening turns a colour to mud) calmed toward graphite.
+     */
+    static int[] ground(int color) {
+        float[] hsv = new float[3];
+        android.graphics.Color.colorToHSV(color, hsv);
+        if (hsv[1] < 0.18f) return new int[]{0xFF3C4048, 0xFF1C1E23};
+        float sat = Math.max(0.42f, Math.min(0.72f, hsv[1]));
+        if (hsv[0] >= 45f && hsv[0] <= 100f) sat *= 0.22f;
+        return new int[]{android.graphics.Color.HSVToColor(new float[]{hsv[0], sat, 0.40f}),
+                android.graphics.Color.HSVToColor(new float[]{hsv[0], Math.min(1f, sat * 1.1f), 0.17f})};
+    }
+
     private static int saturate(int color, float sat, float minValue) {
         float[] hsv = new float[3];
         android.graphics.Color.colorToHSV(color, hsv);
