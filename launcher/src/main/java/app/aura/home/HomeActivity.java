@@ -762,6 +762,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         recentWorker.shutdown();
         shelfWorker.shutdown();
         tilePainter.shutdown();
+        if (allApps != null) allApps.release();
         super.onDestroy();
     }
 
@@ -1091,6 +1092,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 if (nowPlaying.isOpen()) closeNowPlaying();
                 if (weatherSheet.isOpen()) closeWeather();
                 if (folderPanel.isOpen()) closeFolder();
+                if (allApps.isOpen()) closeAllApps(true);
                 if (who.isOpen()) closeWho(true);
                 openFind(text);
                 return true;
@@ -1161,6 +1163,25 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
         });
         root.addView(folderPanel, match());
+        allApps = new AllApps(this, new AllApps.Host() {
+            @Override
+            public Backdrop backdrop() {
+                return backdrop;
+            }
+
+            @Override
+            public void launch(AppRepo.App a, View from) {
+                // home is put back at once, not risen in under the app's zoom
+                closeAllApps(false);
+                HomeActivity.this.launch(a.launch, from, a.label);
+            }
+
+            @Override
+            public void close() {
+                closeAllApps(true);
+            }
+        });
+        root.addView(allApps, match());
         switcher = new Switcher(this, backdrop, new Switcher.Host() {
             @Override
             public AppRepo.App find(String pkg) {
@@ -2549,6 +2570,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (f == null || folderApps(f).isEmpty()) closeFolder();
             else folderPanel.open(f, folderApps(f));
         }
+        if (allApps.isOpen()) allApps.open(allAppsTabs());
         if (findPanel.isOpen()) findPanel.refresh();
         if (settings.isOpen()) settings.refresh();
     }
@@ -3064,10 +3086,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     cells.add(e instanceof Folders.Folder ? folderCell(old, (Folders.Folder) e, k.id) : appCell(old, (AppRepo.App) e, k.id));
                 }
             } else {
-                for (String pkg : Categories.members(this, k, order, installed)) {
-                    AppRepo.App a = find(pkg);
-                    if (a != null) cells.add(appCell(old, a, k.id));
-                }
+                for (AppRepo.App a : categoryApps(k, order, installed)) cells.add(appCell(old, a, k.id));
             }
             int n = cells.size() - start;
             // a row with nothing in it isn't shown
@@ -3294,7 +3313,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 break;
             default:
                 if (r < rowInfo.size() - 1) focusGrid(rowTarget(r + 1, slot));
-                else if (!held) bounce(true);
+                else downPastEnd();
                 break;
         }
     }
@@ -4197,6 +4216,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     /**
+     * Down past the last row: in the tvOS style All Apps rises from below; in the Aura style the
+     * page gives a little. A held key stops at the last row, so scrolling down fast never opens it.
+     */
+    private void downPastEnd() {
+        if (held) return;
+        if (dock) openAllApps();
+        else bounce(true);
+    }
+
+    /**
      * The end of the apps: the page (or the tile at a row's end) gives a little, then springs back,
      * so the edge is felt rather than met with nothing. The page's give rides on its scroll.
      */
@@ -4606,7 +4635,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return welcome != null || settings != null && settings.isOpen() || folderPanel != null && folderPanel.isOpen()
                 || switcher != null && switcher.isOpen() || nowPlaying != null && nowPlaying.isOpen()
                 || menu != null && menu.isOpen() || ask != null && ask.isOpen() || findPanel != null && findPanel.isOpen()
-                || weatherSheet != null && weatherSheet.isOpen() || who != null && who.isOpen();
+                || weatherSheet != null && weatherSheet.isOpen() || who != null && who.isOpen() || allApps != null && allApps.isOpen();
     }
 
     private void setRacked(boolean on) {
@@ -4841,6 +4870,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
             return super.dispatchKeyEvent(e);
         }
+        // All Apps: its tabs and tiles have the arrows and OK; Back (or Menu) goes home
+        if (allApps.isOpen()) {
+            if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS
+                    || code == KeyEvent.KEYCODE_INFO) {
+                closeAllApps(true);
+                return swallow(code);
+            }
+            return super.dispatchKeyEvent(e);
+        }
         // Menu over Settings closes Settings, rather than stacking Control Center on top of it
         if (first && settings.isOpen() && (code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS || code == KeyEvent.KEYCODE_INFO)) {
             if (!settings.back()) closeSettings();
@@ -5047,13 +5085,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                             // two rows a page: down to the second, or to its last app if it's shorter
                             int below = Math.min(n - 1, gridAt + COLS);
                             if (row == 0 && pageOf(below) == page && rowOf(below) == 1) focusGrid(below);
-                            else if (!held) bounce(true);
+                            else downPastEnd();
                         } else if (gridAt + COLS < n) {
                             focusGrid(gridAt + COLS);
                         } else if (row < (n - 1) / COLS) {
                             focusGrid(n - 1);
-                        } else if (!held) {
-                            bounce(true);
+                        } else {
+                            downPastEnd();
                         }
                         break;
                 }
@@ -5862,6 +5900,74 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         focusTag(tag);
     }
 
+    private AllApps allApps;
+
+    /**
+     * All Apps' tabs: every app first, then each category home shows, in home's order, with only
+     * the apps that aren't hidden. A category with nothing in it isn't a tab.
+     */
+    private List<AllApps.Tab> allAppsTabs() {
+        Set<String> hidden = Prefs.hidden(this);
+        List<String> order = AppRepo.order(prefs), installed = new ArrayList<>();
+        for (AppRepo.App a : apps) if (!hidden.contains(a.pkg)) installed.add(a.pkg);
+        List<AllApps.Tab> out = new ArrayList<>();
+        for (Categories.Cat k : Categories.all(this)) {
+            boolean all = k.id.equals(Categories.ALL);
+            if (k.hidden && !all) continue;
+            List<AppRepo.App> in = categoryApps(k, order, installed);
+            if (in.isEmpty()) continue;
+            AllApps.Tab t = new AllApps.Tab(k.id, Categories.name(this, k), in);
+            if (all) out.add(0, t);
+            else out.add(t);
+        }
+        return out;
+    }
+
+    /** The apps in category {@code k} that are still here, in its order ({@code installed}: those not hidden). */
+    private List<AppRepo.App> categoryApps(Categories.Cat k, List<String> order, List<String> installed) {
+        List<AppRepo.App> out = new ArrayList<>();
+        for (String pkg : Categories.members(this, k, order, installed)) {
+            AppRepo.App a = find(pkg);
+            if (a != null) out.add(a);
+        }
+        return out;
+    }
+
+    private void openAllApps() {
+        if (allApps.isOpen() || apps.isEmpty()) return;
+        handler.removeCallbacks(rack);
+        handler.removeCallbacks(goPhoto);
+        stopPreview();
+        hideShelf();
+        hideTip();
+        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        stack.hold(true);
+        allApps.open(allAppsTabs());
+        // HIGH: home's rows lift away and fade as the screen rises over them; LOW: the glass covers them
+        if (!Perf.light(this)) home.animate().translationY(-Ui.dpf(40)).alpha(0f).setStartDelay(0).setDuration(260).setInterpolator(Ui.EMPHASIZED).withLayer().start();
+        handler.postDelayed(() -> {
+            if (allApps.isOpen()) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
+        }, 300);
+    }
+
+    /** {@code animate}: home rises back into place as the screen goes (not when an app is opening over it). */
+    private void closeAllApps(boolean animate) {
+        if (!allApps.isOpen()) return;
+        for (View v : behindCc()) v.setVisibility(View.VISIBLE);
+        home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        allApps.close();
+        stack.hold(false);
+        if (!animate || Perf.light(this)) {
+            home.animate().cancel();
+            home.setTranslationY(0f);
+            home.setAlpha(1f);
+        } else {
+            home.animate().translationY(0f).alpha(1f).setStartDelay(0).setDuration(Ui.CLOSE + 90).setInterpolator(Ui.EMPHASIZED).withLayer().start();
+        }
+        focusGrid(gridAt);
+        wake();
+    }
+
     private Find findPanel;
     private View beforeFind;
 
@@ -5917,6 +6023,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void closeOverlays() {
         if (menu.isOpen()) closeMenu(null);
         if (folderPanel.isOpen()) closeFolder();
+        if (allApps.isOpen()) closeAllApps(true);
         if (nowPlaying.isOpen()) closeNowPlaying();
         if (weatherSheet.isOpen()) closeWeather();
         if (findPanel.isOpen()) closeFind();
