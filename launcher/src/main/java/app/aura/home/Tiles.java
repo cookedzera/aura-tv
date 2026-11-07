@@ -355,7 +355,6 @@ final class Tiles {
         };
     }
 
-    /** The colour made livelier: saturation scaled, brightness at least {@code minValue}. */
     /**
      * A badge's ground from the app's colour, light at the top left to deep at the bottom right: its
      * hue in a rich, held saturation; a near-grey colour on clean graphite; and yellow-greens (where
@@ -371,6 +370,7 @@ final class Tiles {
                 android.graphics.Color.HSVToColor(new float[]{hsv[0], Math.min(1f, sat * 1.1f), 0.17f})};
     }
 
+    /** The colour made livelier: saturation scaled, brightness at least {@code minValue}. */
     private static int saturate(int color, float sat, float minValue) {
         float[] hsv = new float[3];
         android.graphics.Color.colorToHSV(color, hsv);

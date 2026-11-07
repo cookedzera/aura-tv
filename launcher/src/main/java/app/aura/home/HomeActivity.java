@@ -577,8 +577,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         Updater.confirmPending(this);
         // back from switching the Home button service on in Android's settings
         if (HomeRole.waiting) handler.postDelayed(homeCheck, 800);
-        // the photograph moves only while home is in front (it stops in onPause)
-        backdrop.start();
+        // the photograph moves only while home is in front (it stops in onPause), and not under All Apps
+        if (!allApps.isOpen()) backdrop.start();
         // home resumes while the app it replaces is still pausing (resumeWhilePausing): the list waits for a quiet moment
         if (appsDirty) Looper.myQueue().addIdleHandler(reloadWhenIdle);
         wake();
@@ -5833,7 +5833,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 Categories.addTo(this, id, pkg);
                 populate();
                 // from All Apps: its tabs follow (the row may be new to them)
-                if (allApps.isOpen()) allApps.open(allAppsTabs());
+                refreshOverlays();
                 hud(R.drawable.ic_check, getString(R.string.name_is_in_row, label, name));
             }));
         }
@@ -5968,7 +5968,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 closeMenu(card);
                 Prefs.hide(this, pkg, true);
                 populate();
-                allApps.open(allAppsTabs());
+                refreshOverlays();
                 hud(R.drawable.ic_hide, getString(R.string.name_is_hidden_settings, label));
             }));
             items.add(new AppMenu.Item(R.drawable.ic_info, getString(R.string.app_info), () -> {
