@@ -7,7 +7,7 @@ import android.graphics.drawable.ColorDrawable;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ScrollView;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import org.junit.Assert;
@@ -93,8 +93,10 @@ public class AllAppsTest {
     @Before
     public void setUp() throws Exception {
         c = RuntimeEnvironment.getApplication();
-        Prefs.device(c).edit().clear().putBoolean("welcomed", true).putString("set_light", "on").commit();
+        // the profile's settings first: on this TV they share a file with the device's, and clearing
+        // them after would take LOW away again (each test runs on LOW, as a 1 GB TV does, unless it says)
         Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "tvos").putBoolean(Categories.ROWS, true).commit();
+        Prefs.device(c).edit().putBoolean("welcomed", true).putString("set_light", "on").commit();
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16));
         Field w = HomeActivity.class.getDeclaredField("warm");
@@ -226,8 +228,8 @@ public class AllAppsTest {
         Map<String, Object> grids = field(all, "grids");
         Card[] cards = field(grids.get("video"), "cards");
         Assert.assertEquals(2, cards.length);
-        ScrollView scroll = field(all, "scroll");
-        Assert.assertSame(field(grids.get("video"), "view"), scroll.getChildAt(0));
+        FrameLayout viewport = field(all, "viewport");
+        Assert.assertSame(field(grids.get("video"), "view"), viewport.getChildAt(0));
         run(100);
         // a short tab starts at the same left edge as All apps: nothing jumps sideways between tabs
         call(all, "show", new Class<?>[]{int.class, boolean.class}, 0, false);
@@ -238,7 +240,7 @@ public class AllAppsTest {
         call(all, "show", new Class<?>[]{int.class, boolean.class}, 1, false);
         run(100);
         int[] x1 = new int[2];
-        // LOW keeps one tab's tiles: the Movies & TV grid is made again
+        // the Movies & TV grid as it is now
         ((Card[]) field(grids.get("video"), "cards"))[0].getLocationInWindow(x1);
         Assert.assertEquals(x0[0], x1[0]);
     }
@@ -265,32 +267,41 @@ public class AllAppsTest {
     }
 
     @Test
-    public void highLiftsHomeAwayAndBringsItBack() throws Exception {
+    public void homeHoldsStillUnderAllAppsOnHigh() throws Exception {
         Prefs.device(c).edit().putString("set_light", "off").commit();
         HomeActivity a = home(2, 3);
         Assert.assertFalse("HIGH for this test", Perf.light(a));
         call(a, "openAllApps", new Class<?>[]{});
         run(200);
         View home = field(a, "home");
-        Assert.assertTrue("home lifts as All Apps rises", home.getTranslationY() < 0f);
+        // as under Control Center: no layer of the whole home moving or fading, the glass rises over it
+        Assert.assertEquals(0f, home.getTranslationY(), 0.001f);
+        Assert.assertEquals(1f, home.getScaleX(), 0.001f);
+        Assert.assertEquals(1f, home.getAlpha(), 0.001f);
         run(400);
-        call(a, "closeAllApps", new Class<?>[]{boolean.class}, true);
-        run(600);
-        Assert.assertEquals(1f, home.getAlpha(), 0.01f);
-        Assert.assertEquals(0f, home.getTranslationY(), 0.01f);
+        call(a, "closeAllApps", new Class<?>[]{});
+        Assert.assertEquals(View.VISIBLE, home.getVisibility());
     }
 
     @Test
-    public void openingAnAppPutsHomeBackAtOnce() throws Exception {
-        Prefs.device(c).edit().putString("set_light", "off").commit();
-        HomeActivity a = home(2, 3);
+    public void reopeningKeepsEachTabsTilesWhileTheAppsAreTheSame() throws Exception {
+        HomeActivity a = home(2, 4);
         call(a, "openAllApps", new Class<?>[]{});
-        run(400);
-        // as an app opens over it: no rise of home's rows under the app's zoom
-        call(a, "closeAllApps", new Class<?>[]{boolean.class}, false);
-        View home = field(a, "home");
-        Assert.assertEquals(1f, home.getAlpha(), 0.001f);
-        Assert.assertEquals(0f, home.getTranslationY(), 0.001f);
+        run(600);
+        AllApps all = field(a, "allApps");
+        Map<String, Object> grids = field(all, "grids");
+        Object first = grids.get(Categories.ALL);
+        call(a, "closeAllApps", new Class<?>[]{});
+        run(600);
+        call(a, "openAllApps", new Class<?>[]{});
+        run(600);
+        Map<String, Object> again = field(all, "grids");
+        Assert.assertSame("the same tiles, nothing built or painted again", first, again.get(Categories.ALL));
+        // their tabs too: the top row still leads up to a tab that's on screen
+        Card[] cards = field(first, "cards");
+        List<TextView> tabViews = field(all, "tabViews");
+        Assert.assertEquals(tabViews.get(0).getId(), cards[0].getNextFocusUpId());
+        Assert.assertSame(tabViews.get(0).getParent(), field(all, "tabRow"));
     }
 
     @Test
@@ -314,7 +325,7 @@ public class AllAppsTest {
         call(a, "openAllApps", new Class<?>[]{});
         run(600);
         AllApps all = field(a, "allApps");
-        ScrollView scroll = field(all, "scroll");
+        FrameLayout scroll = field(all, "viewport");
         View bar = field(all, "tabRow");
         int h = all.getHeight(), w = all.getWidth();
         Assert.assertTrue("laid out", h > 0 && w > 0);
@@ -335,5 +346,152 @@ public class AllAppsTest {
         int[] at = new int[2];
         cards[0].getLocationInWindow(at);
         Assert.assertTrue("first app on screen at y=" + at[1], at[1] > 0 && at[1] < h / 2);
+    }
+
+    @Test
+    public void theGridGlidesToKeepTheRowInFocusInView() throws Exception {
+        HomeActivity a = home(2, 28);
+        call(a, "openAllApps", new Class<?>[]{});
+        run(600);
+        AllApps all = field(a, "allApps");
+        Map<String, Object> grids = field(all, "grids");
+        Card[] cards = field(grids.get(Categories.ALL), "cards");
+        // six rows of five: down to the fourth row, the grid glides up and the row stays in the window
+        call(all, "requestChildFocus", new Class<?>[]{View.class, View.class}, cards[15], cards[15]);
+        run(900);
+        float scrolled = ((Spring.Glide) field(all, "glide")).value();
+        Assert.assertTrue("glided up by " + scrolled, scrolled > 0f);
+        // nothing in the window clips the grid to its own bounds (a tile in focus at its edge was cut
+        // there); the column around the window clips it, at the window's edges
+        FrameLayout vp = field(all, "viewport");
+        Assert.assertFalse(vp.getClipChildren());
+        Assert.assertTrue(((ViewGroup) vp.getParent()).getClipChildren());
+        View grid0 = (View) ((View) cards[0].getParent()).getParent().getParent();
+        Assert.assertFalse(((ViewGroup) grid0).getClipChildren());
+        Assert.assertFalse(((ViewGroup) cards[0].getParent().getParent()).getClipChildren());
+        FrameLayout viewport = field(all, "viewport");
+        int[] v = new int[2], c4 = new int[2];
+        viewport.getLocationInWindow(v);
+        cards[15].getLocationInWindow(c4);
+        Assert.assertTrue("the fourth row inside the window", c4[1] >= v[1] && c4[1] + cards[15].getHeight() <= v[1] + viewport.getHeight());
+        // the last row: second from the top like every row, whole inside the window (not cut at the grid's
+        // first height), and nothing of the rows above it showing but the one right above
+        Card last = cards[cards.length - 1];
+        call(all, "requestChildFocus", new Class<?>[]{View.class, View.class}, last, last);
+        run(900);
+        int[] cl = new int[2];
+        last.getLocationInWindow(cl);
+        Assert.assertTrue("the last row's tiles end at " + (cl[1] + last.getHeight()) + ", the window at " + (v[1] + viewport.getHeight()),
+                cl[1] + last.getHeight() <= v[1] + viewport.getHeight());
+        int[] above = new int[2];
+        cards[cards.length - 1 - AllApps.COLS * 2].getLocationInWindow(above);
+        Assert.assertTrue("two rows up is out of the window", above[1] + cards[0].getHeight() <= v[1]);
+        View grid = (View) ((View) last.getParent()).getParent().getParent();
+        Assert.assertTrue("the grid laid out at its whole height", grid.getHeight() > viewport.getHeight());
+        // back to the first row: the grid glides back to its top
+        call(all, "requestChildFocus", new Class<?>[]{View.class, View.class}, cards[0], cards[0]);
+        run(900);
+        Assert.assertEquals(0f, ((Spring.Glide) field(all, "glide")).value(), 0.5f);
+    }
+
+    @Test
+    public void aTabSwitchSlidesTheAppsOutThenTheNextIn() throws Exception {
+        Prefs.device(c).edit().putString("set_light", "off").commit();
+        HomeActivity a = home(2, 4);
+        call(a, "openAllApps", new Class<?>[]{});
+        run(600);
+        AllApps all = field(a, "allApps");
+        Map<String, Object> grids = field(all, "grids");
+        Object every = grids.get(Categories.ALL);
+        call(all, "show", new Class<?>[]{int.class, boolean.class}, 1, true);
+        FrameLayout viewport = field(all, "viewport");
+        // the apps on show stay while they slide out; the next tab's come in after
+        Assert.assertSame(field(every, "view"), viewport.getChildAt(0));
+        run(AllApps.OUT_MS + 40);
+        Assert.assertSame(field(grids.get("video"), "view"), viewport.getChildAt(0));
+        run(AllApps.IN_MS + 100);
+        Assert.assertEquals(1f, viewport.getAlpha(), 0.01f);
+        Assert.assertEquals(0f, viewport.getTranslationX(), 0.5f);
+    }
+
+    @Test
+    public void downOnATabMidSlideLandsOnItsApps() throws Exception {
+        HomeActivity a = home(2, 4);
+        call(a, "openAllApps", new Class<?>[]{});
+        run(600);
+        AllApps all = field(a, "allApps");
+        call(all, "show", new Class<?>[]{int.class, boolean.class}, 1, true);
+        // Down before the slide-out ends: the next tab's apps are put in place at once, focus on them
+        call(all, "focusApps", new Class<?>[]{});
+        Map<String, Object> grids = field(all, "grids");
+        FrameLayout viewport = field(all, "viewport");
+        Assert.assertSame(field(grids.get("video"), "view"), viewport.getChildAt(0));
+        Assert.assertNull(field(all, "incoming"));
+    }
+
+    @Test
+    public void highLightsTheGlassInTheColourOfTheAppInFocus() throws Exception {
+        Prefs.device(c).edit().putString("set_light", "off").commit();
+        HomeActivity a = home(2, 6);
+        Assert.assertFalse("HIGH for this test", Perf.light(a));
+        call(a, "openAllApps", new Class<?>[]{});
+        run(600);
+        AllApps all = field(a, "allApps");
+        Map<String, Object> grids = field(all, "grids");
+        Card[] cards = field(grids.get(Categories.ALL), "cards");
+        call(all, "requestChildFocus", new Class<?>[]{View.class, View.class}, cards[1], cards[1]);
+        run(800);
+        View glow = field(all, "glow");
+        Assert.assertNotNull("HIGH has the light once an app has the focus", glow);
+        // centred on the second tile, as laid out (the light is a view its own size, moved by its translation)
+        int[] g = new int[2], t = new int[2];
+        glow.getLocationInWindow(g);
+        cards[1].getLocationInWindow(t);
+        Assert.assertEquals(t[0] + cards[1].getWidth() / 2f, g[0] + glow.getWidth() / 2f, 3f);
+        Assert.assertEquals(((AppRepo.App) cards[1].getTag()).color, (int) (Integer) field(glow, "color"));
+        Assert.assertTrue("it shows", glow.getAlpha() > 0.9f);
+        // closing: the light goes with the screen
+        call(a, "closeAllApps", new Class<?>[]{});
+        run(600);
+        Assert.assertEquals(0f, glow.getAlpha(), 0.01f);
+    }
+
+    @Test
+    public void lowHasNoLightBehindTheApps() throws Exception {
+        HomeActivity a = home(2, 3);
+        Assert.assertNull(field((AllApps) field(a, "allApps"), "glow"));
+    }
+
+    @Test
+    public void appsWithoutABannerAreGivenOneWithTheirName() throws Exception {
+        AppRepo.App x = app("com.example.plain", "Plain App");
+        android.graphics.Bitmap b = android.graphics.Bitmap.createBitmap(296, 168, android.graphics.Bitmap.Config.ARGB_8888);
+        Tiles.tvos(x).paint(new android.graphics.Canvas(b), 296, 168);
+        // a deep pane in the app's colour, not its vivid colour: darker than the colour itself
+        int px = b.getPixel(280, 150);
+        Assert.assertTrue("deep ground", android.graphics.Color.red(px) + android.graphics.Color.green(px) + android.graphics.Color.blue(px)
+                < android.graphics.Color.red(0xFF335577) + android.graphics.Color.green(0xFF335577) + android.graphics.Color.blue(0xFF335577));
+        // the name set to the right of the icon: white pixels there
+        boolean text = false;
+        for (int xx = 150; xx < 280 && !text; xx++) for (int yy = 60; yy < 110 && !text; yy++) text = b.getPixel(xx, yy) == 0xFFFFFFFF
+                || android.graphics.Color.red(b.getPixel(xx, yy)) > 230 && android.graphics.Color.blue(b.getPixel(xx, yy)) > 230;
+        Assert.assertTrue("its name beside the icon", text);
+    }
+
+    @Test
+    public void lowSwapsTabsAtOnceAndSlidesThemInByPositionOnly() throws Exception {
+        HomeActivity a = home(2, 4);
+        call(a, "openAllApps", new Class<?>[]{});
+        run(600);
+        AllApps all = field(a, "allApps");
+        call(all, "show", new Class<?>[]{int.class, boolean.class}, 1, true);
+        Map<String, Object> grids = field(all, "grids");
+        FrameLayout viewport = field(all, "viewport");
+        // no slide-out on LOW: the next tab's apps are there at once, sliding the last bit of the way
+        Assert.assertSame(field(grids.get("video"), "view"), viewport.getChildAt(0));
+        Assert.assertEquals("no fade (no layer the size of the window)", 1f, viewport.getAlpha(), 0.001f);
+        Assert.assertTrue(viewport.getTranslationX() > 0f);
+        run(AllApps.IN_MS + 100);
+        Assert.assertEquals(0f, viewport.getTranslationX(), 0.5f);
     }
 }

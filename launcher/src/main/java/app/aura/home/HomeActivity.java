@@ -1092,7 +1092,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 if (nowPlaying.isOpen()) closeNowPlaying();
                 if (weatherSheet.isOpen()) closeWeather();
                 if (folderPanel.isOpen()) closeFolder();
-                if (allApps.isOpen()) closeAllApps(true);
+                if (allApps.isOpen()) closeAllApps();
                 if (who.isOpen()) closeWho(true);
                 openFind(text);
                 return true;
@@ -1171,14 +1171,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
             @Override
             public void launch(AppRepo.App a, View from) {
-                // home is put back at once, not risen in under the app's zoom
-                closeAllApps(false);
+                closeAllApps();
                 HomeActivity.this.launch(a.launch, from, a.label);
             }
 
             @Override
             public void close() {
-                closeAllApps(true);
+                closeAllApps();
             }
         });
         root.addView(allApps, match());
@@ -4874,7 +4873,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (allApps.isOpen()) {
             if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS
                     || code == KeyEvent.KEYCODE_INFO) {
-                closeAllApps(true);
+                closeAllApps();
                 return swallow(code);
             }
             return super.dispatchKeyEvent(e);
@@ -5943,27 +5942,19 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         stack.hold(true);
         allApps.open(allAppsTabs());
-        // HIGH: home's rows lift away and fade as the screen rises over them; LOW: the glass covers them
-        if (!Perf.light(this)) home.animate().translationY(-Ui.dpf(40)).alpha(0f).setStartDelay(0).setDuration(260).setInterpolator(Ui.EMPHASIZED).withLayer().start();
+        // home holds still as the glass rises over it, as under Control Center: moving or fading the
+        // whole home put it on a layer the size of the screen, which a 1 GB TV paid for in frames
         handler.postDelayed(() -> {
             if (allApps.isOpen()) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
         }, 300);
     }
 
-    /** {@code animate}: home rises back into place as the screen goes (not when an app is opening over it). */
-    private void closeAllApps(boolean animate) {
+    private void closeAllApps() {
         if (!allApps.isOpen()) return;
         for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         allApps.close();
         stack.hold(false);
-        if (!animate || Perf.light(this)) {
-            home.animate().cancel();
-            home.setTranslationY(0f);
-            home.setAlpha(1f);
-        } else {
-            home.animate().translationY(0f).alpha(1f).setStartDelay(0).setDuration(Ui.CLOSE + 90).setInterpolator(Ui.EMPHASIZED).withLayer().start();
-        }
         focusGrid(gridAt);
         wake();
     }
@@ -6023,7 +6014,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void closeOverlays() {
         if (menu.isOpen()) closeMenu(null);
         if (folderPanel.isOpen()) closeFolder();
-        if (allApps.isOpen()) closeAllApps(true);
+        if (allApps.isOpen()) closeAllApps();
         if (nowPlaying.isOpen()) closeNowPlaying();
         if (weatherSheet.isOpen()) closeWeather();
         if (findPanel.isOpen()) closeFind();

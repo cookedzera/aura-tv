@@ -152,8 +152,8 @@ final class Tiles {
      * white mark on it, the way app icons look on iOS. Opaque, painted once: as cheap as a tile gets.
      */
     /**
-     * Apple TV (tvOS): each app keeps its own original banner or icon, finished with tvOS's top-lit
-     * dimensional gloss and, for icon-only apps, a vibrant gradient ground and rounded squircle badge.
+     * Apple TV (tvOS): each app keeps its own original banner, finished with tvOS's top-lit
+     * dimensional gloss; an app with only an icon is made a banner of its own ({@link #badge}).
      */
     static Painter tvos(AppRepo.App a) {
         return (c, w, h) -> {
@@ -167,22 +167,31 @@ final class Tiles {
                 c.drawRect(0, h * 0.65f, w, h, p);
                 return;
             }
-            int base = saturate(a.color, 1.28f, 0.66f);
-            p.setShader(new LinearGradient(0, 0, w * 0.85f, h, Ui.mix(base, 0xFFFFFFFF, 0.16f), Ui.mix(base, 0xFF000000, 0.38f),
-                    Shader.TileMode.CLAMP));
-            c.drawRect(0, 0, w, h, p);
-            p.setShader(new RadialGradient(w * 0.28f, -h * 0.35f, w * 0.90f, 0x2EFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
-            c.drawRect(0, 0, w, h, p);
-            p.setShader(null);
-            Drawable ic = a.icon();
-            if (ic == null) return;
+            badge(c, a, w, h, p);
+        };
+    }
+
+    /**
+     * An app with no TV banner of its own, made into one as TV apps draw theirs: a deep pane in the
+     * app's colour, lit from the top left, its icon crisp in a rounded square on the left and its
+     * name set beside it, in up to two lines.
+     */
+    private static void badge(Canvas c, AppRepo.App a, int w, int h, Paint p) {
+        int base = saturate(a.color, 1.1f, 0.5f);
+        p.setShader(new LinearGradient(0, 0, w, h, Ui.mix(base, 0xFF000000, 0.52f), Ui.mix(base, 0xFF000000, 0.80f), Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, w, h, p);
+        p.setShader(new RadialGradient(w * 0.18f, -h * 0.25f, w * 0.85f, 0x2EFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, w, h, p);
+        p.setShader(null);
+        int s = Math.round(h * 0.48f);
+        float x = w * 0.085f, y = (h - s) / 2f, rad = s * 0.225f;
+        Drawable ic = a.icon();
+        if (ic != null) {
             Drawable d = ic.getConstantState() != null ? ic.getConstantState().newDrawable().mutate() : ic;
-            int s = Math.round(h * 0.60f);
-            float x = (w - s) / 2f, y = (h - s) / 2f, rad = s * 0.225f;
             Paint sh = new Paint(Paint.ANTI_ALIAS_FLAG);
-            sh.setColor(0x33000000);
-            sh.setMaskFilter(new BlurMaskFilter( Math.max(1f, h * 0.04f), BlurMaskFilter.Blur.NORMAL));
-            c.drawRoundRect(new RectF(x, y + h * 0.025f, x + s, y + s + h * 0.025f), rad, rad, sh);
+            sh.setColor(0x40000000);
+            sh.setMaskFilter(new BlurMaskFilter(Math.max(1f, h * 0.035f), BlurMaskFilter.Blur.NORMAL));
+            c.drawRoundRect(new RectF(x, y + h * 0.02f, x + s, y + s + h * 0.02f), rad, rad, sh);
             Bitmap ib = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
             d.setBounds(0, 0, s, s);
             d.draw(new Canvas(ib));
@@ -194,8 +203,19 @@ final class Tiles {
             c.drawRoundRect(new RectF(x, y, x + s, y + s), rad, rad, p);
             p.setShader(null);
             ib.recycle();
-        };
+        }
+        // the name, beside the icon and centred on it: one line if it fits, else two, made smaller to fit
+        android.text.TextPaint tp = new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
+        tp.setColor(0xFFFFFFFF);
+        tp.setTypeface(Ui.semibold);
+        tp.setShadowLayer(h * 0.03f, 0, h * 0.01f, 0x59000000);
+        float tx = x + s + w * 0.06f;
+        String[] lines = TopShelf.lines(a.label, tp, w - tx - w * 0.06f, h * 0.16f, h * 0.14f, h * 0.12f);
+        Paint.FontMetrics fm = tp.getFontMetrics();
+        float lh = tp.getFontSpacing() * 0.92f, top = (h - lh * lines.length) / 2f;
+        for (int k = 0; k < lines.length; k++) c.drawText(lines[k], tx, top + k * lh + (lh - fm.descent - fm.ascent) / 2f, tp);
     }
+
 
     static Painter vivid(AppRepo.App a) {
         return (c, w, h) -> {
