@@ -139,8 +139,9 @@ final class ControlCenter {
 
     /** The column's own title: shown in the Aura style, where the column has the clock. */
     private TextView headTitle;
-    private final TextView time, date, info, todayValue, boostValue, inName, inState, inCount;
+    private final TextView time, date, info, todayValue, boostValue, inName, inState;
     private final ImageView inIcon;
+    private final Dots inDots;
     private final Pad vpnPill, nowCard;
     private final TextView vpnText, nowState, nowTitle, nowBy;
     private final ImageView nowArt;
@@ -536,11 +537,10 @@ final class ControlCenter {
         // "Nichts angeschlossen" is wider than the tile: trailing dots rather than a hard cut
         inState.setEllipsize(android.text.TextUtils.TruncateAt.END);
         ic2.addView(inState, lp(0, 2));
-        inCount = inputs.tint(Ui.text(a, 9.5f, Ui.medium, 0xFFFFFFFF), 0.55f);
-        inCount.setSingleLine(true);
-        // the count sits at the tile's foot
+        // one dot a source at the tile's foot, the live ones lit: how many there are, at a glance
+        inDots = inputs.tint(new Dots(a, inputs), 1f);
         ic2.addView(new View(a), new LinearLayout.LayoutParams(1, 0, 1f));
-        ic2.addView(inCount);
+        ic2.addView(inDots, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(8)));
         inputs.addView(ic2, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         inputs.onClick = this::showInputs;
         inputs.setVisibility(View.GONE);
@@ -1480,17 +1480,20 @@ final class ControlCenter {
             if (android.os.Build.VERSION.SDK_INT >= 24 && info.isHidden(act)) continue;
             if (info.isPassthroughInput() || builtInTuner(info)) list.add(info);
         }
-        // each input's name once: it was looked up again for the sort, the signature and the row
-        final java.util.Map<String, String> labels = new java.util.HashMap<>();
+        // each input's port and name once: they were looked up again for the sort, the signature and the row
+        final java.util.Map<String, String> ports = new java.util.HashMap<>(), labels = new java.util.HashMap<>();
         final java.util.Map<String, Integer> states = new java.util.HashMap<>();
         for (TvInputInfo info : list) {
-            labels.put(info.getId(), label(info));
+            String port = port(info);
+            ports.put(info.getId(), port);
+            labels.put(info.getId(), label(info, port));
             states.put(info.getId(), tim.getInputState(info.getId()));
         }
-        // HDMI first, then the TV's own tuners (antenna, cable, satellite), then the rest
+        // HDMI first, in the order of the ports (a device stays where you remember it), then the
+        // TV's own tuners (antenna, cable, satellite), then the rest
         java.util.Collections.sort(list, (x, y) -> {
             int tx = order(x), ty = order(y);
-            return tx != ty ? tx - ty : labels.get(x.getId()).compareTo(labels.get(y.getId()));
+            return tx != ty ? tx - ty : ports.get(x.getId()).compareTo(ports.get(y.getId()));
         });
         StringBuilder sig = new StringBuilder();
         for (TvInputInfo info : list) sig.append(info.getId()).append('=').append(states.get(info.getId())).append(':').append(labels.get(info.getId())).append('|');
@@ -1498,14 +1501,17 @@ final class ControlCenter {
         InputSheet.Source lead = null;
         for (TvInputInfo info : list) {
             int state = states.get(info.getId());
-            boolean tuner = !info.isPassthroughInput();
+            boolean tuner = !info.isPassthroughInput(), hdmi = info.getType() == TvInputInfo.TYPE_HDMI;
             boolean live = !tuner && state == TvInputManager.INPUT_STATE_CONNECTED;
+            boolean standby = !tuner && state == TvInputManager.INPUT_STATE_CONNECTED_STANDBY;
             String what = tuner ? act.getString(R.string.input_channels)
-                    : state == TvInputManager.INPUT_STATE_CONNECTED ? act.getString(R.string.input_live)
-                    : state == TvInputManager.INPUT_STATE_CONNECTED_STANDBY ? act.getString(R.string.input_standby)
+                    : live ? act.getString(R.string.input_live)
+                    : standby ? act.getString(R.string.input_standby)
                     : act.getString(R.string.input_nothing);
             Intent open = tuner ? tunerIntent(info) : new Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(info.getId()));
-            InputSheet.Source src = new InputSheet.Source(labels.get(info.getId()), what, glyph(info), live, open);
+            String name = labels.get(info.getId()), port = ports.get(info.getId());
+            int kind = InputSheet.kindOf(name, hdmi ? Cec.type(act, port) : Cec.UNKNOWN, hdmi, tuner);
+            InputSheet.Source src = new InputSheet.Source(info.getId(), name, port, what, kind, live, standby, open);
             out.add(src);
             if (lead == null && live) lead = src;
         }
@@ -1534,10 +1540,15 @@ final class ControlCenter {
         inputs.setVisibility(sources.isEmpty() ? View.GONE : View.VISIBLE);
         InputSheet.Source lead = (InputSheet.Source) found[2];
         if (lead == null) return;
-        inIcon.setImageResource(lead.glyph);
+        inIcon.setImageResource(lead.glyph());
         inName.setText(lead.name);
         inState.setText(lead.state);
-        inCount.setText(act.getResources().getQuantityString(R.plurals.n_sources, sources.size(), sources.size()));
+        boolean[] lit = new boolean[sources.size()];
+        for (int i = 0; i < lit.length; i++) lit[i] = sources.get(i).live;
+        inDots.set(lit);
+        // TalkBack: the count the dots stand for
+        inputs.setContentDescription(act.getString(R.string.inputs_title) + ", " + lead.name + ", " + lead.state + ", "
+                + act.getResources().getQuantityString(R.plurals.n_sources, sources.size(), sources.size()));
     }
 
     private int inputRetries, inputsGen;
@@ -1545,10 +1556,6 @@ final class ControlCenter {
 
     private static int order(TvInputInfo info) {
         return info.getType() == TvInputInfo.TYPE_HDMI ? 0 : info.getType() == TvInputInfo.TYPE_TUNER ? 1 : 2;
-    }
-
-    private static int glyph(TvInputInfo info) {
-        return info.getType() == TvInputInfo.TYPE_HDMI ? R.drawable.ic_hdmi : info.getType() == TvInputInfo.TYPE_TUNER ? R.drawable.ic_antenna : R.drawable.ic_av;
     }
 
     /**
@@ -1583,11 +1590,16 @@ final class ControlCenter {
         return watch;
     }
 
-    private String label(TvInputInfo info) {
+    /** The port as the TV names it, "HDMI 2" spelt one way whatever the firmware's habit. */
+    private String port(TvInputInfo info) {
+        return String.valueOf(info.loadLabel(act)).replaceAll("(?i)^hdmi\\s*(\\d)", "HDMI $1");
+    }
+
+    /** A name you gave the input wins; otherwise the device's own name over HDMI-CEC; otherwise the port's. */
+    private String label(TvInputInfo info, String port) {
         CharSequence custom = android.os.Build.VERSION.SDK_INT >= 24 ? info.loadCustomLabel(act) : null;
         if (custom != null && custom.length() > 0) return String.valueOf(custom);
-        // a name you gave the input wins; otherwise the device's own name over HDMI-CEC
-        return Cec.name(act, String.valueOf(info.loadLabel(act)).replaceAll("(?i)^hdmi\\s*(\\d)", "HDMI $1"));
+        return Cec.name(act, port);
     }
 
     private void showInputs() {
@@ -1970,6 +1982,34 @@ final class ControlCenter {
             c.drawArc(box, 0, 360, false, p);
             p.setColor(host.highlight > 0.5f ? host.content(1f) : GREEN);
             c.drawArc(box, -90, 360 * Math.max(0.02f, free), false, p);
+        }
+    }
+
+    /** One dot a source, 4 dp apart, from the left: the live ones green (dark on a lit tile), the rest quiet. */
+    static final class Dots extends View {
+        private final Pad host;
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private boolean[] lit = new boolean[0];
+
+        Dots(Context c, Pad host) {
+            super(c);
+            this.host = host;
+        }
+
+        void set(boolean[] lit) {
+            this.lit = lit;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            float r = Ui.dpf(2.25f), step = Ui.dpf(8.5f), cy = getHeight() / 2f;
+            // never past the tile: with more sources than fit, the dots shrink their stride
+            if (lit.length > 1) step = Math.min(step, (getWidth() - 2 * r) / (lit.length - 1));
+            for (int i = 0; i < lit.length; i++) {
+                p.setColor(lit[i] ? (host.highlight > 0.5f ? host.content(1f) : GREEN) : host.content(0.3f));
+                c.drawCircle(r + i * step, cy, r, p);
+            }
         }
     }
 }

@@ -2612,7 +2612,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         boolean glassTiles = style.equals("glass"), tvosTiles = style.equals("tvos") || dock;
         String nameMode = Prefs.nameMode(this);
         for (String[] in : live) {
-            final String id = in[0], label = in[1], sig = "input|" + style + "|" + dock + "|" + label;
+            final String id = in[0], label = in[1];
+            final int glyph = InputSheet.glyphOf(in.length > 2 ? Integer.parseInt(in[2]) : InputSheet.HDMI);
+            final String sig = "input|" + style + "|" + dock + "|" + label + "|" + glyph;
             Cell kept = reuse(old, "input:" + id, sig);
             if (kept != null) {
                 kept.setNameMode(nameMode, false);
@@ -2620,7 +2622,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 cells.add(kept);
                 continue;
             }
-            final Cell cell = new Cell(this, Tiles.input(this, label), 0xFF46D7C8, label, "input:" + id, TILE_W, TILE_H);
+            final Cell cell = new Cell(this, Tiles.input(this, label, glyph), 0xFF46D7C8, label, "input:" + id, TILE_W, TILE_H);
             cell.card.setGrowRoom(GAP / 2f);
             cell.sig = sig;
             cell.card.glass = backdrop;
@@ -6098,9 +6100,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (Prefs.hidden(this).contains("input:" + info.getId())) continue;
             if (tim.getInputState(info.getId()) != TvInputManager.INPUT_STATE_CONNECTED) continue;
             CharSequence custom = Build.VERSION.SDK_INT >= 24 ? info.loadCustomLabel(this) : null;
-            String label = custom != null && custom.length() > 0 ? String.valueOf(custom)
-                    : Cec.name(this, String.valueOf(info.loadLabel(this)).replaceAll("(?i)^hdmi\\s*(\\d)", "HDMI $1"));
-            out.add(new String[]{info.getId(), label});
+            String port = String.valueOf(info.loadLabel(this)).replaceAll("(?i)^hdmi\\s*(\\d)", "HDMI $1");
+            String label = custom != null && custom.length() > 0 ? String.valueOf(custom) : Cec.name(this, port);
+            // the tile's glyph: what's plugged in (a console, a box), as Control Center's deck shows it
+            int kind = InputSheet.kindOf(label, type == TvInputInfo.TYPE_HDMI ? Cec.type(this, port) : Cec.UNKNOWN, type == TvInputInfo.TYPE_HDMI, false);
+            out.add(new String[]{info.getId(), label, String.valueOf(kind)});
         }
     }
 

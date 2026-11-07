@@ -179,7 +179,7 @@ public class ControlCenterFixesTest {
         sig.setAccessible(true);
         sig.set(cc, "");
         List<InputSheet.Source> sources = field(cc, "sources");
-        sources.add(new InputSheet.Source("HDMI 1", "Live", R.drawable.ic_hdmi, true, new Intent(Intent.ACTION_VIEW)));
+        sources.add(new InputSheet.Source("hdmi1", "HDMI 1", "HDMI 1", "Live", InputSheet.HDMI, true, false, new Intent(Intent.ACTION_VIEW)));
         InputSheet inputSheet = field(cc, "inputSheet");
 
         // the TV's Inputs button: the sheet of sources slides in once the board has settled

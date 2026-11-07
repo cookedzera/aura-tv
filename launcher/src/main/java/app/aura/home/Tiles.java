@@ -654,11 +654,11 @@ final class Tiles {
         return (Math.abs(r(a) - r(b)) + Math.abs(g(a) - g(b)) + Math.abs(bl(a) - bl(b))) / 3;
     }
 
-    /** A live HDMI source on glass: the port glyph, its name and a red LIVE tag. */
-    static Painter input(Context ctx, String label) {
+    /** A live HDMI source on glass: the glyph of what's plugged in, its name and a red LIVE tag. */
+    static Painter input(Context ctx, String label, int glyph) {
         return (c, w, h) -> {
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            Drawable d = ctx.getDrawable(label.startsWith("HDMI") ? R.drawable.ic_hdmi : R.drawable.ic_av).mutate();
+            Drawable d = ctx.getDrawable(glyph).mutate();
             d.setTint(0xFFFFFFFF);
             int s = Math.round(h * 0.30f), x = Math.round(w * 0.09f), y = Math.round(h * 0.22f);
             d.setBounds(x, y, x + s, y + s);
