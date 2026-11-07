@@ -33,8 +33,9 @@ import static org.robolectric.Shadows.shadowOf;
 
 /**
  * Control Center's sheets one at a time, the latest asked for winning (a sheet still on its way
- * never slides in over it, nor into a later opening); notifications that can't be read said so,
- * and those past the three rows counted; the playing app's icon looked up once, not per report.
+ * never slides in over it, nor into a later opening); a sheet closing reads only the toggles again;
+ * notifications that can't be read said so, and those past the three rows counted; the playing
+ * app's icon looked up once, not per report.
  */
 @RunWith(RobolectricTestRunner.class)
 @LooperMode(LooperMode.Mode.PAUSED)
@@ -150,6 +151,24 @@ public class ControlCenterFixesTest {
         Assert.assertFalse(wifiSheet.isOpen() || btSheet.isOpen());
         Assert.assertEquals(View.VISIBLE, board.getVisibility());
         Assert.assertTrue(wifi.isFocused());
+    }
+
+    /** Closing the Wi-Fi or Bluetooth sheet reads the toggles again, never the inputs, the day and every notification with them. */
+    @Test
+    public void closingASheetReadsOnlyTheNetworkAgain() throws Exception {
+        start();
+        openCc(false);
+        run(1500);
+        int reads = field(cc, "readGen"), inputReads = field(cc, "inputsGen"), noteReads = field(cc, "notesGen");
+        for (String sheet : new String[]{"showWifi", "showBt"}) {
+            call(cc, sheet, new Class<?>[]{});
+            run(500);
+            a.onBackPressed();
+            run(500);
+            Assert.assertEquals(sheet + ": no full reading on the way back", (Integer) reads, field(cc, "readGen"));
+            Assert.assertEquals(sheet + ": the inputs aren't asked again", (Integer) inputReads, field(cc, "inputsGen"));
+            Assert.assertEquals(sheet + ": nor the notifications", (Integer) noteReads, field(cc, "notesGen"));
+        }
     }
 
     @Test

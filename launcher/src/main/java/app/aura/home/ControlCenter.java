@@ -84,6 +84,12 @@ final class ControlCenter {
     final FrameLayout panel;
     private final Activity act;
     private final Host host;
+    /**
+     * One thread for every reading (the toggles, the inputs, the day line, the notifications), just
+     * below the screen's priority: four threads started together on each refresh competed with the
+     * board's own frames on a four-core TV. One worker also lands results in the order they were asked.
+     */
+    private final java.util.concurrent.ExecutorService reader = Compat.background("cc", android.os.Process.THREAD_PRIORITY_DEFAULT + 4);
     private final GlassFrame veil;
     private final LinearLayout header;
     private final FrameLayout board;
@@ -818,6 +824,7 @@ final class ControlCenter {
         // a sheet still open as home goes: its Wi-Fi or Bluetooth listener goes with it
         if (wifiSheet.isOpen()) wifiSheet.close();
         btSheet.release();
+        reader.shutdown();
     }
 
     /** Apps' names and icons for the rows, looked up once: decoding an icon each refresh cost frames as the board opened. */
@@ -842,7 +849,7 @@ final class ControlCenter {
     private void refreshNotes() {
         if (panel.getVisibility() != View.VISIBLE) return;
         final int gen = ++notesGen;
-        new SafeThread(() -> {
+        reader.execute(() -> {
             final List<MediaWatch.Note> notes = MediaWatch.notes(act, Integer.MAX_VALUE);
             final java.util.Map<String, Object[]> faces = faces(notes);
             act.runOnUiThread(() -> {
@@ -850,7 +857,7 @@ final class ControlCenter {
                 keepFaces(faces);
                 showNotes(notes);
             });
-        }, "cc-notes").start();
+        });
     }
 
     /** Off the main thread: the name and icon of each app behind the notes given a row, not already known. */
@@ -1140,7 +1147,7 @@ final class ControlCenter {
         wifiSheet.close();
         if (sheetOpen()) return;
         boardBack();
-        refresh();
+        refreshNetwork();
         wifi.requestFocus();
     }
 
@@ -1197,7 +1204,7 @@ final class ControlCenter {
         btSheet.close();
         if (sheetOpen()) return;
         boardBack();
-        refresh();
+        refreshNetwork();
         bt.requestFocus();
     }
 
@@ -1259,14 +1266,14 @@ final class ControlCenter {
     }
 
     void refresh() {
-        buildSegments();
         volume.sync();
         refreshSleep();
         // the rest are calls into Android (the picture and sound, VPN apps, notifications and their
         // apps, Wi-Fi, Bluetooth, memory): read off the main thread, then shown. Just after a restart
-        // Android answers them slowly, and on the main thread they held the remote for seconds
+        // Android answers them slowly, and on the main thread they held the remote for seconds.
+        // The board's own readings go first; the inputs, the slowest to answer, last
         final int gen = ++readGen;
-        new SafeThread(() -> {
+        reader.execute(() -> {
             final String pic = pictureLine(), snd = soundLine();
             List<String> apps = Vpn.apps(act);
             final boolean vpnOn = Vpn.on(act), noVpnApps = apps.isEmpty();
@@ -1274,12 +1281,7 @@ final class ControlCenter {
             final String vpnName = mine != null ? Vpn.label(act, mine) : null;
             final List<MediaWatch.Note> notes = MediaWatch.notes(act, Integer.MAX_VALUE);
             final java.util.Map<String, Object[]> faces = faces(notes);
-            final boolean online = Compat.onWifi(Compat.svc(act, ConnectivityManager.class), true);
-            // a wired box is online but not on Wi-Fi: the button lights, its caption says which
-            final boolean onWifi = online && Compat.onWifi(Compat.svc(act, ConnectivityManager.class), false);
-            BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
-            final boolean btOn = ba != null && ba.isEnabled();
-            final String btName = btOn ? btSheet.connectedName() : act.getString(R.string.bluetooth_off);
+            final Object[] net = readNetwork();
             final ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
             Compat.svc(act, ActivityManager.class).getMemoryInfo(mi);
             act.runOnUiThread(() -> {
@@ -1290,14 +1292,45 @@ final class ControlCenter {
                 showVpn(noVpnApps, vpnOn, vpnName);
                 keepFaces(faces);
                 showNotes(notes);
-                wifi.setOn(online);
-                label(wifi, wifiCap, act.getString(onWifi ? R.string.wi_fi : online ? R.string.ethernet : R.string.offline));
-                bt.setOn(btOn);
-                label(bt, btCap, btName);
+                showNetwork(net);
                 showMemory(mi);
             });
-        }, "cc-read").start();
+        });
         refreshDay();
+        buildSegments();
+    }
+
+    /** Off the main thread: {@code {online, on Wi-Fi, Bluetooth on, Bluetooth's caption}}. */
+    private Object[] readNetwork() {
+        boolean online = Compat.onWifi(Compat.svc(act, ConnectivityManager.class), true);
+        // a wired box is online but not on Wi-Fi: the button lights, its caption says which
+        boolean onWifi = online && Compat.onWifi(Compat.svc(act, ConnectivityManager.class), false);
+        BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
+        boolean btOn = ba != null && ba.isEnabled();
+        String btName = btOn ? btSheet.connectedName() : act.getString(R.string.bluetooth_off);
+        return new Object[]{online, onWifi, btOn, btName};
+    }
+
+    private void showNetwork(Object[] net) {
+        boolean online = (Boolean) net[0], onWifi = (Boolean) net[1], btOn = (Boolean) net[2];
+        wifi.setOn(online);
+        label(wifi, wifiCap, act.getString(onWifi ? R.string.wi_fi : online ? R.string.ethernet : R.string.offline));
+        bt.setOn(btOn);
+        label(bt, btCap, (String) net[3]);
+    }
+
+    /**
+     * After the Wi-Fi or Bluetooth sheet: only what it could have changed is read again, not the
+     * inputs, the day and every notification with it. No generation to check: the one reader lands
+     * results in the order they were asked, so this is never older than what's on show.
+     */
+    private void refreshNetwork() {
+        reader.execute(() -> {
+            final Object[] net = readNetwork();
+            act.runOnUiThread(() -> {
+                if (!act.isDestroyed()) showNetwork(net);
+            });
+        });
     }
 
     void tick(Calendar now) {
@@ -1333,7 +1366,7 @@ final class ControlCenter {
 
     /** Sky and day, read off-thread: sun times, the light outside, time spent in apps. */
     private void refreshDay() {
-        new SafeThread(() -> {
+        reader.execute(() -> {
             long now = System.currentTimeMillis();
             Calendar c = Calendar.getInstance();
             c.set(Calendar.HOUR_OF_DAY, 0);
@@ -1351,11 +1384,12 @@ final class ControlCenter {
                     + (today >= 0 ? "\n" + act.getString(R.string.duration_in_apps_today, Habits.duration(today)) : "");
             preparePick();
             act.runOnUiThread(() -> {
+                if (act.isDestroyed()) return;
                 if (shownPick == null) showPick(); // first time: no need to wait for the next opening
                 todayValue.setText(day);
                 info.setText(line);
             });
-        }, "cc-day").start();
+        });
     }
 
     /** Off the main thread: the next pick in the pool and its poster, ready for the next opening. */
@@ -1419,7 +1453,7 @@ final class ControlCenter {
      */
     private void buildSegments() {
         final int gen = ++inputsGen;
-        new SafeThread(() -> {
+        reader.execute(() -> {
             final Object[] found;
             try {
                 found = readInputs();
@@ -1433,7 +1467,7 @@ final class ControlCenter {
                 if (gen != inputsGen || act.isDestroyed()) return;
                 applyInputs(found);
             });
-        }, "cc-inputs").start();
+        });
     }
 
     /** Off the main thread: {@code {signature, sources, lead}}, or null for a TV with no input service. */
