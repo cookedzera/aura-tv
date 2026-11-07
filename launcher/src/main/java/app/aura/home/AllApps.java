@@ -217,7 +217,9 @@ final class AllApps extends FrameLayout {
             if ((!hasFocus() || findFocus() == this) && !focusApps()) tabViews.get(current).requestFocus();
             return;
         }
-        rowsIn(installed);
+        // the rows' stagger moves things inside the layer the rising panel is on (HIGH), so that
+        // layer is drawn again every frame: only a TV with the GPU for it; LOW has no layer to spoil
+        if (Ui.light || rich()) rowsIn(installed);
         way.in(LOW_OPEN, null);
         hold.start();
         String title = act.getString(R.string.cat_all_apps);
@@ -323,7 +325,7 @@ final class AllApps extends FrameLayout {
         }
         incoming = g;
         incomingDir = dir;
-        if (Ui.light) {
+        if (!rich()) {
             settle();
             return;
         }
@@ -333,7 +335,8 @@ final class AllApps extends FrameLayout {
 
     /**
      * The grid sliding in lands now: its slide-out cut short where something needs its apps at once.
-     * HIGH fades it in on a layer; LOW only moves it (no layer the size of the window).
+     * A TV with the GPU for it fades it in on a layer; others only move it (a layer the size of the
+     * window, drawn again as each tile's picture lands, cost a weak GPU its frames).
      */
     private void settle() {
         Grid g = incoming;
@@ -343,7 +346,7 @@ final class AllApps extends FrameLayout {
         install(g);
         viewport.setTranslationX(Ui.dpf(36) * incomingDir);
         android.view.ViewPropertyAnimator in = viewport.animate().translationX(0f).setStartDelay(0).setDuration(IN_MS).setInterpolator(Ui.EASE_DECEL);
-        if (!Ui.light) {
+        if (rich()) {
             viewport.setAlpha(0f);
             in.alpha(1f).withLayer();
         }
@@ -379,7 +382,7 @@ final class AllApps extends FrameLayout {
         int n = tab.apps.size();
         Card[] cards = new Card[n];
         String style = Prefs.tileStyle(act);
-        boolean tvos = Prefs.tvos(act) || style.equals("tvos"), glass = style.equals("glass"), lowEnd = Perf.lowEnd(act);
+        boolean tvos = Prefs.tvos(act) || style.equals("tvos"), glass = style.equals("glass"), rich = rich();
         LinearLayout row = null;
         for (int i = 0; i < n; i++) {
             if (i % COLS == 0) {
@@ -403,7 +406,7 @@ final class AllApps extends FrameLayout {
             card.tvos = tvos;
             // the slow tilt keeps the screen drawing for seconds after each move: not on a low-end TV,
             // even with HIGH chosen by hand
-            card.sway = !Ui.light && !lowEnd;
+            card.sway = rich;
             // grows no further than halfway into the gap: never over its neighbours
             card.setGrowRoom(GAP / 2f);
             card.onClick = () -> host.launch(a, card);
@@ -505,7 +508,7 @@ final class AllApps extends FrameLayout {
      * fill a weak GPU can't spare.
      */
     private void light(int i, int color) {
-        if (Ui.light || Perf.lowEnd(act)) {
+        if (!rich()) {
             if (glow != null) glow.off(false);
             return;
         }
@@ -518,6 +521,15 @@ final class AllApps extends FrameLayout {
         float x = viewport.getLeft() + (viewport.getWidth() - gridW) / 2f + (i % COLS) * Ui.dpf(W + GAP) + Ui.dpf(W) / 2f;
         float y = viewport.getTop() + Ui.dpf(TOP) - glide.target() + (i / COLS) * pitch() + Ui.dpf(H) / 2f;
         glow.to(x, y, color);
+    }
+
+    /**
+     * The richest motion (the light, the sway, faded slides, rows rising inside the panel's layer)
+     * only on a TV with the hardware for it: HIGH, and not a low-end TV with HIGH chosen by hand.
+     * Read each time, as the tier can change while home runs.
+     */
+    private boolean rich() {
+        return !Ui.light && !Perf.lowEnd(act);
     }
 
     /** The tab in focus, or -1 when focus is in the apps (or anywhere else). */
