@@ -5945,12 +5945,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // home holds still as the glass rises over it, as under Control Center: moving or fading the
         // whole home put it on a layer the size of the screen, which a 1 GB TV paid for in frames
         handler.postDelayed(() -> {
-            if (allApps.isOpen()) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
+            if (!allApps.isOpen()) return;
+            for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
+            // the photograph rests while the glass covers it: its drift re-blurred the glass five
+            // times a second for nothing to see, and on HIGH kept a weak GPU busy as the apps moved
+            backdrop.stop();
         }, 300);
     }
 
     private void closeAllApps() {
         if (!allApps.isOpen()) return;
+        if (resumed) backdrop.start();
         for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         allApps.close();

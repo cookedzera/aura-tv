@@ -376,7 +376,7 @@ final class AllApps extends FrameLayout {
         int n = tab.apps.size();
         Card[] cards = new Card[n];
         String style = Prefs.tileStyle(act);
-        boolean tvos = Prefs.tvos(act) || style.equals("tvos"), glass = style.equals("glass");
+        boolean tvos = Prefs.tvos(act) || style.equals("tvos"), glass = style.equals("glass"), lowEnd = Perf.lowEnd(act);
         LinearLayout row = null;
         for (int i = 0; i < n; i++) {
             if (i % COLS == 0) {
@@ -398,7 +398,9 @@ final class AllApps extends FrameLayout {
             card.opaque = card.glass == null && (a.art == null || !a.art.hasAlpha());
             card.deferred = true;
             card.tvos = tvos;
-            card.sway = !Ui.light;
+            // the slow tilt keeps the screen drawing for seconds after each move: not on a low-end TV,
+            // even with HIGH chosen by hand
+            card.sway = !Ui.light && !lowEnd;
             // grows no further than halfway into the gap: never over its neighbours
             card.setGrowRoom(GAP / 2f);
             card.onClick = () -> host.launch(a, card);

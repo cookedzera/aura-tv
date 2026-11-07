@@ -494,4 +494,16 @@ public class AllAppsTest {
         run(AllApps.IN_MS + 100);
         Assert.assertEquals(0f, viewport.getTranslationX(), 0.5f);
     }
+
+    @Test
+    public void thePhotographRestsWhileAllAppsCoversIt() throws Exception {
+        HomeActivity a = home(2, 3);
+        Backdrop backdrop = field(a, "backdrop");
+        Assert.assertTrue("drifting on home", (boolean) (Boolean) field(backdrop, "running"));
+        call(a, "openAllApps", new Class<?>[]{});
+        run(500);
+        Assert.assertFalse("at rest under the glass", (boolean) (Boolean) field(backdrop, "running"));
+        call(a, "closeAllApps", new Class<?>[]{});
+        Assert.assertTrue("back as All Apps goes", (boolean) (Boolean) field(backdrop, "running"));
+    }
 }
