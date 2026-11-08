@@ -76,7 +76,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private static final int WIDGET_ROW = 816, WIDGET_GAP = 18;
     static final String[] WIDGET_IDS = {"sky", "stack", "today"};
     static final int[] WIDGET_NAMES = {R.string.widget_sky, R.string.smart_stack, R.string.today};
-    private static final int SIDE = 0, WIDGETS = 1, GRID = 2, SHELF = 3, TOP = 4;
+    private static final int SIDE = 0, WIDGETS = 1, GRID = 2, SHELF = 3, TOP = 4, TABS = 5;
     private static final int SIDE_GLOW = 0xFF9FB2D6, DAY_GLOW = 0xFF7FB2FF;
     /** The lengths of Spring.row() and Spring.smooth() (ms): a move whose distance floor (Ui.scrollFloorMs) is longer gets a slower spring. */
     private static final long ROW_MS = 350, SMOOTH_MS = 450;
@@ -1029,6 +1029,21 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         page.addView(shelf, frame(Ui.dp(WIDGET_ROW), Ui.dp(WIDGET_H), Gravity.TOP | Gravity.START, Ui.dp(PAGE_X), Ui.dp(WIDGET_Y), 0, 0));
         gridLabel = Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.26f);
         page.addView(gridLabel, frame(WRAP, WRAP, Gravity.TOP | Gravity.START, Ui.dp(PAGE_X), Ui.dp(GRID_Y - 24), 0, 0));
+        // the Aura style's categories: tabs over the grid, as All Apps has them, in its place of the label
+        homeTabs = new TabStrip(this, 10.5f, 13, 4, new TabStrip.Listener() {
+            @Override
+            public void pick(int k) {
+                pickHomeTab(k);
+            }
+
+            @Override
+            public void hold(int k, View tab) {
+                swallow(heldConfirm);
+                categoryMenu(homeTabIds.get(k), tab);
+            }
+        });
+        homeTabs.setVisibility(View.GONE);
+        page.addView(homeTabs, frame(WRAP, WRAP, Gravity.TOP | Gravity.START, Ui.dp(PAGE_X - 4), Ui.dp(GRID_Y - TABS_H - 6), 0, 0));
         // the tvOS style's frosted shelf, edge to edge behind the first row (added before the tiles: beneath them)
         dockGlass = new GlassFrame(this, backdrop, 26, 0.42f);
         dockGlass.frost = 0.09f;
@@ -2041,6 +2056,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         int aura = dock ? View.GONE : View.VISIBLE;
         greeting.setVisibility(aura);
         gridLabel.setVisibility(aura);
+        if (dock) homeTabs.setVisibility(View.GONE);
         layoutWidgets(false);
         dockGlass.setVisibility(dock ? View.VISIBLE : View.GONE);
         dockGlass.setAlpha(1f);
@@ -2644,11 +2660,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             pageShift = 0f;
         }
         cells.clear();
+        // the Aura style's tabs, made again from the categories; a tab other than All apps shows its apps alone
+        AllApps.Tab tab = refreshHomeTabs();
         boolean calm = Perf.light(this);
         String style = Prefs.tileStyle(this);
         boolean glassTiles = style.equals("glass"), tvosTiles = style.equals("tvos") || dock;
         String nameMode = Prefs.nameMode(this);
-        for (String[] in : live) {
+        for (String[] in : tab != null ? java.util.Collections.<String[]>emptyList() : live) {
             final String id = in[0], label = in[1];
             final int glyph = InputSheet.glyphOf(in.length > 2 ? Integer.parseInt(in[2]) : InputSheet.HDMI);
             final String sig = "input|" + style + "|" + dock + "|" + label + "|" + glyph;
@@ -2689,18 +2707,22 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         for (Folders.Folder f : folders.values()) foldered.addAll(f.apps);
         List<String> hidden = new ArrayList<>(Prefs.hidden(this));
         List<Object> entries = new ArrayList<>();
-        Set<String> placed = new HashSet<>();
-        for (String tag : AppRepo.order(prefs)) {
-            if (tag.startsWith("folder:")) {
-                Folders.Folder f = folders.get(tag.substring(7));
-                if (f != null && !folderApps(f).isEmpty() && placed.add(tag)) entries.add(f);
-            } else {
-                AppRepo.App a = find(tag);
-                if (a != null && !foldered.contains(tag) && !hidden.contains(tag) && placed.add(tag)) entries.add(a);
+        if (tab != null) {
+            entries.addAll(tab.apps);
+        } else {
+            Set<String> placed = new HashSet<>();
+            for (String tag : AppRepo.order(prefs)) {
+                if (tag.startsWith("folder:")) {
+                    Folders.Folder f = folders.get(tag.substring(7));
+                    if (f != null && !folderApps(f).isEmpty() && placed.add(tag)) entries.add(f);
+                } else {
+                    AppRepo.App a = find(tag);
+                    if (a != null && !foldered.contains(tag) && !hidden.contains(tag) && placed.add(tag)) entries.add(a);
+                }
             }
+            for (AppRepo.App a : apps) if (!foldered.contains(a.pkg) && !hidden.contains(a.pkg) && placed.add(a.pkg)) entries.add(a);
+            for (Folders.Folder f : folders.values()) if (!folderApps(f).isEmpty() && placed.add(f.tag())) entries.add(f);
         }
-        for (AppRepo.App a : apps) if (!foldered.contains(a.pkg) && !hidden.contains(a.pkg) && placed.add(a.pkg)) entries.add(a);
-        for (Folders.Folder f : folders.values()) if (!folderApps(f).isEmpty() && placed.add(f.tag())) entries.add(f);
         List<AppRepo.App> sorted = new ArrayList<>();
         int inputs = cells.size();
         if (rows) {
@@ -2742,7 +2764,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         gridLabel.setText(getString(R.string.your_apps_n, sorted.size() + foldered.size()));
         allAppsCount = 0;
         for (Object e : entries) allAppsCount += e instanceof Folders.Folder ? folderApps((Folders.Folder) e).size() : 1;
-        if (!dock) gridLabel.setVisibility(rows ? View.GONE : View.VISIBLE);
+        if (!dock) gridLabel.setVisibility(rows || homeTab != null ? View.GONE : View.VISIBLE);
         // before the labels: the rows are lit for the tile focus goes back to
         gridAt = at;
         placeRowLabels();
@@ -4457,6 +4479,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             return;
         }
         hideTip();
+        if (n.getParent() == homeTabs) {
+            zone = TABS;
+            hideShelf();
+            scrollTo(0);
+            n.getLocationInWindow(loc);
+            glide(loc[0] + n.getWidth() / 2f, loc[1] + n.getHeight() / 2f, SIDE_GLOW);
+            return;
+        }
         i = shelf.cards.indexOf(n);
         if (i >= 0) {
             zone = SHELF;
@@ -5007,8 +5037,28 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void route(int code) {
         View f = getCurrentFocus();
         if (zone == SIDE && side.indexOf(f) < 0 || zone == WIDGETS && widgets.indexOf(f) < 0
-                || zone == SHELF && shelf.cards.indexOf(f) < 0 || zone == TOP && !tops.contains(f)) zone = contentZone;
+                || zone == SHELF && shelf.cards.indexOf(f) < 0 || zone == TOP && !tops.contains(f)
+                || zone == TABS && homeTabs.focused() < 0) zone = contentZone;
         switch (zone) {
+            case TABS: {
+                int k = homeTabs.focused();
+                if (code == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    if (k > 0) homeTabs.tab(k - 1).requestFocus();
+                    else if (!held) enterSide();
+                } else if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    if (k < homeTabs.size() - 1) homeTabs.tab(k + 1).requestFocus();
+                    else if (!held) bounce(false);
+                } else if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    // a tab picked a moment ago: its apps come in now, focus on them where it came up from
+                    homeTabs.pickNow();
+                    if (cells.isEmpty()) landEmpty();
+                    else focusGrid(Math.min(Math.max(0, lastCol), cells.size() - 1));
+                } else if (code == KeyEvent.KEYCODE_DPAD_UP && !held) {
+                    if (!widgets.isEmpty()) focusWidget(widgetForCol(Math.max(0, lastCol)));
+                    else setPhoto(true);
+                }
+                return;
+            }
             case TOP:
                 if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
                     if (shelf.shownFor() != null && !shelf.cards.isEmpty()) shelf.cards.get(Math.min(shelfAt, shelf.cards.size() - 1)).requestFocus();
@@ -5077,7 +5127,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                         break;
                     case KeyEvent.KEYCODE_DPAD_UP:
                         if (row > 0) focusGrid(gridAt - COLS);
-                        else if (!held && shelf.shownFor() != null && shelf.shownFor().equals(cells.get(gridAt).tag)
+                        else if (!held && homeTab != null) {
+                            // up into the categories, onto the one on show
+                            lastCol = col;
+                            homeTabs.tab(Math.max(0, homeTabIds.indexOf(homeTab))).requestFocus();
+                        } else if (!held && shelf.shownFor() != null && shelf.shownFor().equals(cells.get(gridAt).tag)
                                 && !shelf.cards.isEmpty()) {
                             // up into this app's Top Shelf, onto the card nearest above
                             shelf.cards.get(Math.min(shelf.cards.size() - 1, col * shelf.cards.size() / COLS)).requestFocus();
@@ -5903,11 +5957,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         Set<String> hidden = Prefs.hidden(this);
         List<String> order = AppRepo.order(prefs), installed = new ArrayList<>();
         for (AppRepo.App a : apps) if (!hidden.contains(a.pkg)) installed.add(a.pkg);
+        Map<String, AppRepo.App> byPkg = new java.util.HashMap<>();
+        for (AppRepo.App a : apps) byPkg.put(a.pkg, a);
         List<AllApps.Tab> out = new ArrayList<>();
         for (Categories.Cat k : Categories.all(this)) {
             boolean all = k.id.equals(Categories.ALL);
             if (k.hidden && !all) continue;
-            List<AppRepo.App> in = categoryApps(k, order, installed);
+            List<AppRepo.App> in = new ArrayList<>();
+            for (String pkg : Categories.members(this, k, order, installed)) {
+                AppRepo.App a = byPkg.get(pkg);
+                if (a != null) in.add(a);
+            }
             if (in.isEmpty()) continue;
             AllApps.Tab t = new AllApps.Tab(k.id, Categories.name(this, k), in);
             if (all) out.add(0, t);
@@ -5947,7 +6007,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.remove_from_row, catName), () -> {
                 closeMenu(card);
                 Categories.removeFrom(this, tab, pkg);
-                allAppsChanged(tab);
+                categoryChanged(tab);
                 hud(R.drawable.ic_check, getString(R.string.name_left_row, label, catName));
             }));
         }
@@ -6016,14 +6076,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             items.add(new AppMenu.Item(R.drawable.ic_move, getString(d < 0 ? R.string.move_left : R.string.move_right), () -> {
                 Categories.moveBeside(this, id, ids.get(to), dir);
                 closeMenu(anchor);
-                allAppsChanged(id);
+                categoryChanged(id);
             }));
         }
         if (!kids && Categories.builtIn(k) && !id.equals(Categories.ALL)) {
             items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.hide), () -> {
                 Categories.setHidden(this, id, true);
                 closeMenu(anchor);
-                allAppsChanged(id);
+                categoryChanged(id);
                 hud(R.drawable.ic_hide, getString(R.string.category_hidden, name));
             }));
         }
@@ -6037,7 +6097,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 }
                 Categories.delete(this, id);
                 closeMenu(anchor);
-                allAppsChanged(id);
+                categoryChanged(id);
                 hud(R.drawable.ic_trash, getString(R.string.category_deleted, name));
             }));
         }
@@ -6046,11 +6106,91 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         menu.show(anchor, name, items);
     }
 
-    /** All Apps' tabs made again after a category changed, the focus back on its tab (or the one on show). */
-    private void allAppsChanged(String id) {
-        if (!allApps.isOpen()) return;
-        refreshOverlays();
-        allApps.focusTab(id);
+    /** A category changed: All Apps' tabs, or the Aura home's, made again, the focus back on its tab (or the one on show). */
+    private void categoryChanged(String id) {
+        if (allApps.isOpen()) {
+            refreshOverlays();
+            allApps.focusTab(id);
+            return;
+        }
+        populate();
+        int k = homeTabIds.indexOf(id);
+        if (homeTab == null) returnToContent();
+        else homeTabs.tab(k >= 0 ? k : Math.max(0, homeTabIds.indexOf(homeTab))).requestFocus();
+    }
+
+    /** dp: the Aura home's tab strip, from the top of its capsule to its foot. */
+    private static final int TABS_H = 30;
+    private TabStrip homeTabs;
+    /** The Aura home's tabs (category ids, in order), and the one whose apps the grid shows: null with no tabs up. */
+    private final List<String> homeTabIds = new ArrayList<>();
+    private String homeTab;
+
+    /**
+     * The Aura style's category tabs over the grid, made again (only when they changed) from the
+     * categories with something in them; none in the tvOS style, or with a single category. Returns
+     * the tab the grid should show alone, or null for every app (All apps).
+     */
+    private AllApps.Tab refreshHomeTabs() {
+        List<AllApps.Tab> list = dock ? java.util.Collections.<AllApps.Tab>emptyList() : allAppsTabs();
+        if (list.size() < 2) {
+            homeTabs.setVisibility(View.GONE);
+            homeTabIds.clear();
+            homeTab = null;
+            return null;
+        }
+        List<String> ids = new ArrayList<>(), titles = new ArrayList<>();
+        for (AllApps.Tab t : list) {
+            ids.add(t.id);
+            titles.add(t.title);
+        }
+        boolean changed = !ids.equals(homeTabIds) || homeTabs.size() != titles.size();
+        for (int i = 0; !changed && i < titles.size(); i++) changed = !titles.get(i).contentEquals(homeTabs.tab(i).getText());
+        int at = homeTab == null ? -1 : ids.indexOf(homeTab);
+        // none chosen yet, or its category gone (deleted, hidden, emptied): every app
+        if (at < 0) {
+            at = 0;
+            homeTab = ids.get(0);
+        }
+        if (changed) {
+            boolean had = homeTabs.focused() >= 0;
+            homeTabIds.clear();
+            homeTabIds.addAll(ids);
+            homeTabs.set(titles);
+            homeTabs.choose(at, false);
+            if (had) homeTabs.tab(at).requestFocus();
+        }
+        homeTabs.setVisibility(View.VISIBLE);
+        return homeTab.equals(Categories.ALL) ? null : list.get(at);
+    }
+
+    /**
+     * An Aura home tab picked: the grid shows its apps, sliding in from the side the tab lies on as
+     * All Apps' do (HIGH fades them in as well); focus stays on the tab.
+     */
+    private void pickHomeTab(int k) {
+        if (k < 0 || k >= homeTabIds.size()) return;
+        int was = homeTabIds.indexOf(homeTab);
+        if (k == was) return;
+        homeTab = homeTabIds.get(k);
+        homeTabs.choose(k, true);
+        populate();
+        float dx = Ui.dpf(28) * Integer.signum(k - was);
+        boolean rich = AllApps.rich(this);
+        // the rows on screen (the first few: the page sits at its top on a tab); those below are simply there
+        for (int i = 0; i < cells.size() && rowOf(i) < AllApps.STAGGERED_ROWS; i++) {
+            Cell c = cells.get(i);
+            float x = cellX(i);
+            c.setTranslationX(x + dx);
+            // each row a touch behind the one above, as a tab's apps come in All Apps
+            android.view.ViewPropertyAnimator in = c.animate().translationX(x).setStartDelay(0)
+                    .setDuration(AllApps.IN_MS + (long) AllApps.ROW_TRAIL_MS * rowOf(i)).setInterpolator(Ui.EASE_DECEL);
+            if (rich) {
+                c.setAlpha(0f);
+                in.alpha(1f).withLayer();
+            }
+            in.start();
+        }
     }
 
     private void openAllApps() {
@@ -6179,7 +6319,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             // a category renamed from All Apps: back to its tab, home still out of reach under it
             String id = askTab;
             askTab = null;
-            allAppsChanged(id);
+            categoryChanged(id);
             return;
         }
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
@@ -6259,13 +6399,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         List<String> order = new ArrayList<>();
         String row = rows && gridAt < cells.size() ? cells.get(gridAt).row : null;
         for (Cell c : cells) if (!c.tag.startsWith("input:") && (row == null || row.equals(c.row))) order.add(c.tag);
+        // what's on show: a category row, an Aura home tab, or every app (null, or All apps)
+        String scope = row != null ? row : homeTab;
+        boolean main = scope == null || scope.equals(Categories.ALL);
         // the tvOS home shows only its first two rows: the apps after them keep their places
-        if (row == null) {
+        if (main) {
             Set<String> shown = new HashSet<>(order);
             for (String tag : AppRepo.order(prefs)) if (shown.add(tag)) order.add(tag);
+            AppRepo.saveDock(prefs, order);
+        } else {
+            Categories.reorder(this, scope, order);
         }
-        if (row == null || row.equals(Categories.ALL)) AppRepo.saveDock(prefs, order);
-        else Categories.reorder(this, row, order);
         hud(R.drawable.ic_check, getString(R.string.your_apps_are_arranged));
         wake();
     }

@@ -211,7 +211,7 @@ public class AllAppsTest {
         call(a, "openAllApps", new Class<?>[]{});
         run(400);
         AllApps all = field(a, "allApps");
-        List<TextView> tabViews = field(all, "tabViews");
+        List<TextView> tabViews = tabViews(all);
         Map<String, Object> grids = field(all, "grids");
         Card[] cards = field(grids.get(Categories.ALL), "cards");
         Assert.assertEquals(12, cards.length);
@@ -309,7 +309,7 @@ public class AllAppsTest {
         Assert.assertSame("the same tiles, nothing built or painted again", first, again.get(Categories.ALL));
         // their tabs too: the top row still leads up to a tab that's on screen
         Card[] cards = field(first, "cards");
-        List<TextView> tabViews = field(all, "tabViews");
+        List<TextView> tabViews = tabViews(all);
         Assert.assertEquals(tabViews.get(0).getId(), cards[0].getNextFocusUpId());
         Assert.assertSame(tabViews.get(0).getParent(), field(all, "tabRow"));
     }
@@ -594,13 +594,21 @@ public class AllAppsTest {
 
     private static TextView tabFor(AllApps all, String id) throws Exception {
         List<AllApps.Tab> tabs = field(all, "tabs");
-        List<TextView> views = field(all, "tabViews");
+        List<TextView> views = tabViews(all);
         for (int i = 0; i < tabs.size(); i++) if (tabs.get(i).id.equals(id)) return views.get(i);
         return null;
     }
 
+    /** All Apps' tab views, in order. */
+    private static List<TextView> tabViews(AllApps all) throws Exception {
+        TabStrip strip = field(all, "tabRow");
+        List<TextView> out = new ArrayList<>();
+        for (int i = 0; i < strip.size(); i++) out.add(strip.tab(i));
+        return out;
+    }
+
     /** Where one edge of the tab pill is now. */
-    private static float edge(AllApps.Tabs tabs, String name) throws Exception {
+    private static float edge(TabStrip tabs, String name) throws Exception {
         return ((Spring.Mover) field(tabs, name)).value();
     }
 
@@ -790,10 +798,10 @@ public class AllAppsTest {
         Categories.addTo(c, id, "com.example.tool0");
         HomeActivity a = home(2, 3);
         AllApps all = openedAllApps(a);
-        AllApps.Tabs tabs = field(all, "tabRow");
+        TabStrip tabs = field(all, "tabRow");
         TextView from = tabFor(all, Categories.ALL), to = tabFor(all, id);
         float l0 = edge(tabs, "left"), r0 = edge(tabs, "right");
-        tabs.to(to, true);
+        tabs.choose(tabViews(all).indexOf(to), true);
         run(64);
         float l = edge(tabs, "left"), r = edge(tabs, "right");
         float lead = (r - r0) / (to.getRight() - r0), trail = (l - l0) / (to.getLeft() - l0);
@@ -803,7 +811,7 @@ public class AllAppsTest {
         Assert.assertEquals(to.getLeft(), edge(tabs, "left"), 0.5f);
         Assert.assertEquals(to.getRight(), edge(tabs, "right"), 0.5f);
         // and back the other way: now the left edge leads
-        tabs.to(from, true);
+        tabs.choose(tabViews(all).indexOf(from), true);
         run(64);
         l = edge(tabs, "left");
         r = edge(tabs, "right");
@@ -820,7 +828,7 @@ public class AllAppsTest {
         tab.setFocusableInTouchMode(true);
         Assert.assertTrue(tab.requestFocus());
         run(600);
-        Assert.assertEquals(AllApps.TAB_GROW, tab.getScaleX(), 0.005f);
+        Assert.assertEquals(TabStrip.GROW, tab.getScaleX(), 0.005f);
         Map<String, Object> grids = field(all, "grids");
         Card first = ((Card[]) field(grids.get("video"), "cards"))[0];
         first.setFocusableInTouchMode(true);
@@ -845,5 +853,119 @@ public class AllAppsTest {
         Assert.assertTrue("each row trails the one above: " + r0 + ", " + r1 + ", " + r2, r0 < r1 && r1 < r2);
         run(900);
         for (int i = 0; i < grid.getChildCount(); i++) Assert.assertEquals(0f, grid.getChildAt(i).getTranslationX(), 0.5f);
+    }
+
+    private HomeActivity auraHome(int video, int tools) throws Exception {
+        Prefs.of(c).edit().putString(Prefs.LAYOUT, "aura").commit();
+        return home(video, tools);
+    }
+
+    private static TabStrip homeTabs(HomeActivity a) throws Exception {
+        TabStrip s = field(a, "homeTabs");
+        // the test starts in touch mode, where a D-pad focus only lands after a key; a remote is never in it
+        for (int i = 0; i < s.size(); i++) s.tab(i).setFocusableInTouchMode(true);
+        return s;
+    }
+
+    @Test
+    public void theAuraHomeShowsItsCategoriesAsTabsOverTheGrid() throws Exception {
+        HomeActivity a = auraHome(2, 3);
+        TabStrip tabs = homeTabs(a);
+        Assert.assertEquals(View.VISIBLE, tabs.getVisibility());
+        Assert.assertEquals(Arrays.asList(Categories.ALL, "video"), field(a, "homeTabIds"));
+        Assert.assertEquals("the tabs take the label's place", View.GONE, ((View) field(a, "gridLabel")).getVisibility());
+        Assert.assertEquals(5, ((List<?>) field(a, "cells")).size());
+        // a picture of it, for the eye (tests/target/aura-tabs.png)
+        View root = a.getWindow().getDecorView();
+        android.graphics.Bitmap shot = android.graphics.Bitmap.createBitmap(root.getWidth(), root.getHeight(), android.graphics.Bitmap.Config.ARGB_8888);
+        root.draw(new android.graphics.Canvas(shot));
+        try (java.io.FileOutputStream f = new java.io.FileOutputStream("target/aura-tabs.png")) {
+            shot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, f);
+        }
+    }
+
+    @Test
+    public void theTvosHomeHasNoTabs() throws Exception {
+        HomeActivity a = home(2, 3);
+        Assert.assertEquals(View.GONE, ((View) field(a, "homeTabs")).getVisibility());
+    }
+
+    @Test
+    public void pickingAnAuraTabShowsItsAppsAloneSlidingIn() throws Exception {
+        HomeActivity a = auraHome(2, 3);
+        List<Cell> cells = field(a, "cells");
+        call(a, "pickHomeTab", new Class<?>[]{int.class}, 1);
+        Assert.assertEquals("Movies & TV alone", 2, cells.size());
+        float x = (Float) call(a, "cellX", new Class<?>[]{int.class}, 0);
+        Assert.assertTrue("its apps slide in from the side", Math.abs(cells.get(0).getTranslationX() - x) > 1f);
+        run(800);
+        Assert.assertEquals(x, cells.get(0).getTranslationX(), 0.5f);
+        Assert.assertEquals(1f, cells.get(0).getAlpha(), 0.01f);
+        call(a, "pickHomeTab", new Class<?>[]{int.class}, 0);
+        run(800);
+        Assert.assertEquals("every app again", 5, cells.size());
+    }
+
+    @Test
+    public void upFromTheFirstRowReachesTheTabsAndDownComesBack() throws Exception {
+        HomeActivity a = auraHome(2, 3);
+        TabStrip tabs = homeTabs(a);
+        List<Cell> cells = field(a, "cells");
+        // out of touch mode, as a remote is: tiles built later take focus too
+        cells.get(2).card.requestFocusFromTouch();
+        org.junit.Assume.assumeFalse(cells.get(2).card.isInTouchMode());
+        call(a, "focusGrid", new Class<?>[]{int.class}, 2);
+        run(100);
+        set(a, "held", false);
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP));
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_UP));
+        run(100);
+        Assert.assertEquals("onto the tab on show", 0, tabs.focused());
+        // Right to Movies & TV, then Down: its apps, focus on them
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT));
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_RIGHT));
+        run(50);
+        Assert.assertEquals(1, tabs.focused());
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_DOWN));
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_DOWN));
+        run(100);
+        Assert.assertEquals("video", field(a, "homeTab"));
+        Assert.assertEquals(2, cells.size());
+        // the test window never has window focus, so the tile is asked, not the window
+        Assert.assertTrue("focus on its apps", cells.get(1).card.isFocused());
+        Assert.assertEquals(-1, tabs.focused());
+    }
+
+    @Test
+    public void holdingOkOnAnAuraTabOpensItsCategory() throws Exception {
+        HomeActivity a = auraHome(2, 3);
+        TabStrip tabs = homeTabs(a);
+        Assert.assertTrue(tabs.tab(1).requestFocus());
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER));
+        run(android.view.ViewConfiguration.getLongPressTimeout() + 80);
+        Assert.assertTrue(((AppMenu) field(a, "menu")).isOpen());
+        Assert.assertNotNull(menuRow(a, c.getString(R.string.hide)));
+        menuRow(a, c.getString(R.string.hide)).run();
+        run(400);
+        Assert.assertEquals("its tab is gone with it, and so are the tabs (one category left)", View.GONE, tabs.getVisibility());
+        Assert.assertEquals(5, ((List<?>) field(a, "cells")).size());
+    }
+
+    @Test
+    public void arrangingAppsInAnAuraTabKeepsTheMainOrder() throws Exception {
+        HomeActivity a = auraHome(3, 3);
+        List<String> before = new ArrayList<>();
+        List<AppRepo.App> apps = field(a, "apps");
+        for (AppRepo.App x : apps) before.add(x.pkg);
+        AppRepo.saveDock(Prefs.of(c), before);
+        call(a, "pickHomeTab", new Class<?>[]{int.class}, 1);
+        call(a, "focusGrid", new Class<?>[]{int.class}, 0);
+        set(a, "editing", true);
+        call(a, "moveEditing", new Class<?>[]{int.class}, 1);
+        call(a, "stopEdit", new Class<?>[]{});
+        Assert.assertEquals("the main order is untouched", before, AppRepo.order(Prefs.of(c)));
+        List<String> video = new ArrayList<>();
+        for (Cell x : (List<Cell>) field(a, "cells")) video.add(x.tag);
+        Assert.assertEquals("the category keeps its new order", Arrays.asList("com.example.video1", "com.example.video0", "com.example.video2"), video);
     }
 }

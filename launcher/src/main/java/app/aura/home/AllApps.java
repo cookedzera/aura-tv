@@ -7,9 +7,7 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RadialGradient;
 import android.graphics.Rect;
-import android.graphics.RectF;
 import android.graphics.Shader;
-import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -68,8 +66,6 @@ final class AllApps extends FrameLayout {
     static final int COLS = 5, W = 148, H = 84, GAP = 28, ROW_GAP = 18;
     /** dp: room above the first row for its tile in focus to grow. */
     static final int TOP = 22;
-    /** A tab taken by focus waits this long before its apps come in, so sweeping across the tabs builds nothing on the way. */
-    static final long PICK_MS = 160;
     /** The apps on show slide out over this, the next tab's in over IN_MS. */
     static final int OUT_MS = 110, IN_MS = 280;
     /** LOW: how long the screen takes to rise (HIGH rides the spring). */
@@ -81,13 +77,11 @@ final class AllApps extends FrameLayout {
     /** HIGH, a tab's apps sliding in: each row after the first trails it by this many dp and ms more, so the first row leads. */
     static final float ROW_TRAIL = 12;
     static final int ROW_TRAIL_MS = 40;
-    /** A tab in focus grows to this, with the pop of the other controls. */
-    static final float TAB_GROW = 1.06f;
 
     private final Activity act;
     private final Host host;
     /** The tabs in their capsule, the pill drawn beneath them. */
-    private final Tabs tabRow;
+    private final TabStrip tabRow;
     /** The apps' window under the tabs: the grid glides inside it, clipped to it. */
     private final FrameLayout viewport;
     /** HIGH: the light behind the app in focus, made the first time it's wanted; null until then. */
@@ -97,17 +91,11 @@ final class AllApps extends FrameLayout {
     private final Runnable gone;
     /** The tiles' pictures, painted one at a time behind the screen, top rows first: opening never waits on them. */
     private final ExecutorService painter = Compat.background("all-apps", android.os.Process.THREAD_PRIORITY_DEFAULT + 4);
-    private final List<TextView> tabViews = new ArrayList<>();
     private final Map<String, Grid> grids = new HashMap<>();
     private List<Tab> tabs = new ArrayList<>();
     private boolean shown;
-    /** OK went down on a tab and hasn't yet been let go or held long enough for its menu. */
-    private boolean tabArmed;
-    private final Runnable tabHold = this::tabHeld;
     /** The tab whose apps are on show (or sliding in). */
     int current = -1;
-    /** The tab focus has moved to comes in once it rests there. */
-    private final Runnable pick = () -> show(focusedTab(), true);
     /** The grid in the window, and the next one while the last slides out. */
     private Grid installed, incoming;
     private int incomingDir;
@@ -143,7 +131,17 @@ final class AllApps extends FrameLayout {
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER_HORIZONTAL);
         col.setPadding(0, Ui.dp(Ui.TEXT_SAFE_Y + 4), 0, 0);
-        tabRow = new Tabs(a);
+        tabRow = new TabStrip(a, 15, 20, 8, new TabStrip.Listener() {
+            @Override
+            public void pick(int k) {
+                show(k, true);
+            }
+
+            @Override
+            public void hold(int k, View tab) {
+                host.edit(tabs.get(k), tab);
+            }
+        });
         col.addView(tabRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         viewport = new FrameLayout(a) {
             /** The grid at its whole height, not cut to the window's: rows below glide into view whole. */
@@ -180,7 +178,7 @@ final class AllApps extends FrameLayout {
             col.setScaleY(s);
         });
         hold = new GlassFrame.Hold(this, () -> {
-            if (!focusApps() && !tabViews.isEmpty()) tabViews.get(0).requestFocus();
+            if (!focusApps() && tabRow.size() > 0) tabRow.tab(0).requestFocus();
         });
         gone = () -> {
             if (shown) return;
@@ -221,7 +219,7 @@ final class AllApps extends FrameLayout {
         viewport.animate().cancel();
         viewport.removeAllViews();
         installed = incoming = null;
-        removeCallbacks(pick);
+        tabRow.live(true);
         current = -1;
         if (!same) buildTabs();
         int at = 0;
@@ -231,7 +229,7 @@ final class AllApps extends FrameLayout {
         if (tabs.isEmpty()) return;
         show(at, false);
         if (again) {
-            if ((!hasFocus() || findFocus() == this) && !focusApps()) tabViews.get(current).requestFocus();
+            if ((!hasFocus() || findFocus() == this) && !focusApps()) tabRow.tab(current).requestFocus();
             return;
         }
         // the rows' stagger moves things inside the layer the rising panel is on (HIGH), so that
@@ -258,9 +256,7 @@ final class AllApps extends FrameLayout {
     void close() {
         if (!shown) return;
         shown = false;
-        removeCallbacks(pick);
-        removeCallbacks(tabHold);
-        tabArmed = false;
+        tabRow.live(false);
         hold.stop();
         if (glow != null) glow.off(true);
         // fading out, its tiles take no focus
@@ -270,66 +266,9 @@ final class AllApps extends FrameLayout {
     }
 
     private void buildTabs() {
-        tabRow.removeAllViews();
-        tabViews.clear();
-        for (int i = 0; i < tabs.size(); i++) {
-            final int k = i;
-            TextView t = Ui.text(act, 15, Ui.semibold, 0xCCFFFFFF);
-            t.setText(tabs.get(i).title);
-            t.setSingleLine(true);
-            t.setPadding(Ui.dp(20), Ui.dp(8), Ui.dp(20), Ui.dp(8));
-            t.setFocusable(true);
-            t.setId(View.generateViewId());
-            t.setOnFocusChangeListener((v, gained) -> {
-                paintTabs();
-                // the pill grows with it: the row draws it, so it's drawn again as the tab grows
-                if (!shown) {
-                    // closing: back to size at once, not moving inside the layer the screen falls away on
-                    v.animate().cancel();
-                    v.setScaleX(1f);
-                    v.setScaleY(1f);
-                    tabRow.invalidate();
-                    return;
-                }
-                float s = gained ? TAB_GROW : 1f;
-                boolean pop = gained && !Ui.light;
-                v.animate().scaleX(s).scaleY(s).setStartDelay(0)
-                        .setDuration(pop ? Ui.CTRL_POP : gained ? Ui.CTRL_SCALE_IN : Ui.CTRL_SCALE_OUT)
-                        .setInterpolator(pop ? Ui.CTRL_POP_CURVE : gained ? Ui.EASE_DECEL : Ui.EASE_STANDARD)
-                        .setUpdateListener(a -> tabRow.invalidate()).start();
-                if (!gained) return;
-                tabRow.to(v, true);
-                removeCallbacks(pick);
-                if (k != current) postDelayed(pick, PICK_MS);
-            });
-            t.setOnClickListener(v -> commitPick());
-            LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            if (i > 0) l.leftMargin = Ui.dp(2);
-            tabRow.addView(t, l);
-            tabViews.add(t);
-        }
-        for (int i = 0; i < tabViews.size(); i++) {
-            TextView t = tabViews.get(i);
-            t.setNextFocusLeftId(i == 0 ? t.getId() : tabViews.get(i - 1).getId());
-            t.setNextFocusRightId(i == tabViews.size() - 1 ? t.getId() : tabViews.get(i + 1).getId());
-        }
-    }
-
-    /** The chosen tab dark on a white pill while the tabs have the focus, light on a faint one once it's in the apps. */
-    private void paintTabs() {
-        boolean onTabs = focusedTab() >= 0;
-        tabRow.lit(onTabs);
-        for (int i = 0; i < tabViews.size(); i++) {
-            TextView t = tabViews.get(i);
-            boolean chosen = onTabs ? t.isFocused() : i == current;
-            t.setTextColor(chosen && onTabs ? 0xFF1C1C1E : chosen ? 0xFFFFFFFF : 0x99FFFFFF);
-        }
-    }
-
-    /** The tab in focus comes in now, not after its rest (OK or Down on it). */
-    private void commitPick() {
-        removeCallbacks(pick);
-        show(focusedTab(), true);
+        List<String> titles = new ArrayList<>();
+        for (Tab t : tabs) titles.add(t.title);
+        tabRow.set(titles);
     }
 
     /** The first app on show takes the focus; false when there's none. */
@@ -348,8 +287,7 @@ final class AllApps extends FrameLayout {
         int dir = Integer.signum(k - current);
         current = k;
         Grid g = grid(k);
-        tabRow.to(tabViews.get(k), animate);
-        paintTabs();
+        tabRow.choose(k, animate);
         viewport.animate().cancel();
         if (!animate || installed == null) {
             incoming = null;
@@ -412,7 +350,7 @@ final class AllApps extends FrameLayout {
         Tab tab = tabs.get(k);
         Grid g = grids.get(tab.id);
         if (g == null) {
-            g = build(tab, tabViews.get(k));
+            g = build(tab, tabRow.tab(k));
             grids.put(tab.id, g);
         }
         return g;
@@ -582,7 +520,12 @@ final class AllApps extends FrameLayout {
      * Read each time, as the tier can change while home runs.
      */
     private boolean rich() {
-        return !Ui.light && !Perf.lowEnd(act);
+        return rich(act);
+    }
+
+    /** The same test for anything else on screen that moves this way (home's own tabs). */
+    static boolean rich(Context c) {
+        return !Ui.light && !Perf.lowEnd(c);
     }
 
     /** The category on show, or null before any is. */
@@ -590,53 +533,20 @@ final class AllApps extends FrameLayout {
         return current >= 0 && current < tabs.size() ? tabs.get(current).id : null;
     }
 
-    /** The hold on a tab, timed here: an IR remote's own long-press often never arrives. */
-    private void tabHeld() {
-        int k = focusedTab();
-        if (!tabArmed || k < 0) return;
-        tabArmed = false;
-        host.edit(tabs.get(k), tabViews.get(k));
-    }
-
     /** The tab for category {@code id} takes the focus, or the one on show when that category is gone. */
     void focusTab(String id) {
         for (int i = 0; i < tabs.size(); i++) {
             if (tabs.get(i).id.equals(id)) {
-                tabViews.get(i).requestFocus();
+                tabRow.tab(i).requestFocus();
                 return;
             }
         }
-        if (current >= 0 && current < tabViews.size()) tabViews.get(current).requestFocus();
-    }
-
-    /** The tab in focus, or -1 when focus is in the apps (or anywhere else). */
-    private int focusedTab() {
-        for (int i = 0; i < tabViews.size(); i++) if (tabViews.get(i).isFocused()) return i;
-        return -1;
+        if (current >= 0 && current < tabRow.size()) tabRow.tab(current).requestFocus();
     }
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
-        boolean onTab = shown && focusedTab() >= 0;
-        if (onTab && Pad.isConfirm(e.getKeyCode())) {
-            // OK on a tab: a press brings its apps in, a hold opens its category's menu
-            if (e.getAction() == KeyEvent.ACTION_DOWN) {
-                if (e.getRepeatCount() == 0) {
-                    tabArmed = true;
-                    postDelayed(tabHold, android.view.ViewConfiguration.getLongPressTimeout());
-                } else if ((e.getFlags() & KeyEvent.FLAG_LONG_PRESS) != 0) {
-                    // the remote's own long-press arrived first
-                    removeCallbacks(tabHold);
-                    tabHeld();
-                }
-                return true;
-            }
-            removeCallbacks(tabHold);
-            if (tabArmed && !e.isCanceled()) commitPick();
-            tabArmed = false;
-            return true;
-        }
-        if (onTab && e.getAction() == KeyEvent.ACTION_DOWN) {
+        if (shown && tabRow.focused() >= 0 && e.getAction() == KeyEvent.ACTION_DOWN) {
             int code = e.getKeyCode();
             if (code == KeyEvent.KEYCODE_DPAD_UP) {
                 // above the tabs there's only home again; a held key doesn't carry out of the screen
@@ -645,7 +555,7 @@ final class AllApps extends FrameLayout {
             }
             if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
                 // Down on a tab picked a moment ago: its apps come in now, and the focus goes to them
-                commitPick();
+                tabRow.pickNow();
                 focusApps();
                 return true;
             }
@@ -667,93 +577,6 @@ final class AllApps extends FrameLayout {
     protected void onFocusChanged(boolean gained, int direction, Rect previous) {
         super.onFocusChanged(gained, direction, previous);
         if (!gained) hold.stop();
-    }
-
-    /**
-     * The row of tabs in a glass capsule, with the pill drawn under the chosen one: its two ends
-     * glide on springs to the next tab's place, keeping their speed as focus sweeps across, white
-     * while the tabs have the focus, faint once it's in the apps. Drawn by the row itself, beneath
-     * its tabs: a separate view laid over them would need a size of its own.
-     */
-    static final class Tabs extends LinearLayout {
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final RectF r = new RectF();
-        private final Spring.Mover left, right;
-        /** The left edge leads (heading left), on {@link Spring#pillLead}; the right one otherwise. */
-        private boolean leftLeads;
-        /** The tab the pill sits on: it grows with that tab. */
-        private View on;
-        private float top, bottom;
-        private boolean lit;
-
-        Tabs(Context c) {
-            super(c);
-            setOrientation(HORIZONTAL);
-            setWillNotDraw(false);
-            int in = Ui.dp(4);
-            setPadding(in, in, in, in);
-            paint.setColor(0x2EFFFFFF);
-            // the capsule: a pane of light glass with a hairline round it, its own background
-            GradientDrawable capsule = new GradientDrawable();
-            capsule.setColor(0x1FFFFFFF);
-            capsule.setStroke(Math.max(1, Ui.dp(0.75f)), 0x33FFFFFF);
-            capsule.setCornerRadius(Ui.dpf(999));
-            setBackground(capsule);
-            left = new Spring.Mover(Spring.pillTrail(), 0.5f, 0f, v -> invalidate());
-            right = new Spring.Mover(Spring.pillLead(), 0.5f, 0f, v -> invalidate());
-        }
-
-        /** To {@code tab}'s place, gliding or there at once. */
-        void to(View tab, boolean glide) {
-            if (tab.getWidth() == 0) {
-                // not laid out yet (the screen's first frame): once it is
-                tab.addOnLayoutChangeListener(new OnLayoutChangeListener() {
-                    @Override
-                    public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) {
-                        v.removeOnLayoutChangeListener(this);
-                        to(v, false);
-                    }
-                });
-                return;
-            }
-            on = tab;
-            top = tab.getTop();
-            bottom = tab.getBottom();
-            if (glide && right.value() > left.value()) {
-                boolean toLeft = tab.getLeft() < left.target();
-                if (toLeft != leftLeads) {
-                    // turning round: the other edge leads now, each keeping its speed
-                    leftLeads = toLeft;
-                    left.respring(toLeft ? Spring.pillLead() : Spring.pillTrail());
-                    right.respring(toLeft ? Spring.pillTrail() : Spring.pillLead());
-                }
-                left.to(tab.getLeft());
-                right.to(tab.getRight());
-            } else {
-                left.jump(tab.getLeft());
-                right.jump(tab.getRight());
-            }
-            invalidate();
-        }
-
-        void lit(boolean on) {
-            if (lit == on) return;
-            lit = on;
-            paint.setColor(on ? 0xF7FFFFFF : 0x2EFFFFFF);
-            invalidate();
-        }
-
-        @Override
-        protected void onDraw(Canvas c) {
-            float l = left.value(), rt = right.value();
-            if (rt <= l) return;
-            r.set(l, top, rt, bottom);
-            // grown with its tab, about the tab's own centre
-            float s = on != null ? on.getScaleX() : 1f;
-            if (s != 1f) r.inset(-(rt - l) * (s - 1f) / 2f, -(bottom - top) * (s - 1f) / 2f);
-            float rad = r.height() / 2f;
-            c.drawRoundRect(r, rad, rad, paint);
-        }
     }
 
     /**
