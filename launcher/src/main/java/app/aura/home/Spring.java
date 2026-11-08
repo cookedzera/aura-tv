@@ -32,6 +32,16 @@ final class Spring {
         return new Spring(0.35, 0.15);
     }
 
+    /** All Apps' tab pill: the edge on the side it's heading leads on this one... */
+    static Spring pillLead() {
+        return new Spring(0.24, 0.12);
+    }
+
+    /** ...and the other trails on this, so the pill stretches toward the next tab and gathers there. */
+    static Spring pillTrail() {
+        return new Spring(0.42, 0.04);
+    }
+
     /** Long, calm moves: scrolling, a carried tile. */
     static Spring smooth() {
         return new Spring(0.45, 0);
@@ -107,7 +117,7 @@ final class Spring {
      * mid-flight, and it stops by itself once settled. Main thread only.
      */
     static final class Mover implements TimeAnimator.TimeListener {
-        private final Spring spring;
+        private Spring spring;
         private final float minChange;
         private final Sink sink;
         private TimeAnimator clock;
@@ -163,6 +173,15 @@ final class Spring {
                 return;
             }
             spring.retarget(to, simNow());
+        }
+
+        /** Moves on {@code s} from now on, from where it is at the speed it has: a change of feel with no jolt. */
+        void respring(Spring s) {
+            if (moving) {
+                long now = simNow();
+                s.start(spring.pos(now), spring.vel(now), spring.target(), now);
+            }
+            spring = s;
         }
 
         /** Sets the value at once and stops. */

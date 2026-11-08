@@ -8,6 +8,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import org.junit.Assert;
@@ -95,7 +96,7 @@ public class AllAppsTest {
         c = RuntimeEnvironment.getApplication();
         // the profile's settings first: on this TV they share a file with the device's, and clearing
         // them after would take LOW away again (each test runs on LOW, as a 1 GB TV does, unless it says)
-        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "tvos").putBoolean(Categories.ROWS, true).commit();
+        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "tvos").commit();
         Prefs.device(c).edit().putBoolean("welcomed", true).putString("set_light", "on").commit();
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16));
@@ -128,11 +129,10 @@ public class AllAppsTest {
         return a;
     }
 
-    /** Focus on the last row's first tile, then Down. */
+    /** Focus on home's last tile, then Down. */
     private static void downFromLastRow(HomeActivity a) throws Exception {
-        List<?> rows = field(a, "rowInfo");
-        Object last = rows.get(rows.size() - 1);
-        call(a, "focusGrid", new Class<?>[]{int.class}, (int) (Integer) field(last, "start"));
+        List<?> cells = field(a, "cells");
+        call(a, "focusGrid", new Class<?>[]{int.class}, cells.size() - 1);
         run(100);
         set(a, "held", false);
         a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_DOWN));
@@ -276,15 +276,16 @@ public class AllAppsTest {
     }
 
     @Test
-    public void homeHoldsStillUnderAllAppsOnHigh() throws Exception {
+    public void homeOnlySinksUnderAllAppsOnHigh() throws Exception {
         Prefs.device(c).edit().putString("set_light", "off").commit();
         HomeActivity a = home(2, 3);
         Assert.assertFalse("HIGH for this test", Perf.light(a));
         call(a, "openAllApps", new Class<?>[]{});
         run(200);
         View home = field(a, "home");
-        // as under Control Center: no layer of the whole home moving or fading, the glass rises over it
-        Assert.assertEquals(0f, home.getTranslationY(), 0.001f);
+        // only its position moves: no layer of the whole home, nothing fading or scaling it
+        Assert.assertTrue("it sinks", home.getTranslationY() > 0f);
+        Assert.assertEquals(View.LAYER_TYPE_NONE, home.getLayerType());
         Assert.assertEquals(1f, home.getScaleX(), 0.001f);
         Assert.assertEquals(1f, home.getAlpha(), 0.001f);
         run(400);
@@ -566,18 +567,283 @@ public class AllAppsTest {
         Card[] cards = field(grids.get(Categories.ALL), "cards");
         String pkg = ((AppRepo.App) cards[3].getTag()).pkg;
         call(a, "allAppsMenu", new Class<?>[]{AppRepo.App.class, Card.class}, cards[3].getTag(), cards[3]);
-        AppMenu menu = field(a, "menu");
-        ViewGroup list = field(menu, "list");
-        Runnable hide = null;
-        for (int i = 0; i < list.getChildCount(); i++) {
-            View row = list.getChildAt(i);
-            if (row instanceof Pad && hasText((ViewGroup) row, c.getString(R.string.hide_from_home))) hide = ((Pad) row).onClick;
-        }
+        Runnable hide = menuRow(a, c.getString(R.string.hide_from_home));
         Assert.assertNotNull("Hide from home is offered", hide);
         hide.run();
         run(600);
         Assert.assertTrue(all.isOpen());
         List<AllApps.Tab> tabs = field(all, "tabs");
         for (AppRepo.App x : tabs.get(0).apps) Assert.assertNotEquals(pkg, x.pkg);
+    }
+
+    private static Runnable menuRow(HomeActivity a, String label) throws Exception {
+        AppMenu menu = field(a, "menu");
+        ViewGroup list = field(menu, "list");
+        for (int i = 0; i < list.getChildCount(); i++) {
+            View row = list.getChildAt(i);
+            if (row instanceof Pad && hasText((ViewGroup) row, label)) return ((Pad) row).onClick;
+        }
+        return null;
+    }
+
+    private static AllApps openedAllApps(HomeActivity a) throws Exception {
+        call(a, "openAllApps", new Class<?>[]{});
+        run(600);
+        return field(a, "allApps");
+    }
+
+    private static TextView tabFor(AllApps all, String id) throws Exception {
+        List<AllApps.Tab> tabs = field(all, "tabs");
+        List<TextView> views = field(all, "tabViews");
+        for (int i = 0; i < tabs.size(); i++) if (tabs.get(i).id.equals(id)) return views.get(i);
+        return null;
+    }
+
+    /** Where one edge of the tab pill is now. */
+    private static float edge(AllApps.Tabs tabs, String name) throws Exception {
+        return ((Spring.Mover) field(tabs, name)).value();
+    }
+
+    private static List<String> catIds() {
+        List<String> out = new ArrayList<>();
+        for (Categories.Cat k : Categories.all(RuntimeEnvironment.getApplication())) out.add(k.id);
+        return out;
+    }
+
+    @Test
+    public void homeIsTwoRowsWithNoCategoriesAndAllAppsHoldsTheRest() throws Exception {
+        HomeActivity a = home(6, 14);
+        List<?> cells = field(a, "cells");
+        int cols = field(a, "COLS");
+        Assert.assertEquals("the dock and one row under it", 2 * cols, cells.size());
+        Assert.assertTrue("no category rows on home", ((List<?>) field(a, "rowInfo")).isEmpty());
+        // Down from the second row: All Apps, with every app
+        set(a, "held", false);
+        call(a, "focusGrid", new Class<?>[]{int.class}, cols + 1);
+        run(100);
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_DOWN));
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_DOWN));
+        run(500);
+        AllApps all = field(a, "allApps");
+        Assert.assertTrue("Down past the second row opens All Apps", all.isOpen());
+        List<AllApps.Tab> tabs = field(all, "tabs");
+        Assert.assertEquals(20, tabs.get(0).apps.size());
+        Assert.assertTrue("the categories are its tabs", ids(all).contains("video"));
+    }
+
+    @Test
+    public void theAuraStyleGridKeepsEveryApp() throws Exception {
+        Prefs.of(c).edit().putString(Prefs.LAYOUT, "aura").commit();
+        HomeActivity a = home(6, 14);
+        Assert.assertEquals(20, ((List<?>) field(a, "cells")).size());
+        Assert.assertTrue(((List<?>) field(a, "rowInfo")).isEmpty());
+    }
+
+    @Test
+    public void arrangingTheTwoRowsKeepsTheOrderOfTheAppsAfterThem() throws Exception {
+        HomeActivity a = home(6, 14);
+        List<String> before = new ArrayList<>();
+        List<AppRepo.App> apps = field(a, "apps");
+        for (AppRepo.App x : apps) before.add(x.pkg);
+        AppRepo.saveDock(Prefs.of(c), before);
+        call(a, "populate", new Class<?>[]{});
+        call(a, "focusGrid", new Class<?>[]{int.class}, 0);
+        set(a, "editing", true);
+        call(a, "stopEdit", new Class<?>[]{});
+        Assert.assertEquals("nothing past the second row lost its place", before, AppRepo.order(Prefs.of(c)));
+    }
+
+    @Test
+    public void holdingOkOnATabOpensItsCategory() throws Exception {
+        HomeActivity a = home(2, 3);
+        AllApps all = openedAllApps(a);
+        TextView tab = tabFor(all, "video");
+        // the test starts in touch mode, where a D-pad focus only lands after a key; a remote is never in it
+        tab.setFocusableInTouchMode(true);
+        Assert.assertTrue(tab.requestFocus());
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER));
+        run(android.view.ViewConfiguration.getLongPressTimeout() + 80);
+        AppMenu menu = field(a, "menu");
+        Assert.assertTrue("Hold OK on a tab opens its category", menu.isOpen());
+        Assert.assertNotNull(menuRow(a, c.getString(R.string.rename)));
+        Assert.assertNotNull("a built-in category can be hidden", menuRow(a, c.getString(R.string.hide)));
+        Assert.assertNull("All apps always leads: nothing moves before it", menuRow(a, c.getString(R.string.move_left)));
+        Assert.assertNull("a built-in category can't be deleted", menuRow(a, c.getString(R.string.delete_category)));
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_CENTER));
+        run(100);
+        Assert.assertTrue("letting go of the hold presses nothing in the menu", menu.isOpen());
+    }
+
+    @Test
+    public void aShortOkOnATabOpensNoMenu() throws Exception {
+        HomeActivity a = home(2, 3);
+        AllApps all = openedAllApps(a);
+        TextView tab = tabFor(all, "video");
+        tab.setFocusableInTouchMode(true);
+        Assert.assertTrue(tab.requestFocus());
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER));
+        run(80);
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_CENTER));
+        run(android.view.ViewConfiguration.getLongPressTimeout() + 80);
+        Assert.assertFalse(((AppMenu) field(a, "menu")).isOpen());
+        Assert.assertEquals("its apps come in", "video", all.currentId());
+    }
+
+    @Test
+    public void hidingABuiltInCategoryTakesItsTabAway() throws Exception {
+        HomeActivity a = home(2, 3);
+        AllApps all = openedAllApps(a);
+        call(a, "categoryMenu", new Class<?>[]{String.class, View.class}, "video", tabFor(all, "video"));
+        menuRow(a, c.getString(R.string.hide)).run();
+        run(400);
+        Assert.assertTrue(all.isOpen());
+        Assert.assertFalse(ids(all).contains("video"));
+        Assert.assertTrue(Categories.find(Categories.all(c), "video").hidden);
+    }
+
+    @Test
+    public void movingAndDeletingACategoryOfYourOwn() throws Exception {
+        String id = Categories.create(c, "Mine");
+        Categories.addTo(c, id, "com.example.tool0");
+        HomeActivity a = home(2, 3);
+        AllApps all = openedAllApps(a);
+        Assert.assertEquals(Arrays.asList(Categories.ALL, "video", id), ids(all));
+        call(a, "categoryMenu", new Class<?>[]{String.class, View.class}, id, tabFor(all, id));
+        Assert.assertNull("the last tab moves no further right", menuRow(a, c.getString(R.string.move_right)));
+        menuRow(a, c.getString(R.string.move_left)).run();
+        run(400);
+        Assert.assertEquals("one tab along, past nothing unseen", Arrays.asList(Categories.ALL, id, "video"), ids(all));
+        call(a, "categoryMenu", new Class<?>[]{String.class, View.class}, id, tabFor(all, id));
+        menuRow(a, c.getString(R.string.delete_category)).run();
+        run(200);
+        Assert.assertNotNull("the first OK asks again", menuRow(a, c.getString(R.string.press_ok_again)));
+        Assert.assertTrue(catIds().contains(id));
+        menuRow(a, c.getString(R.string.press_ok_again)).run();
+        run(400);
+        Assert.assertFalse(catIds().contains(id));
+        Assert.assertFalse(ids(all).contains(id));
+        Assert.assertTrue(all.isOpen());
+    }
+
+    @Test
+    public void anAppComesOutOfTheCategoryOnShow() throws Exception {
+        HomeActivity a = home(2, 3);
+        AllApps all = openedAllApps(a);
+        Map<String, Object> grids = field(all, "grids");
+        // on All apps there's nothing to come out of
+        Card[] every = field(grids.get(Categories.ALL), "cards");
+        call(a, "allAppsMenu", new Class<?>[]{AppRepo.App.class, Card.class}, every[0].getTag(), every[0]);
+        String allName = Categories.name(c, Categories.find(Categories.all(c), Categories.ALL));
+        Assert.assertNull(menuRow(a, c.getString(R.string.remove_from_row, allName)));
+        call(a, "closeMenu", new Class<?>[]{View.class}, every[0]);
+        call(all, "show", new Class<?>[]{int.class, boolean.class}, 1, false);
+        Card[] video = field(grids.get("video"), "cards");
+        String pkg = ((AppRepo.App) video[0].getTag()).pkg;
+        call(a, "allAppsMenu", new Class<?>[]{AppRepo.App.class, Card.class}, video[0].getTag(), video[0]);
+        String name = Categories.name(c, Categories.find(Categories.all(c), "video"));
+        menuRow(a, c.getString(R.string.remove_from_row, name)).run();
+        run(400);
+        List<AllApps.Tab> tabs = field(all, "tabs");
+        for (AllApps.Tab t : tabs) {
+            if (!t.id.equals("video")) continue;
+            for (AppRepo.App x : t.apps) Assert.assertNotEquals(pkg, x.pkg);
+        }
+        Assert.assertEquals("still in All apps", 5, tabs.get(0).apps.size());
+    }
+
+    @Test
+    public void homeSinksAsAllAppsRisesAndComesBackAsItFalls() throws Exception {
+        HomeActivity a = home(2, 4);
+        View home = field(a, "home");
+        call(a, "openAllApps", new Class<?>[]{});
+        run(600);
+        Assert.assertEquals("home falls back under the glass", Ui.dpf(14), home.getTranslationY(), 1f);
+        AllApps all = field(a, "allApps");
+        call(a, "closeAllApps", new Class<?>[]{});
+        run(AllApps.CLOSE_MS / 2);
+        float mid = home.getTranslationY();
+        Assert.assertTrue("and rises as All Apps falls away: " + mid, mid > 0.5f && mid < Ui.dpf(14));
+        Assert.assertTrue("the screen is still on its way out", all.getAlpha() > 0f && all.getVisibility() == View.VISIBLE);
+        run(900);
+        Assert.assertEquals(0f, home.getTranslationY(), 0.5f);
+        Assert.assertEquals(View.GONE, all.getVisibility());
+    }
+
+    @Test
+    public void closingFallsQuickestAsItGoes() throws Exception {
+        Prefs.device(c).edit().putString("set_light", "off").commit();
+        HomeActivity a = home(2, 4);
+        call(a, "openAllApps", new Class<?>[]{});
+        run(800);
+        AllApps all = field(a, "allApps");
+        call(a, "closeAllApps", new Class<?>[]{});
+        run(AllApps.CLOSE_MS / 3);
+        float early = 1f - all.getAlpha();
+        run(AllApps.CLOSE_MS / 3);
+        float later = 1f - all.getAlpha() - early;
+        Assert.assertTrue("slow to leave, quicker as it goes: " + early + " then " + later, later > early);
+    }
+
+    @Test
+    public void thePillStretchesTowardTheNextTabAndGathersThere() throws Exception {
+        String id = Categories.create(c, "Mine");
+        Categories.addTo(c, id, "com.example.tool0");
+        HomeActivity a = home(2, 3);
+        AllApps all = openedAllApps(a);
+        AllApps.Tabs tabs = field(all, "tabRow");
+        TextView from = tabFor(all, Categories.ALL), to = tabFor(all, id);
+        float l0 = edge(tabs, "left"), r0 = edge(tabs, "right");
+        tabs.to(to, true);
+        run(64);
+        float l = edge(tabs, "left"), r = edge(tabs, "right");
+        float lead = (r - r0) / (to.getRight() - r0), trail = (l - l0) / (to.getLeft() - l0);
+        Assert.assertTrue("heading right, the right edge leads: " + lead + " vs " + trail, lead > trail + 0.05f);
+        Assert.assertTrue("so the pill is wider than either tab on the way", r - l > Math.max(from.getWidth(), to.getWidth()));
+        run(900);
+        Assert.assertEquals(to.getLeft(), edge(tabs, "left"), 0.5f);
+        Assert.assertEquals(to.getRight(), edge(tabs, "right"), 0.5f);
+        // and back the other way: now the left edge leads
+        tabs.to(from, true);
+        run(64);
+        l = edge(tabs, "left");
+        r = edge(tabs, "right");
+        lead = (to.getLeft() - l) / (float) (to.getLeft() - from.getLeft());
+        trail = (to.getRight() - r) / (float) (to.getRight() - from.getRight());
+        Assert.assertTrue("heading left, the left edge leads: " + lead + " vs " + trail, lead > trail + 0.05f);
+    }
+
+    @Test
+    public void aTabInFocusGrowsAndSettlesBackOnceFocusGoesToTheApps() throws Exception {
+        HomeActivity a = home(2, 3);
+        AllApps all = openedAllApps(a);
+        TextView tab = tabFor(all, "video");
+        tab.setFocusableInTouchMode(true);
+        Assert.assertTrue(tab.requestFocus());
+        run(600);
+        Assert.assertEquals(AllApps.TAB_GROW, tab.getScaleX(), 0.005f);
+        Map<String, Object> grids = field(all, "grids");
+        Card first = ((Card[]) field(grids.get("video"), "cards"))[0];
+        first.setFocusableInTouchMode(true);
+        Assert.assertTrue(first.requestFocus());
+        run(600);
+        Assert.assertEquals(1f, tab.getScaleX(), 0.005f);
+    }
+
+    @Test
+    public void highATabsFirstRowLeadsTheRowsUnderIt() throws Exception {
+        Prefs.device(c).edit().putString("set_light", "off").commit();
+        HomeActivity a = home(2, 16);
+        AllApps all = openedAllApps(a);
+        call(all, "show", new Class<?>[]{int.class, boolean.class}, 1, true);
+        call(all, "show", new Class<?>[]{int.class, boolean.class}, 0, true);
+        run(AllApps.OUT_MS + 20 + 60);
+        Map<String, Object> grids = field(all, "grids");
+        LinearLayout grid = field(grids.get(Categories.ALL), "view");
+        Assert.assertTrue("several rows", grid.getChildCount() >= 3);
+        float r0 = Math.abs(grid.getChildAt(0).getTranslationX()), r1 = Math.abs(grid.getChildAt(1).getTranslationX()),
+                r2 = Math.abs(grid.getChildAt(2).getTranslationX());
+        Assert.assertTrue("each row trails the one above: " + r0 + ", " + r1 + ", " + r2, r0 < r1 && r1 < r2);
+        run(900);
+        for (int i = 0; i < grid.getChildCount(); i++) Assert.assertEquals(0f, grid.getChildAt(i).getTranslationX(), 0.5f);
     }
 }

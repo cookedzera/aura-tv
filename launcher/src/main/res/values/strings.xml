@@ -1006,18 +1006,11 @@
     <string name="cat_inputs">Inputs</string>
     <string name="add_to_category">Add to category…</string>
     <string name="remove_from_row">Remove from %1$s</string>
-    <string name="rename_row">Rename %1$s</string>
     <string name="name_left_row">%1$s is out of %2$s</string>
     <string name="name_is_in_row">%1$s is in %2$s</string>
     <string name="name_your_new_category">Name your new category</string>
-    <string name="home_layout">Layout</string>
-    <string name="layout_category_rows">Category rows</string>
-    <string name="layout_one_grid">One grid</string>
     <string name="categories">Categories</string>
-    <string name="categories_note">Rows on home, in this order. Movies &amp; TV, Music, Games and News fill themselves; Hold OK on any app to add it to a row or start a new one.</string>
-    <string name="dim_other_rows">Dim other rows</string>
-    <string name="rows_on_home">Rows</string>
-    <string name="show_on_home">Show on home</string>
+    <string name="categories_note">The tabs in All Apps, in this order. Movies &amp; TV, Music, Games and News fill themselves; hold OK on any app to add it to a category or start a new one, or hold OK on a tab to rename, move, hide or delete it.</string>
     <string name="sort_by">Sort</string>
     <string name="sort_custom">Your order</string>
     <string name="sort_az">A to Z</string>
@@ -1026,15 +1019,13 @@
     <string name="move_up">Move up</string>
     <string name="move_down">Move down</string>
     <string name="delete_category">Delete category</string>
+    <string name="show_in_all_apps">Show in All Apps</string>
+    <string name="category_hidden">%1$s is hidden. Settings, Home screen, Categories brings it back.</string>
+    <string name="category_deleted">%1$s is deleted</string>
+    <plurals name="n_tabs"><item quantity="one">%1$d tab</item><item quantity="other">%1$d tabs</item></plurals>
     <string name="category_all_note">Every app, in your own order, with your folders.</string>
     <string name="category_auto_note">Fills itself with apps of this kind. Hold OK on an app to add it or take it out.</string>
-    <string name="category_own_note">Your own row. Hold OK on any app to add it here.</string>
-    <plurals name="n_rows"><item quantity="one">%1$d row</item><item quantity="other">%1$d rows</item></plurals>
-    <string name="how_should_apps_sit">How should your apps sit?</string>
-    <string name="rows_or_grid_about">Category rows sort themselves into Movies &amp; TV, Music, Games and News. Change it any time in Settings, Home screen.</string>
-    <string name="layout_category_rows_recommended">Category rows (recommended)</string>
-    <string name="layout_one_grid_folders">One grid, with folders</string>
-    <string name="rows_new_hint">New: your apps sit in category rows. Settings, Home screen, Layout brings back one grid.</string>
+    <string name="category_own_note">Your own category. Hold OK on any app to add it here.</string>
     <string name="free_up_memory">Free up memory</string>
     <string name="free_up_memory_sub">Switch off apps the TV came with</string>
     <string name="debloat_note">Apps the TV came with that sit in memory for things Aura doesn\'t need. Switched off, not deleted: OK turns any of them back on.</string>

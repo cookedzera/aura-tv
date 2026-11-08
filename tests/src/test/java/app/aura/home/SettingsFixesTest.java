@@ -94,7 +94,7 @@ public class SettingsFixesTest {
         c = RuntimeEnvironment.getApplication();
         Profiles.forget();
         Prefs.device(c).edit().clear().putBoolean("welcomed", true).putString("set_light", "on").commit();
-        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "aura").putBoolean(Categories.ROWS, true).commit();
+        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "aura").commit();
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16));
         Field w = HomeActivity.class.getDeclaredField("warm");

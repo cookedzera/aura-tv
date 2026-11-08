@@ -1004,18 +1004,11 @@
     <string name="cat_inputs">Entradas</string>
     <string name="add_to_category">Adicionar à categoria…</string>
     <string name="remove_from_row">Remover de %1$s</string>
-    <string name="rename_row">Renomear %1$s</string>
     <string name="name_left_row">%1$s saiu de %2$s</string>
     <string name="name_is_in_row">%1$s está em %2$s</string>
     <string name="name_your_new_category">Dê um nome à nova categoria</string>
-    <string name="home_layout">Disposição</string>
-    <string name="layout_category_rows">Linhas por categoria</string>
-    <string name="layout_one_grid">Uma grade</string>
     <string name="categories">Categorias</string>
-    <string name="categories_note">Linhas da tela inicial, nesta ordem. Filmes e séries, Música, Jogos e Notícias se preenchem sozinhas; segure OK em um app para colocá-lo em uma linha ou criar outra.</string>
-    <string name="dim_other_rows">Escurecer as outras linhas</string>
-    <string name="rows_on_home">Linhas</string>
-    <string name="show_on_home">Mostrar na tela inicial</string>
+    <string name="categories_note">As abas de Todos os apps, nesta ordem. Filmes e séries, Música, Jogos e Notícias se preenchem sozinhas; segure OK em um app para colocá-lo em uma categoria ou criar outra, ou segure OK em uma aba para renomeá-la, movê-la, ocultá-la ou excluí-la.</string>
     <string name="sort_by">Ordem</string>
     <string name="sort_custom">Sua ordem</string>
     <string name="sort_az">De A a Z</string>
@@ -1024,15 +1017,13 @@
     <string name="move_up">Subir</string>
     <string name="move_down">Descer</string>
     <string name="delete_category">Excluir categoria</string>
+    <string name="show_in_all_apps">Mostrar em Todos os apps</string>
+    <string name="category_hidden">%1$s está oculta. Configurações, Tela inicial, Categorias a traz de volta.</string>
+    <string name="category_deleted">%1$s foi excluída</string>
+    <plurals name="n_tabs"><item quantity="one">%1$d aba</item><item quantity="other">%1$d abas</item></plurals>
     <string name="category_all_note">Todos os apps, na sua ordem, com suas pastas.</string>
     <string name="category_auto_note">Preenche-se sozinha com apps deste tipo. Segure OK em um app para adicioná-lo ou retirá-lo.</string>
-    <string name="category_own_note">Sua própria linha. Segure OK em qualquer app para adicioná-lo aqui.</string>
-    <plurals name="n_rows"><item quantity="one">%1$d linha</item><item quantity="other">%1$d linhas</item></plurals>
-    <string name="how_should_apps_sit">Como você quer organizar seus apps?</string>
-    <string name="rows_or_grid_about">As linhas por categoria se organizam sozinhas em Filmes e séries, Música, Jogos e Notícias. Mude quando quiser em Configurações, Tela inicial.</string>
-    <string name="layout_category_rows_recommended">Linhas por categoria (recomendado)</string>
-    <string name="layout_one_grid_folders">Uma grade, com pastas</string>
-    <string name="rows_new_hint">Novidade: seus apps estão em linhas por categoria. Configurações, Tela inicial, Disposição traz a grade de volta.</string>
+    <string name="category_own_note">Sua própria categoria. Segure OK em qualquer app para adicioná-lo aqui.</string>
     <string name="free_up_memory">Liberar memória</string>
     <string name="free_up_memory_sub">Desligar apps que vieram com a TV</string>
     <string name="debloat_note">Apps que vieram com a TV e ocupam memória com coisas de que o Aura não precisa. São desligados, não apagados: OK liga qualquer um de novo.</string>

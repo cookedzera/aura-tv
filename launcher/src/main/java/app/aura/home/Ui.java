@@ -30,6 +30,8 @@ final class Ui {
     static final TimeInterpolator DECEL = new DecelerateInterpolator(2f);
     /** Focus coming in (ease-out) and going (ease-in-out): the same curves as EMPHASIZED and SOFT. */
     static final TimeInterpolator EASE_DECEL = EMPHASIZED, EASE_STANDARD = SOFT;
+    /** Falling away: slow to leave, quickest as it goes (Material's emphasized accelerate). */
+    static final TimeInterpolator EASE_ACCEL = new PathInterpolator(0.3f, 0f, 0.8f, 0.15f);
     /** A control taking focus: up to ×1.12 and back to ×1.08 over {@link #CTRL_POP} ms, as a fraction of the 0.08 rise. */
     static final TimeInterpolator CTRL_POP_CURVE = new Lut(0f, .27f, .77f, 1.27f, 1.50f, 1.47f, 1.45f, 1.33f, 1.24f, 1.12f, 1.10f, 1f);
 

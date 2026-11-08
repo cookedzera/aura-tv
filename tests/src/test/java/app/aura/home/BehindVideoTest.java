@@ -279,7 +279,7 @@ public class BehindVideoTest {
     @Test
     public void homeBehindAVideoKeepsItsFirstScreenAndPaintsTheRestOnReturn() throws Exception {
         Prefs.of(c).edit().putString(Prefs.LAYOUT, "aura").putString(Prefs.TILE_STYLE, "original")
-                .putBoolean(Categories.ROWS, false).putBoolean(Prefs.GRID_PAGES, false).commit();
+                .putBoolean(Prefs.GRID_PAGES, false).commit();
         Trouble.clear(c);
         ActivityController<HomeActivity> ac = Robolectric.buildActivity(HomeActivity.class).setup();
         HomeActivity a = ac.get();

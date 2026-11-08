@@ -219,7 +219,7 @@ class GlassFrame extends FrameLayout {
 
     /**
      * A pane's way in and out as one number, 0 (gone) to 1 (in place), which the pane turns into its
-     * alpha, scale and offset. HIGH comes in on the snappy spring, LOW in the time given; every way out
+     * alpha, scale and offset. HIGH comes in on the snappy spring, LOW in the time given; a way out
      * takes {@link Ui#CLOSE} ms. The view given keeps a hardware layer, HIGH only, while it moves, so
      * its text isn't drawn again at each scale. Each move starts where the last one got to.
      */
@@ -263,10 +263,15 @@ class GlassFrame extends FrameLayout {
 
         /** Out from where it is, in {@link Ui#CLOSE} ms; {@code gone} runs once it's there. */
         void out(Runnable gone) {
+            out(gone, Ui.CLOSE, Ui.EASE_STANDARD);
+        }
+
+        /** Out from where it is, in {@code ms} on {@code curve}; {@code gone} runs once it's there. */
+        void out(Runnable gone, long ms, TimeInterpolator curve) {
             halt();
             end = gone;
             layer(true);
-            run(0f, Ui.CLOSE, Ui.EASE_STANDARD);
+            run(0f, ms, curve);
         }
 
         /** There at once, nothing moving and nothing left to run. */

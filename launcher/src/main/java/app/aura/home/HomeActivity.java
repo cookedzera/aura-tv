@@ -1181,8 +1181,19 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
 
             @Override
+            public void edit(AllApps.Tab tab, View from) {
+                categoryMenu(tab.id, from);
+            }
+
+            @Override
             public void close() {
                 closeAllApps();
+            }
+
+            @Override
+            public void depth(float p) {
+                // only home's position moves, a property of its own drawing: nothing painted again, no layer
+                home.setTranslationY(Ui.dpf(RECEDE) * p);
             }
         });
         root.addView(allApps, match());
@@ -2615,16 +2626,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         for (Cell c : cells) old.put(c.key(), c);
         // a new app size: every tile is painted again at its new size, none kept
         if (sizeGrid(Prefs.gridCols(this))) for (Cell c : old.values()) c.sig = null;
-        // category rows, in either style: in the tvOS style the first row is the dock
-        rows = Categories.on(this);
-        rowsDim = rows && Categories.dim(this);
+        // home keeps no category rows: the categories are All Apps' tabs
+        rows = false;
+        rowsDim = false;
         if (!rows) {
             // back to the grid: no row slide may keep moving tiles
             for (RowInfo r : rowInfo) if (r.glide != null) r.glide.stop();
             rowInfo.clear();
             rowIdx = colIdx = new int[0];
         }
-        paged = !rows && Prefs.on(this, Prefs.GRID_PAGES);
+        paged = !rows && !dock && Prefs.on(this, Prefs.GRID_PAGES);
         if (!paged && pageShift != 0f) {
             // pages switched off: the grid lies flat again, from the first column
             if (pageGlide != null) pageGlide.stop();
@@ -2695,7 +2706,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (rows) {
             buildRows(old, entries, hidden, inputs);
         } else {
+            // the tvOS style: the dock and one row under it, the rest in All Apps (Down past the second row)
+            int room = dock ? Math.max(0, perPage() - inputs) : Integer.MAX_VALUE;
             for (Object entry : entries) {
+                if (room-- <= 0) break;
                 if (entry instanceof Folders.Folder) {
                     cells.add(folderCell(old, (Folders.Folder) entry, null));
                 } else {
@@ -2759,13 +2773,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             appsReady = true;
             appsAt = SystemClock.uptimeMillis();
             progressSplash();
-            // updating from 7.7: home is in category rows now, said once, with the way back to one grid
-            if (rows && !Prefs.of(this).getBoolean(Categories.ASKED, false)) {
-                Prefs.of(this).edit().putBoolean(Categories.ASKED, true).apply();
-                handler.postDelayed(() -> {
-                    if (resumed && !settings.isOpen()) hud(R.drawable.ic_apps, getString(R.string.rows_new_hint));
-                }, 4000);
-            }
         }
         refreshWidgets(true);
         windowMoved();
@@ -5669,30 +5676,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             closeMenu(card);
             chooseCategory(pkg, label, card);
         }));
-        final String inRow = rows ? c.row : null;
-        if (inRow != null && !inRow.equals(Categories.ALL)) {
-            final Categories.Cat cat = Categories.find(Categories.all(this), inRow);
-            if (cat != null) {
-                final String rowName = Categories.name(this, cat);
-                items.add(new AppMenu.Item(R.drawable.ic_settings, getString(R.string.rename_row, rowName), () -> {
-                    closeMenu(card);
-                    askTag = inRow + "|" + pkg;
-                    home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-                    ask.show(getString(R.string.rename_name, rowName.toUpperCase(Locale.getDefault())), rowName,
-                            getString(R.string.type_a_name_then_ok), Folders.suggestions(this), name -> {
-                                Categories.rename(this, inRow, name);
-                                afterAsk();
-                                hud(R.drawable.ic_check, getString(R.string.renamed_to, name));
-                            });
-                }));
-                items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.remove_from_row, rowName), () -> {
-                    closeMenu(card);
-                    Categories.removeFrom(this, inRow, pkg);
-                    populate();
-                    hud(R.drawable.ic_check, getString(R.string.name_left_row, label, rowName));
-                }));
-            }
-        }
         // a kids' profile can move apps and make folders, nothing more
         if (!Profiles.kids(this)) {
             items.add(new AppMenu.Item(R.drawable.ic_picture, getString(R.string.change_its_picture), () -> {
@@ -5956,6 +5939,18 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             closeMenu(card);
             chooseCategory(pkg, label, card);
         }));
+        // out of the category on show (All apps holds every app, so not out of that)
+        final String tab = allApps.currentId();
+        final Categories.Cat in = tab == null || tab.equals(Categories.ALL) ? null : Categories.find(Categories.all(this), tab);
+        if (in != null) {
+            final String catName = Categories.name(this, in);
+            items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.remove_from_row, catName), () -> {
+                closeMenu(card);
+                Categories.removeFrom(this, tab, pkg);
+                allAppsChanged(tab);
+                hud(R.drawable.ic_check, getString(R.string.name_left_row, label, catName));
+            }));
+        }
         // a kids' profile can sort apps into rows, nothing more (as on home)
         if (!Profiles.kids(this)) {
             items.add(new AppMenu.Item(R.drawable.ic_picture, getString(R.string.change_its_picture), () -> {
@@ -5984,6 +5979,80 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         menu.show(card, label, items);
     }
 
+    /** Delete chosen once on this category: the next OK on it really deletes it. */
+    private String deleting;
+    /** The All Apps tab a rename was asked from, for the focus to go back to. */
+    private String askTab;
+
+    /**
+     * OK held on an All Apps tab: rename the category, move it along the tabs, hide a built-in one
+     * (Settings brings it back) or delete one of your own, the first OK asking for a second.
+     */
+    private void categoryMenu(String id, View anchor) {
+        Categories.Cat k = Categories.find(Categories.all(this), id);
+        if (k == null || anchor == null || menu.isOpen() && !id.equals(deleting)) return;
+        // a menu opened afresh asks for Delete's second OK again
+        if (!menu.isOpen()) deleting = null;
+        List<String> ids = new ArrayList<>();
+        for (AllApps.Tab t : allAppsTabs()) ids.add(t.id);
+        int at = ids.indexOf(id);
+        final String name = Categories.name(this, k);
+        boolean kids = Profiles.kids(this);
+        List<AppMenu.Item> items = new ArrayList<>();
+        items.add(new AppMenu.Item(R.drawable.ic_settings, getString(R.string.rename), () -> {
+            closeMenu(anchor);
+            askTab = id;
+            ask.show(getString(R.string.rename_name, name.toUpperCase(Locale.getDefault())), name,
+                    getString(R.string.type_a_name_then_ok), Folders.suggestions(this), typed -> {
+                        Categories.rename(this, id, typed);
+                        afterAsk();
+                        hud(R.drawable.ic_check, getString(R.string.renamed_to, typed));
+                    });
+        }));
+        // All apps always leads: the others move among themselves, after it
+        for (int d = -1; d <= 1; d += 2) {
+            final int to = at + d, dir = d;
+            if (at < 1 || to < 1 || to >= ids.size()) continue;
+            items.add(new AppMenu.Item(R.drawable.ic_move, getString(d < 0 ? R.string.move_left : R.string.move_right), () -> {
+                Categories.moveBeside(this, id, ids.get(to), dir);
+                closeMenu(anchor);
+                allAppsChanged(id);
+            }));
+        }
+        if (!kids && Categories.builtIn(k) && !id.equals(Categories.ALL)) {
+            items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.hide), () -> {
+                Categories.setHidden(this, id, true);
+                closeMenu(anchor);
+                allAppsChanged(id);
+                hud(R.drawable.ic_hide, getString(R.string.category_hidden, name));
+            }));
+        }
+        if (!kids && !Categories.builtIn(k)) {
+            final boolean sure = id.equals(deleting);
+            items.add(new AppMenu.Item(R.drawable.ic_trash, getString(sure ? R.string.press_ok_again : R.string.delete_category), () -> {
+                if (!sure) {
+                    deleting = id;
+                    categoryMenu(id, anchor);
+                    return;
+                }
+                Categories.delete(this, id);
+                closeMenu(anchor);
+                allAppsChanged(id);
+                hud(R.drawable.ic_trash, getString(R.string.category_deleted, name));
+            }));
+        }
+        if (!id.equals(deleting)) swallow(heldConfirm);
+        menuBack = anchor;
+        menu.show(anchor, name, items);
+    }
+
+    /** All Apps' tabs made again after a category changed, the focus back on its tab (or the one on show). */
+    private void allAppsChanged(String id) {
+        if (!allApps.isOpen()) return;
+        refreshOverlays();
+        allApps.focusTab(id);
+    }
+
     private void openAllApps() {
         if (allApps.isOpen() || apps.isEmpty()) return;
         handler.removeCallbacks(rack);
@@ -5994,8 +6063,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         stack.hold(true);
         allApps.open(allAppsTabs());
-        // home holds still as the glass rises over it, as under Control Center: moving or fading the
-        // whole home put it on a layer the size of the screen, which a 1 GB TV paid for in frames
+        // home sinks a little as the glass rises over it, by its position alone (AllApps.Host.depth):
+        // fading or scaling the whole home put it on a layer the size of the screen, which a 1 GB TV paid for
         handler.postDelayed(() -> {
             if (!allApps.isOpen()) return;
             for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
@@ -6004,6 +6073,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             backdrop.stop();
         }, 300);
     }
+
+    /** dp home sinks while All Apps covers it, falling back as the glass rises and coming up again as it goes. */
+    private static final float RECEDE = 14;
 
     private void closeAllApps() {
         if (!allApps.isOpen()) return;
@@ -6103,6 +6175,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     private void afterAsk() {
+        if (askTab != null) {
+            // a category renamed from All Apps: back to its tab, home still out of reach under it
+            String id = askTab;
+            askTab = null;
+            allAppsChanged(id);
+            return;
+        }
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         populate();
         if (askTag != null) focusTag(askTag);
@@ -6180,6 +6259,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         List<String> order = new ArrayList<>();
         String row = rows && gridAt < cells.size() ? cells.get(gridAt).row : null;
         for (Cell c : cells) if (!c.tag.startsWith("input:") && (row == null || row.equals(c.row))) order.add(c.tag);
+        // the tvOS home shows only its first two rows: the apps after them keep their places
+        if (row == null) {
+            Set<String> shown = new HashSet<>(order);
+            for (String tag : AppRepo.order(prefs)) if (shown.add(tag)) order.add(tag);
+        }
         if (row == null || row.equals(Categories.ALL)) AppRepo.saveDock(prefs, order);
         else Categories.reorder(this, row, order);
         hud(R.drawable.ic_check, getString(R.string.your_apps_are_arranged));

@@ -31,7 +31,7 @@ import java.util.concurrent.ExecutorService;
  * Right pick a category (the apps slide out one way and the next in from the other), Down goes into
  * its apps, the grid glides on a spring to keep the row in focus in view, Up from the top row goes
  * back to the tabs, and Up from the tabs or Back closes it; holding OK on an app opens home's menu
- * for it. On HIGH a soft light in the colour of the app in focus follows it across the glass.
+ * for it, holding OK on a tab its category's (rename, move, hide, delete). On HIGH a soft light in the colour of the app in focus follows it across the glass.
  */
 final class AllApps extends FrameLayout {
     interface Host {
@@ -42,8 +42,14 @@ final class AllApps extends FrameLayout {
         /** OK held on an app: home's menu for it, over the screen. */
         void hold(AppRepo.App a, Card from);
 
+        /** OK held on a tab: home's menu for that category, over the screen. */
+        void edit(Tab tab, View from);
+
         /** Up from the tabs: home asked to close the screen. */
         void close();
+
+        /** Each frame of the screen's way in and out, 0 (gone) to 1 (in place): home sinks beneath it on the same clock. */
+        void depth(float p);
     }
 
     /** A category and its apps, in home's order. */
@@ -70,6 +76,13 @@ final class AllApps extends FrameLayout {
     static final int LOW_OPEN = 300;
     /** Opening: each row comes this many ms after the one above, the first this many rows. */
     static final int ROW_STAGGER = 55, STAGGERED_ROWS = 4;
+    /** Closing: the screen falls away over this, quickest as it goes, while home rises back under it. */
+    static final int CLOSE_MS = 230;
+    /** HIGH, a tab's apps sliding in: each row after the first trails it by this many dp and ms more, so the first row leads. */
+    static final float ROW_TRAIL = 12;
+    static final int ROW_TRAIL_MS = 40;
+    /** A tab in focus grows to this, with the pop of the other controls. */
+    static final float TAB_GROW = 1.06f;
 
     private final Activity act;
     private final Host host;
@@ -88,6 +101,9 @@ final class AllApps extends FrameLayout {
     private final Map<String, Grid> grids = new HashMap<>();
     private List<Tab> tabs = new ArrayList<>();
     private boolean shown;
+    /** OK went down on a tab and hasn't yet been let go or held long enough for its menu. */
+    private boolean tabArmed;
+    private final Runnable tabHold = this::tabHeld;
     /** The tab whose apps are on show (or sliding in). */
     int current = -1;
     /** The tab focus has moved to comes in once it rests there. */
@@ -157,6 +173,7 @@ final class AllApps extends FrameLayout {
         // up from below, growing out of a touch smaller: on the spring on HIGH, eased on LOW
         way = new GlassFrame.Way(col, p -> {
             setAlpha(Ui.clamp(p, 0f, 1f));
+            h.depth(Ui.clamp(p, 0f, 1f));
             col.setTranslationY(Ui.dpf(Ui.light ? 40 : 56) * (1f - p));
             float s = 0.94f + 0.06f * p;
             col.setScaleX(s);
@@ -242,11 +259,14 @@ final class AllApps extends FrameLayout {
         if (!shown) return;
         shown = false;
         removeCallbacks(pick);
+        removeCallbacks(tabHold);
+        tabArmed = false;
         hold.stop();
         if (glow != null) glow.off(true);
         // fading out, its tiles take no focus
         setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
-        way.out(gone);
+        // LOW has no layer: the glass repaints each frame it fades, so it keeps the short way out
+        way.out(gone, Ui.light ? Ui.CLOSE : CLOSE_MS, Ui.EASE_ACCEL);
     }
 
     private void buildTabs() {
@@ -262,6 +282,21 @@ final class AllApps extends FrameLayout {
             t.setId(View.generateViewId());
             t.setOnFocusChangeListener((v, gained) -> {
                 paintTabs();
+                // the pill grows with it: the row draws it, so it's drawn again as the tab grows
+                if (!shown) {
+                    // closing: back to size at once, not moving inside the layer the screen falls away on
+                    v.animate().cancel();
+                    v.setScaleX(1f);
+                    v.setScaleY(1f);
+                    tabRow.invalidate();
+                    return;
+                }
+                float s = gained ? TAB_GROW : 1f;
+                boolean pop = gained && !Ui.light;
+                v.animate().scaleX(s).scaleY(s).setStartDelay(0)
+                        .setDuration(pop ? Ui.CTRL_POP : gained ? Ui.CTRL_SCALE_IN : Ui.CTRL_SCALE_OUT)
+                        .setInterpolator(pop ? Ui.CTRL_POP_CURVE : gained ? Ui.EASE_DECEL : Ui.EASE_STANDARD)
+                        .setUpdateListener(a -> tabRow.invalidate()).start();
                 if (!gained) return;
                 tabRow.to(v, true);
                 removeCallbacks(pick);
@@ -349,6 +384,13 @@ final class AllApps extends FrameLayout {
         if (rich()) {
             viewport.setAlpha(0f);
             in.alpha(1f).withLayer();
+            // the first row leads, those under it trailing a little more each: rows moving inside the
+            // window's layer redraw it every frame, so only on a TV with the GPU for it
+            for (int r = 1; r < Math.min(STAGGERED_ROWS, g.view.getChildCount()); r++) {
+                View row = g.view.getChildAt(r);
+                row.setTranslationX(Ui.dpf(ROW_TRAIL) * r * incomingDir);
+                row.animate().translationX(0f).setStartDelay(0).setDuration(IN_MS + (long) ROW_TRAIL_MS * r).setInterpolator(Ui.EASE_DECEL).start();
+            }
         }
         in.start();
     }
@@ -356,6 +398,7 @@ final class AllApps extends FrameLayout {
     /** {@code g} in the window, from its top. */
     private void install(Grid g) {
         viewport.removeAllViews();
+        restRows(g);
         FrameLayout.LayoutParams l = new FrameLayout.LayoutParams(Ui.dp(COLS * W + (COLS - 1) * GAP), ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.CENTER_HORIZONTAL);
         viewport.addView(g.view, l);
@@ -456,6 +499,16 @@ final class AllApps extends FrameLayout {
         }
     }
 
+    /** The rows the opening rise and a tab's slide move, at rest: a cached grid left mid-move comes back as itself. */
+    private static void restRows(Grid g) {
+        for (int r = 0; r < Math.min(STAGGERED_ROWS, g.view.getChildCount()); r++) {
+            View row = g.view.getChildAt(r);
+            row.animate().cancel();
+            row.setTranslationX(0f);
+            row.setTranslationY(0f);
+        }
+    }
+
     /**
      * Opening: the first rows rise in one after another, by position only. The panel's own fade
      * carries them, so no layer is drawn inside the one the rising panel is on.
@@ -532,6 +585,30 @@ final class AllApps extends FrameLayout {
         return !Ui.light && !Perf.lowEnd(act);
     }
 
+    /** The category on show, or null before any is. */
+    String currentId() {
+        return current >= 0 && current < tabs.size() ? tabs.get(current).id : null;
+    }
+
+    /** The hold on a tab, timed here: an IR remote's own long-press often never arrives. */
+    private void tabHeld() {
+        int k = focusedTab();
+        if (!tabArmed || k < 0) return;
+        tabArmed = false;
+        host.edit(tabs.get(k), tabViews.get(k));
+    }
+
+    /** The tab for category {@code id} takes the focus, or the one on show when that category is gone. */
+    void focusTab(String id) {
+        for (int i = 0; i < tabs.size(); i++) {
+            if (tabs.get(i).id.equals(id)) {
+                tabViews.get(i).requestFocus();
+                return;
+            }
+        }
+        if (current >= 0 && current < tabViews.size()) tabViews.get(current).requestFocus();
+    }
+
     /** The tab in focus, or -1 when focus is in the apps (or anywhere else). */
     private int focusedTab() {
         for (int i = 0; i < tabViews.size(); i++) if (tabViews.get(i).isFocused()) return i;
@@ -540,7 +617,26 @@ final class AllApps extends FrameLayout {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
-        if (shown && e.getAction() == KeyEvent.ACTION_DOWN && focusedTab() >= 0) {
+        boolean onTab = shown && focusedTab() >= 0;
+        if (onTab && Pad.isConfirm(e.getKeyCode())) {
+            // OK on a tab: a press brings its apps in, a hold opens its category's menu
+            if (e.getAction() == KeyEvent.ACTION_DOWN) {
+                if (e.getRepeatCount() == 0) {
+                    tabArmed = true;
+                    postDelayed(tabHold, android.view.ViewConfiguration.getLongPressTimeout());
+                } else if ((e.getFlags() & KeyEvent.FLAG_LONG_PRESS) != 0) {
+                    // the remote's own long-press arrived first
+                    removeCallbacks(tabHold);
+                    tabHeld();
+                }
+                return true;
+            }
+            removeCallbacks(tabHold);
+            if (tabArmed && !e.isCanceled()) commitPick();
+            tabArmed = false;
+            return true;
+        }
+        if (onTab && e.getAction() == KeyEvent.ACTION_DOWN) {
             int code = e.getKeyCode();
             if (code == KeyEvent.KEYCODE_DPAD_UP) {
                 // above the tabs there's only home again; a held key doesn't carry out of the screen
@@ -583,6 +679,10 @@ final class AllApps extends FrameLayout {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF r = new RectF();
         private final Spring.Mover left, right;
+        /** The left edge leads (heading left), on {@link Spring#pillLead}; the right one otherwise. */
+        private boolean leftLeads;
+        /** The tab the pill sits on: it grows with that tab. */
+        private View on;
         private float top, bottom;
         private boolean lit;
 
@@ -599,8 +699,8 @@ final class AllApps extends FrameLayout {
             capsule.setStroke(Math.max(1, Ui.dp(0.75f)), 0x33FFFFFF);
             capsule.setCornerRadius(Ui.dpf(999));
             setBackground(capsule);
-            left = new Spring.Mover(Spring.smooth(), 0.5f, 0f, v -> invalidate());
-            right = new Spring.Mover(Spring.smooth(), 0.5f, 0f, v -> invalidate());
+            left = new Spring.Mover(Spring.pillTrail(), 0.5f, 0f, v -> invalidate());
+            right = new Spring.Mover(Spring.pillLead(), 0.5f, 0f, v -> invalidate());
         }
 
         /** To {@code tab}'s place, gliding or there at once. */
@@ -616,9 +716,17 @@ final class AllApps extends FrameLayout {
                 });
                 return;
             }
+            on = tab;
             top = tab.getTop();
             bottom = tab.getBottom();
             if (glide && right.value() > left.value()) {
+                boolean toLeft = tab.getLeft() < left.target();
+                if (toLeft != leftLeads) {
+                    // turning round: the other edge leads now, each keeping its speed
+                    leftLeads = toLeft;
+                    left.respring(toLeft ? Spring.pillLead() : Spring.pillTrail());
+                    right.respring(toLeft ? Spring.pillTrail() : Spring.pillLead());
+                }
                 left.to(tab.getLeft());
                 right.to(tab.getRight());
             } else {
@@ -640,7 +748,10 @@ final class AllApps extends FrameLayout {
             float l = left.value(), rt = right.value();
             if (rt <= l) return;
             r.set(l, top, rt, bottom);
-            float rad = (bottom - top) / 2f;
+            // grown with its tab, about the tab's own centre
+            float s = on != null ? on.getScaleX() : 1f;
+            if (s != 1f) r.inset(-(rt - l) * (s - 1f) / 2f, -(bottom - top) * (s - 1f) / 2f);
+            float rad = r.height() / 2f;
             c.drawRoundRect(r, rad, rad, paint);
         }
     }

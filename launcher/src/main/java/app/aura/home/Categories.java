@@ -27,10 +27,6 @@ import java.util.Set;
  * in it isn't shown. Kept per profile, like folders.
  */
 final class Categories {
-    /** Home shows category rows (on by default; Settings, Home screen switches back to the grid). */
-    static final String ROWS = "set_rows", DIM = "set_rows_dim";
-    /** Asked once, in the welcome or (updating from 7.7) on home. */
-    static final String ASKED = "rows_asked";
     private static final String KEY = "categories";
     static final String FAV = "fav", ALL = "all";
     static final String[] SORTS = {"custom", "az", "most", "recent"};
@@ -54,14 +50,6 @@ final class Categories {
     }
 
     private Categories() { }
-
-    static boolean on(Context c) {
-        return Prefs.of(c).getBoolean(ROWS, true);
-    }
-
-    static boolean dim(Context c) {
-        return Prefs.of(c).getBoolean(DIM, true);
-    }
 
     /** The rows in home's order; made the first time with the smart set. */
     static List<Cat> all(Context c) {
@@ -327,11 +315,22 @@ final class Categories {
         edit(c, id, (cats, k) -> k.sort = SORTS[(java.util.Arrays.asList(SORTS).indexOf(k.sort) + 1) % SORTS.length]);
     }
 
-    /** One place up (-1) or down (1) on home. */
+    /** One place up (-1) or down (1) in the whole list, hidden and empty ones too (Settings); All Apps' tabs use moveBeside. */
     static void move(Context c, String id, int d) {
         edit(c, id, (cats, k) -> {
             int i = cats.indexOf(k), j = i + d;
             if (j >= 0 && j < cats.size()) cats.add(j, cats.remove(i));
+        });
+    }
+
+    /** Just before ({@code d} -1) or just after (1) {@code beside}: one tab along in All Apps, whatever sits between them unseen. */
+    static void moveBeside(Context c, String id, String beside, int d) {
+        edit(c, id, (cats, k) -> {
+            Cat b = find(cats, beside);
+            if (b == null || b == k) return;
+            cats.remove(k);
+            int j = cats.indexOf(b);
+            cats.add(d < 0 ? j : j + 1, k);
         });
     }
 

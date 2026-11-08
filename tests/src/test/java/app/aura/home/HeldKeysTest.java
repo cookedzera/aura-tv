@@ -124,7 +124,7 @@ public class HeldKeysTest {
         // the main profile's file is the device's too: cleared once, or the second clear wipes the first's writes
         Prefs.of(c).edit().clear().commit();
         Prefs.device(c).edit().clear().putBoolean("welcomed", true).putString("set_light", "on").commit();
-        Prefs.of(c).edit().putString(Prefs.LAYOUT, "aura").putBoolean(Categories.ROWS, true).commit();
+        Prefs.of(c).edit().putString(Prefs.LAYOUT, "aura").commit();
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16));
         setStatic(HomeActivity.class, "warm", true);
@@ -133,7 +133,7 @@ public class HeldKeysTest {
         HomeActivity.lastKeyAt = 0;
     }
 
-    /** Rows: Movies & TV (24 tiles, indices 0-23), Music (24-25), Games (26-27), News (28-29), All apps. */
+    /** Home's one grid (no category rows): 30 apps of four kinds. */
     private ActivityController<HomeActivity> start() throws Exception {
         for (int i = 0; i < 24; i++) install("com.example.video" + i, "Video " + i, ApplicationInfo.CATEGORY_VIDEO);
         for (int i = 0; i < 2; i++) install("com.example.music" + i, "Music " + i, ApplicationInfo.CATEGORY_AUDIO);
@@ -150,8 +150,8 @@ public class HeldKeysTest {
         apps.addAll(fake);
         call(a, "populate", new Class<?>[]{});
         run(1000);
-        List<?> rows = field(a, "rowInfo");
-        Assert.assertTrue("the category rows were built: " + rows.size(), rows.size() >= 5);
+        List<?> cells = field(a, "cells");
+        Assert.assertTrue("the grid was built: " + cells.size(), cells.size() >= 24);
         return ac;
     }
 
@@ -159,131 +159,6 @@ public class HeldKeysTest {
     private static void leaveTouchMode(View v) {
         v.requestFocusFromTouch();
         Assume.assumeFalse("the simulated TV left touch mode", v.isInTouchMode());
-    }
-
-    @Test
-    public void aHeldKeyStepsOnTheLadderAndStopsWhereItIsLetGo() throws Exception {
-        ActivityController<HomeActivity> ac = start();
-        HomeActivity a = ac.get();
-        int cols = field(a, "COLS");
-        int[] colIdx = field(a, "colIdx"), rowIdx = field(a, "rowIdx");
-        List<?> rowInfo = field(a, "rowInfo");
-        focusGrid(a, 0);
-        run(1000);
-        Trouble.clear(c);
-        long down = SystemClock.uptimeMillis();
-        a.dispatchKeyEvent(new KeyEvent(down, down, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT, 0));
-        Assert.assertEquals("the press moves at once", 1, gridAt(a));
-        // Android's repeats: the first after 500 ms, then one every 50 ms, for two seconds in all
-        int last = 1, early = 0, later = 0;
-        for (int i = 1; i <= 30; i++) {
-            run(i == 1 ? 500 : 50);
-            long t = SystemClock.uptimeMillis();
-            a.dispatchKeyEvent(new KeyEvent(down, t, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT, i));
-            int g = gridAt(a);
-            if (g != last) {
-                if (t - down < 1000) early++;
-                else later++;
-                last = g;
-            }
-        }
-        Assert.assertTrue("a step about every 110 ms in the first second: " + early, early >= 4 && early <= 6);
-        Assert.assertTrue("about every 80 ms after it: " + later, later >= 10 && later <= 14);
-        int at = gridAt(a);
-        Object row = rowInfo.get(rowIdx[at]);
-        float shift = field(row, "shift");
-        Assert.assertTrue("the row keeps pace: the tile in focus is on screen, " + (colIdx[at] - shift) + " columns in",
-                colIdx[at] - shift < cols - 0.5f);
-
-        a.dispatchKeyEvent(new KeyEvent(down, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_RIGHT, 0));
-        run(1500);
-        Assert.assertEquals("focus stops where the key was let go", at, gridAt(a));
-        int first = field(row, "first");
-        shift = field(row, "shift");
-        Assert.assertEquals("the row comes to rest on a whole column", first, shift, 0.01f);
-        Assert.assertTrue("at most one column past the edge, the tile in view: first " + first + ", tile " + colIdx[at],
-                colIdx[at] - first >= cols - 2 && colIdx[at] - first <= cols - 1);
-        Assert.assertFalse(Trouble.report(c), Trouble.report(c).contains("key KEYCODE_"));
-        ac.pause().stop().destroy();
-    }
-
-    @Test
-    public void separatePressesAreNeverDroppedNorRestartedFromRest() throws Exception {
-        ActivityController<HomeActivity> ac = start();
-        HomeActivity a = ac.get();
-        int cols = field(a, "COLS");
-        List<?> rowInfo = field(a, "rowInfo");
-        focusGrid(a, 0);
-        run(1000);
-        for (int i = 0; i < 3; i++) key(a, KeyEvent.KEYCODE_DPAD_RIGHT);
-        Assert.assertEquals("a burst of three presses moves three tiles", 3, gridAt(a));
-
-        // the last tile on screen: Right slides the row; Right again while it still slides
-        focusGrid(a, cols - 1);
-        run(1000);
-        Object row = rowInfo.get(0);
-        key(a, KeyEvent.KEYCODE_DPAD_RIGHT);
-        List<Long> when = new ArrayList<>();
-        List<Float> at = new ArrayList<>();
-        watch(row, 70, when, at);
-        int n = at.size();
-        Assert.assertTrue("the row slides: " + at, n >= 3);
-        float before = (at.get(n - 1) - at.get(n - 2)) / (when.get(n - 1) - when.get(n - 2));
-        key(a, KeyEvent.KEYCODE_DPAD_RIGHT);
-        List<Long> when2 = new ArrayList<>();
-        List<Float> at2 = new ArrayList<>();
-        watch(row, 40, when2, at2);
-        Assert.assertTrue("and slides on: " + at2, at2.size() >= 2);
-        float after = (at2.get(1) - at.get(n - 1)) / (when2.get(1) - when.get(n - 1));
-        Assert.assertTrue("the second press carries on at the row's speed, never from a standstill: " + before + " then " + after,
-                after >= 0.6f * before);
-        run(1000);
-        Assert.assertEquals(cols + 1, gridAt(a));
-
-        // the HUD speaks for itself to TalkBack
-        View hud = field(a, "hud");
-        Assert.assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE, hud.getAccessibilityLiveRegion());
-        // light mode: opening an app adds nothing to home
-        a.open(new Intent("app.aura.test.SOMEWHERE"), a.getWindow().getDecorView());
-        run(400);
-        View home = field(a, "home");
-        Assert.assertEquals(1f, home.getScaleX(), 0.001f);
-        Assert.assertNull(field(a, "launchVeil"));
-        ac.pause().stop().destroy();
-    }
-
-    @Test
-    public void noSidewaysJumpOutOfTheRowsWhileThePageScrolls() throws Exception {
-        ActivityController<HomeActivity> ac = start();
-        HomeActivity a = ac.get();
-        focusGrid(a, 0);
-        run(1500);
-        key(a, KeyEvent.KEYCODE_DPAD_DOWN);
-        Assert.assertEquals("down to Music, first tile", 24, gridAt(a));
-        Assert.assertTrue("the page scrolls to it", (Boolean) call(a, "scrollingV", new Class<?>[]{}));
-        key(a, KeyEvent.KEYCODE_DPAD_LEFT);
-        Assert.assertEquals("Left at the row's start stays in the rows while the page moves", 2, (int) (Integer) field(a, "zone"));
-        run(1500);
-        key(a, KeyEvent.KEYCODE_DPAD_LEFT);
-        Assert.assertEquals("once it rests, Left reaches the sidebar", 0, (int) (Integer) field(a, "zone"));
-        ac.pause().stop().destroy();
-    }
-
-    @Test
-    public void rowsRecedeByTheirTilesAlpha() throws Exception {
-        ActivityController<HomeActivity> ac = start();
-        HomeActivity a = ac.get();
-        List<Cell> cells = field(a, "cells");
-        List<View> labels = field(a, "rowLabels");
-        leaveTouchMode(cells.get(0).card);
-        focusGrid(a, 24);
-        Assert.assertSame(cells.get(24).card, a.getWindow().getCurrentFocus());
-        // light mode: at once
-        Assert.assertEquals(Ui.DIM_OTHER_ROWS, cells.get(0).getAlpha(), 0.01f);
-        Assert.assertEquals(1f, cells.get(24).getAlpha(), 0.01f);
-        Assert.assertEquals(0.55f, labels.get(0).getAlpha(), 0.01f);
-        Assert.assertEquals(1f, labels.get(1).getAlpha(), 0.01f);
-        ac.pause().stop().destroy();
     }
 
     @Test
@@ -333,25 +208,6 @@ public class HeldKeysTest {
     }
 
     @Test
-    public void rowsDimAsFocusMovesDuringTheIntro() throws Exception {
-        ActivityController<HomeActivity> ac = start();
-        HomeActivity a = ac.get();
-        List<Cell> cells = field(a, "cells");
-        leaveTouchMode(cells.get(0).card);
-        focusGrid(a, 0);
-        run(500);
-        // the tiles rise into place (after boot), and focus moves down to Music before they're done
-        call(a, "cascade", new Class<?>[]{});
-        run(200);
-        focusGrid(a, 24);
-        run(3500);
-        Assert.assertEquals("the row focus moved to is lit", 1f, cells.get(24).getAlpha(), 0.01f);
-        Assert.assertEquals("the row it left recedes", Ui.DIM_OTHER_ROWS, cells.get(0).getAlpha(), 0.01f);
-        Assert.assertEquals("risen to full size", 1f, cells.get(24).getScaleX(), 0.001f);
-        ac.pause().stop().destroy();
-    }
-
-    @Test
     public void theSameTileAfterAndroidBuildsHomeAgain() throws Exception {
         ActivityController<HomeActivity> ac = start();
         HomeActivity a = ac.get();
@@ -377,23 +233,16 @@ public class HeldKeysTest {
     }
 
     @Test
-    public void strongTvsEaseRowsAndStepHomeBackAsAnAppOpens() throws Exception {
+    public void strongTvsStepHomeBackAsAnAppOpens() throws Exception {
         Prefs.device(c).edit().putString("set_light", "off").commit();
         ActivityController<HomeActivity> ac = start();
         HomeActivity a = ac.get();
         List<Cell> cells = field(a, "cells");
         leaveTouchMode(cells.get(0).card);
         run(500);
-        focusGrid(a, 24);
-        Assert.assertEquals("the row just left starts out lit", 1f, cells.get(0).getAlpha(), 0.01f);
-        run(50);
-        float mid = cells.get(0).getAlpha();
-        Assert.assertTrue("and recedes over a moment: " + mid, mid > Ui.DIM_OTHER_ROWS + 0.02f && mid < 0.98f);
-        run(400);
-        Assert.assertEquals(Ui.DIM_OTHER_ROWS, cells.get(0).getAlpha(), 0.01f);
-        Assert.assertEquals(1f, cells.get(24).getAlpha(), 0.01f);
-
-        a.open(new Intent("app.aura.test.SOMEWHERE"), cells.get(24).card);
+        focusGrid(a, 7);
+        run(450);
+        a.open(new Intent("app.aura.test.SOMEWHERE"), cells.get(7).card);
         run(450);
         View home = field(a, "home"), veil = field(a, "launchVeil");
         Assert.assertEquals("home steps back as the app zooms in", 0.97f, home.getScaleX(), 0.005f);

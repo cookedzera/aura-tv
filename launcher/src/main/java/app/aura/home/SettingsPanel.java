@@ -519,20 +519,10 @@ final class SettingsPanel {
                 build();
                 focusTag("layout");
             });
-            // your apps in category rows (Movies & TV, Music...) or in one grid with folders
-            add(act.getString(R.string.home_layout), Categories.on(act) ? act.getString(R.string.layout_category_rows)
-                    : act.getString(R.string.layout_one_grid), Categories.ROWS, () -> {
-                Prefs.of(act).edit().putBoolean(Categories.ROWS, !Categories.on(act)).putBoolean(Categories.ASKED, true).apply();
-                host.applied("apps");
-                build();
-                focusTag(Categories.ROWS);
-            });
-            if (Categories.on(act)) {
-                // the rows home really shows: a row with nothing in it isn't one of them
-                int shown = 0;
-                for (Categories.Cat k : Categories.all(act)) if (!k.hidden && !catEmpty(k)) shown++;
-                add(act.getString(R.string.categories), act.getResources().getQuantityString(R.plurals.n_rows, shown, shown), "cats", () -> go("cats"));
-            }
+            // the categories are All Apps' tabs: those it really shows, as one with nothing in it isn't one
+            int shown = 0;
+            for (Categories.Cat k : Categories.all(act)) if (!k.hidden && !catEmpty(k)) shown++;
+            add(act.getString(R.string.categories), act.getResources().getQuantityString(R.plurals.n_tabs, shown, shown), "cats", () -> go("cats"));
             if (tvos) add(act.getString(R.string.sidebar), Prefs.dockSidebar(act) ? act.getString(R.string.slides_in_from_the_left) : act.getString(R.string.hidden_up_for_the_top), "dockside", () -> {
                 Prefs.of(act).edit().putBoolean(Prefs.DOCK_SIDEBAR, !Prefs.dockSidebar(act)).apply();
                 host.applied("layout");
@@ -556,7 +546,8 @@ final class SettingsPanel {
                 build();
                 focusTag("grid");
             });
-            toggle(act.getString(R.string.apps_beyond_two_rows), Prefs.GRID_PAGES, act.getString(R.string.pages_to_the_side), act.getString(R.string.scroll_down), "apps");
+            // the tvOS home is two rows, the rest in All Apps: only the Aura style's grid goes further
+            if (!tvos) toggle(act.getString(R.string.apps_beyond_two_rows), Prefs.GRID_PAGES, act.getString(R.string.pages_to_the_side), act.getString(R.string.scroll_down), "apps");
             int ni = Math.max(0, java.util.Arrays.asList(Prefs.NAME_MODES).indexOf(Prefs.nameMode(act)));
             add(act.getString(R.string.app_names), act.getString(Prefs.NAME_LABELS[ni]), "names", () -> {
                 String next = Prefs.NAME_MODES[(ni + 1) % Prefs.NAME_MODES.length];
@@ -1043,8 +1034,6 @@ final class SettingsPanel {
         } else if (page.equals("cats")) {
             Ui.fit(title, act.getString(R.string.categories), Ui.dp(300), 52, 30);
             note.setText(act.getString(R.string.categories_note));
-            toggle(act.getString(R.string.dim_other_rows), Categories.DIM, act.getString(R.string.on), act.getString(R.string.off), "apps");
-            section(act.getString(R.string.rows_on_home));
             for (Categories.Cat k : Categories.all(act)) {
                 final String id = k.id;
                 add(Categories.name(act, k), k.hidden ? act.getString(R.string.hidden) : catEmpty(k) ? act.getString(R.string.empty_not_shown) : act.getString(Categories.sortName(k.sort)), "cat:" + id, () -> {
@@ -1882,7 +1871,7 @@ final class SettingsPanel {
             build();
         };
         // All apps stays: hidden, every app outside the other rows (and every folder) would be out of reach
-        if (!k.id.equals(Categories.ALL)) add(act.getString(R.string.show_on_home), k.hidden ? act.getString(R.string.off) : act.getString(R.string.on), "c:show", () -> {
+        if (!k.id.equals(Categories.ALL)) add(act.getString(R.string.show_in_all_apps), k.hidden ? act.getString(R.string.off) : act.getString(R.string.on), "c:show", () -> {
             Categories.setHidden(act, id, !k.hidden);
             changed.run();
             focusTag("c:show");

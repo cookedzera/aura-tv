@@ -1004,18 +1004,11 @@
     <string name="cat_inputs">Eingänge</string>
     <string name="add_to_category">Zu Kategorie hinzufügen…</string>
     <string name="remove_from_row">Aus %1$s entfernen</string>
-    <string name="rename_row">%1$s umbenennen</string>
     <string name="name_left_row">%1$s ist nicht mehr in %2$s</string>
     <string name="name_is_in_row">%1$s ist in %2$s</string>
     <string name="name_your_new_category">Benenne deine neue Kategorie</string>
-    <string name="home_layout">Aufbau</string>
-    <string name="layout_category_rows">Kategoriereihen</string>
-    <string name="layout_one_grid">Ein Raster</string>
     <string name="categories">Kategorien</string>
-    <string name="categories_note">Reihen auf dem Startbildschirm, in dieser Reihenfolge. Filme &amp; Serien, Musik, Spiele und Nachrichten füllen sich selbst; halte OK auf einer App, um sie einer Reihe hinzuzufügen oder eine neue anzulegen.</string>
-    <string name="dim_other_rows">Andere Reihen abdunkeln</string>
-    <string name="rows_on_home">Reihen</string>
-    <string name="show_on_home">Auf dem Startbildschirm</string>
+    <string name="categories_note">Die Tabs in Alle Apps, in dieser Reihenfolge. Filme &amp; Serien, Musik, Spiele und Nachrichten füllen sich selbst; halte OK auf einer App, um sie einer Kategorie hinzuzufügen oder eine neue anzulegen, oder halte OK auf einem Tab, um ihn umzubenennen, zu verschieben, auszublenden oder zu löschen.</string>
     <string name="sort_by">Sortierung</string>
     <string name="sort_custom">Deine Reihenfolge</string>
     <string name="sort_az">A bis Z</string>
@@ -1024,15 +1017,13 @@
     <string name="move_up">Nach oben</string>
     <string name="move_down">Nach unten</string>
     <string name="delete_category">Kategorie löschen</string>
+    <string name="show_in_all_apps">In Alle Apps zeigen</string>
+    <string name="category_hidden">%1$s ist ausgeblendet. Einstellungen, Startbildschirm, Kategorien holt sie zurück.</string>
+    <string name="category_deleted">%1$s ist gelöscht</string>
+    <plurals name="n_tabs"><item quantity="one">%1$d Tab</item><item quantity="other">%1$d Tabs</item></plurals>
     <string name="category_all_note">Alle Apps, in deiner Reihenfolge, mit deinen Ordnern.</string>
     <string name="category_auto_note">Füllt sich selbst mit Apps dieser Art. Halte OK auf einer App, um sie hinzuzufügen oder herauszunehmen.</string>
-    <string name="category_own_note">Deine eigene Reihe. Halte OK auf einer App, um sie hier hinzuzufügen.</string>
-    <plurals name="n_rows"><item quantity="one">%1$d Reihe</item><item quantity="other">%1$d Reihen</item></plurals>
-    <string name="how_should_apps_sit">Wie sollen deine Apps angeordnet sein?</string>
-    <string name="rows_or_grid_about">Kategoriereihen sortieren sich selbst in Filme &amp; Serien, Musik, Spiele und Nachrichten. Jederzeit änderbar unter Einstellungen, Startbildschirm.</string>
-    <string name="layout_category_rows_recommended">Kategoriereihen (empfohlen)</string>
-    <string name="layout_one_grid_folders">Ein Raster, mit Ordnern</string>
-    <string name="rows_new_hint">Neu: Deine Apps stehen in Kategoriereihen. Einstellungen, Startbildschirm, Aufbau bringt das Raster zurück.</string>
+    <string name="category_own_note">Deine eigene Kategorie. Halte OK auf einer App, um sie hier hinzuzufügen.</string>
     <string name="free_up_memory">Speicher freigeben</string>
     <string name="free_up_memory_sub">Mitgelieferte Apps ausschalten</string>
     <string name="debloat_note">Mitgelieferte Apps, die für Dinge im Speicher sitzen, die Aura nicht braucht. Ausgeschaltet, nicht gelöscht: OK schaltet jede wieder ein.</string>

@@ -1004,18 +1004,11 @@
     <string name="cat_inputs">Entradas</string>
     <string name="add_to_category">Añadir a categoría…</string>
     <string name="remove_from_row">Quitar de %1$s</string>
-    <string name="rename_row">Renombrar %1$s</string>
     <string name="name_left_row">%1$s ya no está en %2$s</string>
     <string name="name_is_in_row">%1$s está en %2$s</string>
     <string name="name_your_new_category">Pon nombre a tu nueva categoría</string>
-    <string name="home_layout">Disposición</string>
-    <string name="layout_category_rows">Filas por categoría</string>
-    <string name="layout_one_grid">Una cuadrícula</string>
     <string name="categories">Categorías</string>
-    <string name="categories_note">Filas del inicio, en este orden. Películas y series, Música, Juegos y Noticias se llenan solas; mantén OK en una app para añadirla a una fila o crear una nueva.</string>
-    <string name="dim_other_rows">Atenuar las otras filas</string>
-    <string name="rows_on_home">Filas</string>
-    <string name="show_on_home">Mostrar en el inicio</string>
+    <string name="categories_note">Las pestañas de Todas las apps, en este orden. Películas y series, Música, Juegos y Noticias se llenan solas; mantén OK en una app para añadirla a una categoría o crear una nueva, o mantén OK en una pestaña para renombrarla, moverla, ocultarla o eliminarla.</string>
     <string name="sort_by">Orden</string>
     <string name="sort_custom">Tu orden</string>
     <string name="sort_az">De la A a la Z</string>
@@ -1024,15 +1017,13 @@
     <string name="move_up">Subir</string>
     <string name="move_down">Bajar</string>
     <string name="delete_category">Eliminar categoría</string>
+    <string name="show_in_all_apps">Mostrar en Todas las apps</string>
+    <string name="category_hidden">%1$s está oculta. Ajustes, Pantalla de inicio, Categorías la devuelve.</string>
+    <string name="category_deleted">%1$s se eliminó</string>
+    <plurals name="n_tabs"><item quantity="one">%1$d pestaña</item><item quantity="other">%1$d pestañas</item></plurals>
     <string name="category_all_note">Todas las apps, en tu orden, con tus carpetas.</string>
     <string name="category_auto_note">Se llena sola con apps de este tipo. Mantén OK en una app para añadirla o quitarla.</string>
-    <string name="category_own_note">Tu propia fila. Mantén OK en cualquier app para añadirla aquí.</string>
-    <plurals name="n_rows"><item quantity="one">%1$d fila</item><item quantity="other">%1$d filas</item></plurals>
-    <string name="how_should_apps_sit">¿Cómo quieres ordenar tus apps?</string>
-    <string name="rows_or_grid_about">Las filas por categoría se ordenan solas en Películas y series, Música, Juegos y Noticias. Puedes cambiarlo cuando quieras en Ajustes, Inicio.</string>
-    <string name="layout_category_rows_recommended">Filas por categoría (recomendado)</string>
-    <string name="layout_one_grid_folders">Una cuadrícula, con carpetas</string>
-    <string name="rows_new_hint">Novedad: tus apps están en filas por categoría. Ajustes, Inicio, Disposición recupera la cuadrícula.</string>
+    <string name="category_own_note">Tu propia categoría. Mantén OK en cualquier app para añadirla aquí.</string>
     <string name="free_up_memory">Liberar memoria</string>
     <string name="free_up_memory_sub">Desactivar apps que trae la TV</string>
     <string name="debloat_note">Apps que trae la TV y que ocupan memoria para cosas que Aura no necesita. Se desactivan, no se borran: OK vuelve a activar cualquiera.</string>

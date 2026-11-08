@@ -175,7 +175,7 @@ final class Welcome extends FrameLayout {
             // the two ways of setting Home up lead back to the choice between them
             if (setupBusy || retireBusy) return true;
             // "Keep the defaults" skipped the look pages: Back from the last page goes to the first, not to one never shown
-            if (page > 0) show(page == 7 || page == 9 ? 5 : page == 5 || page == 6 ? 4 : page == 8 ? 0 : page == 10 ? 8 : page == 1 ? 10
+            if (page > 0) show(page == 7 || page == 9 ? 5 : page == 5 || page == 6 ? 4 : page == 8 ? 0 : page == 1 ? 8
                     : page == 3 && skipped ? 0 : page - 1, -1);
             return true;
         }
@@ -226,7 +226,7 @@ final class Welcome extends FrameLayout {
             pairDrop = null;
         }
         View v = p == 0 ? hello() : p == 1 ? look() : p == 2 ? choices() : p == 3 ? ready() : p == 4 ? homeWays() : p == 5 ? onTv()
-                : p == 6 ? fromPc() : p == 8 ? style() : p == 9 ? retireAsk() : p == 10 ? arrange() : wireless();
+                : p == 6 ? fromPc() : p == 8 ? style() : p == 9 ? retireAsk() : wireless();
         if (p == 5 || p == 6) postDelayed(poll, 1200);
         pageView = v;
         stage.addView(v, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -236,8 +236,8 @@ final class Welcome extends FrameLayout {
         for (int i = 0; i < dots.getChildCount(); i++) {
             View d = dots.getChildAt(i);
             LinearLayout.LayoutParams dl = (LinearLayout.LayoutParams) d.getLayoutParams();
-            // style and arrange are one step; the Home setup pages belong to the last step
-            boolean here = i == (p == 8 || p == 10 ? 1 : p == 0 ? 0 : Math.min(p, 3) + 1);
+            // the style is one step; the Home setup pages belong to the last step
+            boolean here = i == (p == 8 ? 1 : p == 0 ? 0 : Math.min(p, 3) + 1);
             dl.width = Ui.dp(here ? 20 : 6);
             d.setLayoutParams(dl);
             d.setAlpha(here ? 0.95f : 0.35f);
@@ -320,37 +320,12 @@ final class Welcome extends FrameLayout {
             actions.add(() -> {
                 Prefs.of(act).edit().putString(Prefs.LAYOUT, st[0]).remove(Prefs.TILE_STYLE).apply();
                 host.applied("layout");
-                show(10, 1);
+                show(1, 1);
             });
         }
         col.addView(row, wrap(34));
         horizontal = true;
         return centred(col);
-    }
-
-    /** Category rows (Movies &amp; TV, Music, Games... filled by themselves) or one grid with folders. */
-    private View arrange() {
-        LinearLayout col = column(Gravity.CENTER_HORIZONTAL);
-        col.addView(kicker(act.getString(R.string.categories)), wrap(0));
-        col.addView(title(act.getString(R.string.how_should_apps_sit)), wrap(6));
-        TextView body = line(act.getString(R.string.rows_or_grid_about));
-        body.setSingleLine(false);
-        body.setGravity(Gravity.CENTER_HORIZONTAL);
-        body.setMaxWidth(Ui.dp(560));
-        col.addView(body, wrap(8));
-        LinearLayout list = column(Gravity.START);
-        boolean on = Categories.on(act);
-        way(list, (on ? "✓  " : "") + act.getString(R.string.layout_category_rows_recommended), () -> arranged(true));
-        way(list, (!on ? "✓  " : "") + act.getString(R.string.layout_one_grid_folders), () -> arranged(false));
-        col.addView(list, wrap(26));
-        horizontal = false;
-        return centred(col);
-    }
-
-    private void arranged(boolean rows) {
-        Prefs.of(act).edit().putBoolean(Categories.ROWS, rows).putBoolean(Categories.ASKED, true).apply();
-        host.applied("apps");
-        show(1, 1);
     }
 
     private View look() {
