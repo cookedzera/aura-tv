@@ -1065,9 +1065,9 @@
     <string name="switch_off_name_q">Switch off %1$s?</string>
     <string name="retire_body_tv">Aura is your home now, but %1$s still runs behind it, keeping memory busy, and on some TVs it takes the Home button back. Switched off, Home always opens Aura and that memory is free for your apps.</string>
     <string name="tv_home_is_off">%1$s is off · Settings, Set up on this TV brings it back</string>
-    <string name="setup_card_todo">Not done yet. Makes Home open Aura, and unlocks Free up memory and ad blocking.</string>
-    <string name="setup_card_done">Connected. Free up memory, the TV\'s own home and Aura\'s extras are here.</string>
-    <string name="setup_card_start">Start here</string>
+    <string name="setup_card_todo">One step, no computer. Home opens Aura and ads are blocked.</string>
+    <string name="setup_card_done">Connected. Aura\'s extras and Free up memory are ready.</string>
+    <string name="setup_card_start">Start</string>
     <string name="setup_card_done_pill">✓ Done</string>
     <string name="inputs_title">Inputs</string>
     <string name="screen_off">Screen off</string>

@@ -1063,9 +1063,9 @@
     <string name="switch_off_name_q">%1$s ausschalten?</string>
     <string name="retire_body_tv">Aura ist jetzt dein Startbildschirm, aber %1$s läuft dahinter weiter, belegt Speicher und holt sich auf manchen Fernsehern die Home-Taste zurück. Ausgeschaltet öffnet Home immer Aura und der Speicher ist frei für deine Apps.</string>
     <string name="tv_home_is_off">%1$s ist aus · Einstellungen, Auf diesem Fernseher einrichten holt ihn zurück</string>
-    <string name="setup_card_todo">Noch nicht erledigt. Damit öffnet Home Aura, und Speicher freigeben und Werbeblocker gehen.</string>
-    <string name="setup_card_done">Verbunden. Speicher freigeben, der eigene Startbildschirm des Fernsehers und Auras Extras sind hier.</string>
-    <string name="setup_card_start">Hier starten</string>
+    <string name="setup_card_todo">Ein Schritt, ohne Computer. Home öffnet Aura, Werbung wird geblockt.</string>
+    <string name="setup_card_done">Verbunden. Auras Extras und Speicher freigeben sind bereit.</string>
+    <string name="setup_card_start">Starten</string>
     <string name="setup_card_done_pill">✓ Erledigt</string>
     <string name="inputs_title">Eingänge</string>
     <string name="screen_off">Bildschirm aus</string>

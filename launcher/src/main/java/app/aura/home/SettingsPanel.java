@@ -2657,47 +2657,79 @@ final class SettingsPanel {
      */
     private void addSetupCard() {
         boolean done = Adb.on(act);
-        Pad p = new Pad(act, null, 18, 0f);
+        // its colour: blue while it waits, green once it's done
+        final int accent = done ? 0xFF30D158 : 0xFF2F7BFF, deep = done ? 0xFF1A8F3A : 0xFF1747C8;
+        Pad p = new Pad(act, null, 22, 0f);
         p.row = true;
-        p.plainColor = done ? 0x1F34C759 : 0x402F7BFF;
-        p.edgeLight = false;
+        p.plainColor = 0x1FFFFFFF;
+        p.edgeLight = true;
         p.focusScale = 1.03f;
         p.setTag("tv");
+        // a wash of its colour from the left, at rest; it gives way to the white of focus
+        android.graphics.drawable.GradientDrawable wash = new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT, new int[]{Ui.alpha(accent, 0.30f), Ui.alpha(accent, 0.08f), 0x00000000});
+        wash.setCornerRadius(Ui.dpf(22));
+        View washView = new View(act);
+        washView.setBackground(wash);
+        p.addView(washView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         LinearLayout r = new LinearLayout(act);
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(Ui.dp(16), 0, Ui.dp(14), 0);
+        r.setPadding(Ui.dp(14), 0, Ui.dp(16), 0);
+        // its icon on a tile of its own colour, light at the top to deep at the foot, as tvOS Settings draws them
+        FrameLayout tile = new FrameLayout(act);
+        android.graphics.drawable.GradientDrawable tileBg = new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, new int[]{Ui.mix(accent, 0xFFFFFFFF, 0.18f), deep});
+        tileBg.setCornerRadius(Ui.dpf(12));
+        tile.setBackground(tileBg);
+        android.widget.ImageView glyph = new android.widget.ImageView(act);
+        glyph.setImageResource(done ? R.drawable.ic_check : R.drawable.ic_bolt);
+        glyph.setColorFilter(0xFFFFFFFF);
+        tile.addView(glyph, new FrameLayout.LayoutParams(Ui.dp(22), Ui.dp(22), Gravity.CENTER));
+        LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(Ui.dp(44), Ui.dp(44));
+        tl.rightMargin = Ui.dp(14);
+        r.addView(tile, tl);
         LinearLayout text = new LinearLayout(act);
         text.setOrientation(LinearLayout.VERTICAL);
         TextView name = p.tint(Ui.text(act, 15, Ui.semibold, 0xFFFFFFFF), 1f);
         name.setText(act.getString(R.string.set_up_on_this_tv));
         text.addView(name);
-        TextView sub = p.tint(Ui.text(act, 11, Ui.regular, 0xFFFFFFFF), 0.75f);
+        TextView sub = p.tint(Ui.text(act, 11, Ui.regular, 0xFFFFFFFF), 0.62f);
         sub.setSingleLine(false);
         sub.setMaxLines(2);
+        sub.setEllipsize(TextUtils.TruncateAt.END);
+        sub.setLineSpacing(Ui.dpf(1.5f), 1f);
         // a TV that let Aura in without asking is open to anything on the Wi-Fi: said here too
         sub.setText(act.getString(!done ? R.string.setup_card_todo : Adb.unguarded(act) ? R.string.connected_open_to_your_wi : R.string.setup_card_done));
         LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sl.topMargin = Ui.dp(2);
+        sl.topMargin = Ui.dp(3);
         text.addView(sub, sl);
         r.addView(text, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView pill = Ui.text(act, 10.5f, Ui.semibold, done ? 0xFF34C759 : 0xFFFFFFFF);
+        // the button: a white capsule at rest, in its own colour once the card is lit white; done, a quiet green mark
+        final TextView pill = Ui.text(act, 11.5f, Ui.semibold, done ? accent : 0xFF15171B);
         pill.setText(act.getString(done ? R.string.setup_card_done_pill : R.string.setup_card_start));
-        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-        bg.setCornerRadius(Ui.dpf(10));
-        bg.setColor(done ? 0x2634C759 : 0xFF2F7BFF);
-        pill.setBackground(bg);
-        pill.setPadding(Ui.dp(10), Ui.dp(3), Ui.dp(10), Ui.dp(3));
+        final android.graphics.drawable.GradientDrawable pillBg = new android.graphics.drawable.GradientDrawable();
+        pillBg.setCornerRadius(Ui.dpf(999));
+        pillBg.setColor(done ? Ui.alpha(accent, 0.18f) : 0xFFFFFFFF);
+        pill.setBackground(pillBg);
+        pill.setPadding(Ui.dp(14), Ui.dp(6), Ui.dp(14), Ui.dp(6));
         LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        pl.leftMargin = Ui.dp(10);
+        pl.leftMargin = Ui.dp(12);
         r.addView(pill, pl);
+        p.fillListener = f -> {
+            washView.setAlpha(1f - f);
+            if (!done) {
+                pillBg.setColor(Ui.mix(0xFFFFFFFF, accent, f));
+                pill.setTextColor(Ui.mix(0xFF15171B, 0xFFFFFFFF, f));
+            }
+        };
         p.addView(r, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         p.onClick = () -> go("tv");
         p.setOnFocusChangeListener((v, has) -> {
             if (has) explain("tv");
         });
-        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(58));
+        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(72));
         l.topMargin = Ui.dp(4);
-        l.bottomMargin = Ui.dp(6);
+        l.bottomMargin = Ui.dp(8);
         rows.addView(p, l);
     }
 

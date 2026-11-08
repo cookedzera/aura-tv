@@ -1063,9 +1063,9 @@
     <string name="switch_off_name_q">¿Desactivar %1$s?</string>
     <string name="retire_body_tv">Aura ya es tu inicio, pero %1$s sigue funcionando detrás, ocupando memoria, y en algunas TV recupera el botón Inicio. Desactivado, Inicio abre siempre Aura y esa memoria queda libre para tus apps.</string>
     <string name="tv_home_is_off">%1$s está desactivado · Ajustes, Configurar en esta TV lo recupera</string>
-    <string name="setup_card_todo">Aún sin hacer. Hace que Inicio abra Aura y activa Liberar memoria y el bloqueo de anuncios.</string>
-    <string name="setup_card_done">Conectado. Liberar memoria, el inicio propio de la TV y los extras de Aura están aquí.</string>
-    <string name="setup_card_start">Empieza aquí</string>
+    <string name="setup_card_todo">Un paso, sin ordenador. Inicio abre Aura y se bloquean anuncios.</string>
+    <string name="setup_card_done">Conectado. Los extras de Aura y Liberar memoria están listos.</string>
+    <string name="setup_card_start">Empezar</string>
     <string name="setup_card_done_pill">✓ Hecho</string>
     <string name="inputs_title">Entradas</string>
     <string name="screen_off">Pantalla apagada</string>
