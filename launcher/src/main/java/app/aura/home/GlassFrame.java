@@ -32,11 +32,16 @@ class GlassFrame extends FrameLayout {
     float saturation;
     int plainColor = 0x1AFFFFFF;
     boolean edgeLight = true;
+    /** How bright the hairline is: 1 for a pane, less for a tile that sits among others. */
+    float edgeStrength = 1f;
+    /** HIGH: a soft light across the top of plain glass, as if lit from above. Never on LOW. */
+    boolean sheen;
     float highlight;
 
     private final Paint blurPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint shine = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF box = new RectF();
     private final int[] loc = new int[2];
     private int tintKey, frostKey = -1;
@@ -98,6 +103,7 @@ class GlassFrame extends FrameLayout {
         // a hairline all the way round, brightest where the light falls on the top edge
         edge.setShader(new LinearGradient(0, 0, w * 0.35f, h,
                 new int[]{0x8CFFFDF9, 0x3DFFFDF9, 0x2EFFFFFF}, new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
+        if (sheen && !Ui.light) shine.setShader(new LinearGradient(0, 0, 0, h * 0.5f, 0x1CFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
     }
 
     @Override
@@ -105,8 +111,16 @@ class GlassFrame extends FrameLayout {
         int frostC = Ui.withAlpha(Ui.IVORY, Math.round(255 * frost));
         int hi = Ui.withAlpha(0xFFFFFFFF, Math.round(245 * highlight));
         if (backdrop == null) {
-            fill.setColor(Ui.over(Ui.over(plainColor, frostC), hi));
-            c.drawRoundRect(box, radius, radius, fill);
+            int col = Ui.over(Ui.over(plainColor, frostC), hi);
+            // a clear pane at rest (a Settings row on its card) draws nothing of its own
+            if ((col >>> 24) != 0) {
+                fill.setColor(col);
+                c.drawRoundRect(box, radius, radius, fill);
+            }
+            if (sheen && !Ui.light && highlight < 1f) {
+                shine.setAlpha(Math.round(255 * (1f - highlight)));
+                c.drawRoundRect(box, radius, radius, shine);
+            }
             return;
         }
         int tint = Ui.withAlpha(Ui.SMOKE, Math.round(255 * darkness));
@@ -134,7 +148,7 @@ class GlassFrame extends FrameLayout {
         super.dispatchDraw(c);
         if (edgeLight) {
             float i = edge.getStrokeWidth() / 2f;
-            edge.setAlpha(Math.round(255 * (1f - highlight * 0.7f)));
+            edge.setAlpha(Math.round(255 * edgeStrength * (1f - highlight * 0.7f)));
             c.drawRoundRect(i, i, getWidth() - i, getHeight() - i, radius, radius, edge);
         }
     }

@@ -116,6 +116,17 @@ final class SettingsPanel {
             }
         };
         head.setOrientation(LinearLayout.VERTICAL);
+        // the large icon over the title: the row in focus on the main page, the page's own beyond it
+        hero = new FrameLayout(a);
+        heroBg = new android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0, 0});
+        heroBg.setCornerRadius(Ui.dpf(18));
+        hero.setBackground(heroBg);
+        heroGlyph = new android.widget.ImageView(a);
+        heroGlyph.setColorFilter(0xFFFFFFFF);
+        hero.addView(heroGlyph, new FrameLayout.LayoutParams(Ui.dp(34), Ui.dp(34), Gravity.CENTER));
+        LinearLayout.LayoutParams hel = new LinearLayout.LayoutParams(Ui.dp(68), Ui.dp(68));
+        hel.bottomMargin = Ui.dp(20);
+        head.addView(hero, hel);
         TextView kicker = Ui.caps(a, 8, 0x99FFFFFF, 0.3f);
         kicker.setText("AURA");
         head.addView(kicker);
@@ -206,7 +217,9 @@ final class SettingsPanel {
         };
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setClipChildren(false);
+        // rows come, go and hide as pages build, and each time the list is laid out again
         rows.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            regroup();
             fadeEdges();
             wantThumbs();
         });
@@ -475,6 +488,8 @@ final class SettingsPanel {
         // the release notes have the whole column to themselves
         help.setVisibility(page.equals("updates") ? View.GONE : View.VISIBLE);
         help.setText("");
+        // a page shows its own icon over its title; the main page's follows the row in focus
+        hero(page);
         if (page.equals("apps")) {
             Ui.fit(title, act.getString(R.string.apps), Ui.dp(300), 52, 30);
             note.setText(act.getString(R.string.hidden_apps_leave_your_grid));
@@ -1910,13 +1925,14 @@ final class SettingsPanel {
     }
 
     private void toggle(String label, String key, String onText, String offText, String what) {
-        add(label, Prefs.on(act, key) ? onText : offText, key, () -> {
+        boolean on = Prefs.on(act, key);
+        add(label, on ? onText : offText, key, null, () -> {
             Prefs.set(act, key, !Prefs.on(act, key));
             host.applied(what);
             build();
             // rebuilding the app grid (tiles, names) takes focus away: stay on the row you pressed
             focusTag(key);
-        });
+        }, on);
     }
 
     private void focusTag(String tag) {
@@ -2775,17 +2791,209 @@ final class SettingsPanel {
         });
     }
 
+    // ---- the look of the list: rows grouped on cards, an icon to each on the main page --------------
+
+    /** The colours of the icon tiles, Apple's system colours as tvOS Settings uses them. */
+    private static final int BLUE = 0xFF2F7BFF, TEAL = 0xFF34AADC, INDIGO = 0xFF5E5CE6, VIOLET = 0xFF8E6CFF, ORANGE = 0xFFFF9F0A,
+            GREEN = 0xFF30D158, PINK = 0xFFFF375F, RED = 0xFFFF453A, GREY = 0xFF8E8E93;
+    /** A row's tag → its glyph and colour; also a page's name → the icon its title shows. */
+    private static final java.util.Map<String, int[]> ICONS = new java.util.HashMap<>();
+
+    static {
+        icon(BLUE, R.drawable.ic_bolt, "tv");
+        icon(GREEN, R.drawable.ic_home, "role");
+        icon(BLUE, R.drawable.ic_person, "profiles");
+        icon(TEAL, R.drawable.ic_photo, "wallpaper");
+        icon(INDIGO, R.drawable.ic_phone, "drop", "photos");
+        icon(VIOLET, R.drawable.ic_cast, Prefs.DLNA);
+        icon(BLUE, R.drawable.ic_apps, "home");
+        icon(GREY, R.drawable.ic_hide, "hidden", "apps");
+        icon(ORANGE, R.drawable.ic_star, "picks");
+        icon(TEAL, R.drawable.ic_w_partly, Prefs.WEATHER);
+        icon(GREEN, R.drawable.ic_place, "city", "auto");
+        icon(ORANGE, R.drawable.ic_w_sun, "wx:unit");
+        icon(GREEN, R.drawable.ic_shield, "shield");
+        icon(PINK, R.drawable.ic_sparkle, "anim");
+        icon(GREY, R.drawable.ic_settings, "android", "");
+        icon(INDIGO, R.drawable.ic_box, "backup");
+        icon(ORANGE, R.drawable.ic_info, "trouble");
+        icon(BLUE, R.drawable.ic_download, "updates");
+        icon(RED, R.drawable.ic_trash, "remove");
+    }
+
+    private static void icon(int color, int res, String... tags) {
+        for (String t : tags) ICONS.put(t, new int[]{res, color});
+    }
+
+    private final FrameLayout hero;
+    private final android.graphics.drawable.GradientDrawable heroBg;
+    private final android.widget.ImageView heroGlyph;
+    private int[] heroShown;
+
+    /** The large icon beside the list shows {@code tag}'s; one with none of its own keeps what was there. */
+    private void hero(String tag) {
+        int[] ic = ICONS.get(tag);
+        if (ic == null || ic == heroShown) return;
+        boolean first = heroShown == null;
+        heroShown = ic;
+        heroBg.setColors(shade(ic[1]));
+        heroGlyph.setImageResource(ic[0]);
+        if (Ui.light || first || !isOpen()) return;
+        // HIGH: the new icon settles in from a touch smaller, its glyph fading up
+        hero.animate().cancel();
+        hero.setScaleX(0.9f);
+        hero.setScaleY(0.9f);
+        hero.animate().scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(Ui.CTRL_POP_CURVE).start();
+        heroGlyph.animate().cancel();
+        heroGlyph.setAlpha(0.2f);
+        heroGlyph.animate().alpha(1f).setDuration(180).setInterpolator(Ui.SOFT).start();
+    }
+
+    /** A row that sits on a card (a choice); cards, QR codes and the like stand alone. */
+    private static boolean onCard(View v) {
+        return v != null && v.getBackground() instanceof Segment;
+    }
+
+    /** An icon tile's colours: light at the top to deep at the foot, as tvOS Settings draws them. */
+    private static int[] shade(int color) {
+        return new int[]{Ui.mix(color, 0xFFFFFFFF, 0.15f), Ui.mix(color, 0xFF000000, 0.25f)};
+    }
+
+    /**
+     * Each run of rows between two labels is one card: the first rounded at the top, the last at the
+     * foot, a hairline between each two. A row in focus lifts off it white, as tvOS Settings does.
+     */
+    private void regroup() {
+        List<View> shown = new java.util.ArrayList<>();
+        for (int i = 0; i < rows.getChildCount(); i++) if (rows.getChildAt(i).getVisibility() != View.GONE) shown.add(rows.getChildAt(i));
+        for (int k = 0; k < shown.size(); k++) {
+            View c = shown.get(k);
+            if (!onCard(c)) continue;
+            boolean top = k == 0 || !onCard(shown.get(k - 1));
+            boolean bottom = k == shown.size() - 1 || !onCard(shown.get(k + 1));
+            ((Segment) c.getBackground()).set(top, bottom);
+        }
+    }
+
+    /** A row's share of its card: rounded where the card begins or ends, a hairline under it otherwise. */
+    static final class Segment extends android.graphics.drawable.Drawable {
+        private final android.graphics.Paint fill = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG),
+                hair = new android.graphics.Paint();
+        private final android.graphics.Path path = new android.graphics.Path();
+        private final float[] radii = new float[8];
+        private final android.graphics.RectF box = new android.graphics.RectF();
+        private static final int FILL = 0x1AFFFFFF, HAIR = 0x14FFFFFF;
+        private boolean top = true, bottom = true;
+
+        Segment() {
+            fill.setColor(FILL);
+            hair.setColor(HAIR);
+        }
+
+        void set(boolean top, boolean bottom) {
+            if (top == this.top && bottom == this.bottom) return;
+            this.top = top;
+            this.bottom = bottom;
+            onBoundsChange(getBounds());
+            invalidateSelf();
+        }
+
+        @Override
+        protected void onBoundsChange(android.graphics.Rect b) {
+            float r = Ui.dpf(16);
+            java.util.Arrays.fill(radii, 0, 4, top ? r : 0f);
+            java.util.Arrays.fill(radii, 4, 8, bottom ? r : 0f);
+            box.set(b);
+            path.reset();
+            path.addRoundRect(box, radii, android.graphics.Path.Direction.CW);
+        }
+
+        @Override
+        public void draw(android.graphics.Canvas c) {
+            c.drawPath(path, fill);
+            if (!bottom) {
+                android.graphics.Rect b = getBounds();
+                c.drawRect(b.left + Ui.dp(16), b.bottom - Math.max(1, Ui.hair()), b.right - Ui.dp(16), b.bottom, hair);
+            }
+        }
+
+        @Override
+        public void setAlpha(int a) {
+            fill.setAlpha(Math.round((FILL >>> 24) * a / 255f));
+            hair.setAlpha(Math.round((HAIR >>> 24) * a / 255f));
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter f) {
+        }
+
+        @Override
+        public int getOpacity() {
+            return android.graphics.PixelFormat.TRANSLUCENT;
+        }
+    }
+
+    /** On or off, as a switch: green when on. Its off track darkens as the row it's in lights white. */
+    static final class Switch extends View {
+        private final android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final boolean on;
+        private float lit;
+
+        Switch(android.content.Context c, boolean on) {
+            super(c);
+            this.on = on;
+        }
+
+        void lit(float f) {
+            lit = f;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas c) {
+            float w = getWidth(), h = getHeight(), r = h / 2f;
+            p.setColor(on ? GREEN : Ui.mix(0x3DFFFFFF, 0x2915171B, lit));
+            c.drawRoundRect(0, 0, w, h, r, r, p);
+            p.setColor(0xFFFFFFFF);
+            float k = r - Ui.dpf(2);
+            c.drawCircle(on ? w - r : r, r, k, p);
+        }
+    }
+
     private void add(String label, String value, String tag, android.graphics.Bitmap thumb, Runnable run) {
+        add(label, value, tag, thumb, run, null);
+    }
+
+    /** {@code sw}, when not null: the row is a switch, on or off. */
+    private void add(String label, String value, String tag, android.graphics.Bitmap thumb, Runnable run, Boolean sw) {
         Pad p = new Pad(act, null, 16, 0f);
         p.row = true;
-        p.plainColor = 0x1AFFFFFF;
+        // at rest the card behind it shows through; focused, it lights white over it
+        p.plainColor = 0;
         p.edgeLight = false;
         p.focusScale = 1.03f;
         p.setTag(tag);
+        p.setBackground(new Segment());
         LinearLayout r = new LinearLayout(act);
         r.setGravity(Gravity.CENTER_VERTICAL);
         boolean picture = thumb != null || tag.startsWith("p:");
-        r.setPadding(Ui.dp(picture ? 6 : 16), 0, Ui.dp(16), 0);
+        int[] ic = page.isEmpty() && !picture ? ICONS.get(tag) : null;
+        r.setPadding(Ui.dp(picture ? 6 : ic != null ? 9 : 16), 0, Ui.dp(16), 0);
+        if (ic != null) {
+            // its icon on a small tile of its own colour, as on the main list of tvOS Settings
+            FrameLayout tile = new FrameLayout(act);
+            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable(
+                    android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, shade(ic[1]));
+            bg.setCornerRadius(Ui.dpf(7));
+            tile.setBackground(bg);
+            android.widget.ImageView g = new android.widget.ImageView(act);
+            g.setImageResource(ic[0]);
+            g.setColorFilter(0xFFFFFFFF);
+            tile.addView(g, new FrameLayout.LayoutParams(Ui.dp(15), Ui.dp(15), Gravity.CENTER));
+            LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(Ui.dp(24), Ui.dp(24));
+            tl.rightMargin = Ui.dp(11);
+            r.addView(tile, tl);
+        }
         if (picture) {
             android.widget.ImageView iv = new android.widget.ImageView(act);
             iv.setTag("thumb");
@@ -2807,37 +3015,50 @@ final class SettingsPanel {
         name.setText(label);
         Ui.shrinkToWidth(name, 11f);
         r.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        if (!value.isEmpty()) {
+        // a switch says On or Off by itself: the word only stays when it says more ("On · DLNA")
+        boolean plain = sw != null && (value.equals(act.getString(R.string.on)) || value.equals(act.getString(R.string.off)));
+        if (!value.isEmpty() && !plain) {
             TextView v = p.tint(Ui.text(act, 12, Ui.medium, 0xFFFFFFFF), 0.7f);
             v.setText(value);
             v.setEllipsize(TextUtils.TruncateAt.END);
-            v.setMaxWidth(Ui.dp(170));
+            v.setMaxWidth(Ui.dp(sw != null ? 130 : 170));
             Ui.shrinkToWidth(v, 10f);
             r.addView(v);
+        }
+        if (sw != null) {
+            Switch s = new Switch(act, sw);
+            s.setContentDescription(value);
+            LinearLayout.LayoutParams swl = new LinearLayout.LayoutParams(Ui.dp(30), Ui.dp(18));
+            swl.leftMargin = Ui.dp(10);
+            r.addView(s, swl);
+            p.fillListener = s::lit;
         }
         p.addView(r, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         p.onClick = run;
         p.setOnFocusChangeListener((v, has) -> {
             if (has) explain(tag);
         });
-        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(35));
-        l.topMargin = Ui.dp(4);
+        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(36));
+        // on a card with the row above it, it sits right under it; the first of a card leaves a gap
+        View above = rows.getChildCount() > 0 ? rows.getChildAt(rows.getChildCount() - 1) : null;
+        l.topMargin = onCard(above) ? 0 : Ui.dp(4);
         rows.addView(p, l);
     }
 
     /** A quiet label over a group of rows; never focused, so the remote moves straight past it. */
     private void section(String name) {
-        TextView t = Ui.caps(act, 7.5f, 0x8CFFFFFF, 0.3f);
+        TextView t = Ui.caps(act, 8, 0xA6FFFFFF, 0.28f);
         t.setText(name);
         t.setPadding(Ui.dp(16), 0, 0, 0);
         LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        l.topMargin = Ui.dp(rows.getChildCount() == 0 ? 2 : 16);
-        l.bottomMargin = Ui.dp(2);
+        l.topMargin = Ui.dp(rows.getChildCount() == 0 ? 2 : 18);
+        l.bottomMargin = Ui.dp(3);
         rows.addView(t, l);
     }
 
     /** The focused row's sentence beside the list, faded across; rows that need none leave it empty. */
     private void explain(String tag) {
+        if (page.isEmpty()) hero(tag);
         Integer id = HELP.get(tag);
         String text = rowHelp.containsKey(tag) ? rowHelp.get(tag) : id == null ? "" : act.getString(id);
         if (text.contentEquals(help.getText())) return;

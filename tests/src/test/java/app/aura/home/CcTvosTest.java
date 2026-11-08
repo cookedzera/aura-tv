@@ -112,7 +112,7 @@ public class CcTvosTest {
             Assert.assertEquals(Gravity.END, ((android.widget.LinearLayout.LayoutParams) time.getLayoutParams()).gravity);
         } else {
             Assert.assertTrue(title.isShown());
-            Assert.assertEquals("the large clock on the left", 62f, sp, 0.5f);
+            Assert.assertEquals("the large clock on the left", 56f, sp, 0.5f);
         }
         ac.pause().stop().destroy();
         ws.onListenerDisconnected();

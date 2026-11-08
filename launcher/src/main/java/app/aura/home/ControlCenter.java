@@ -76,6 +76,10 @@ final class ControlCenter {
     }
 
     private static final int U = 84, G = 14;
+    /** The Settings and Standby capsules: shorter than a tile, so the board ends on a lighter note. */
+    private static final int PILL_H = 58;
+    /** The time in the Aura style's column. */
+    private static final int TIME_SP = 56;
     /** How long the frost takes to turn opaque; after that the home screen beneath stops drawing. */
     static final long FROST_MS = 240;
     /** HIGH: each module of the board this many ms after the last, as Control Center opens. */
@@ -229,13 +233,14 @@ final class ControlCenter {
         headTitle = title;
         title.setText(act.getString(R.string.control_center));
         header.addView(title);
-        time = Ui.text(a, 62, Ui.heavy, 0xFFFFFFFF);
+        // semibold, not heavy: the time is read at a glance, the board beside it is where the eye works
+        time = Ui.text(a, TIME_SP, Ui.semibold, 0xFFFFFFFF);
         time.setIncludeFontPadding(true);
         time.setLetterSpacing(-0.045f);
         header.addView(time, lp(0, 4));
         date = Ui.text(a, 16, Ui.medium, 0xE6FFFFFF);
         header.addView(date, lp(0, 0));
-        info = Ui.text(a, 12, Ui.regular, 0xA6FFFFFF);
+        info = Ui.text(a, 12, Ui.regular, 0x8CFFFFFF);
         info.setSingleLine(false);
         info.setMaxLines(3);
         info.setLineSpacing(Ui.dpf(3), 1f);
@@ -520,8 +525,7 @@ final class ControlCenter {
         focusables.add(volume);
 
         // 1x2: the inputs, where the sky was. The source that's live, large; OK opens them all on a sheet
-        inputs = place(new Pad(a, null, 26, 0f), 3, 0, 1, 2);
-        inputs.plainColor = MODULE;
+        inputs = place(tile(new Pad(a, null, 26, 0f)), 3, 0, 1, 2);
         LinearLayout ic2 = column(a, 13);
         TextView il = inputs.tint(Ui.caps(a, 7, 0xFFFFFFFF, 0.24f), 0.55f);
         il.setText(act.getString(R.string.inputs));
@@ -557,8 +561,7 @@ final class ControlCenter {
 
         // 1x1: memory, with a ring; OK shows recent apps, where they're closed (a "boost" that kills
         // apps from a launcher is refused by Android 11 and later anyway)
-        boost = place(new Pad(a, null, 26, 0f), 2, 2, 1, 1);
-        boost.plainColor = MODULE;
+        boost = place(tile(new Pad(a, null, 26, 0f)), 2, 2, 1, 1);
         LinearLayout bc = new LinearLayout(a);
         bc.setOrientation(LinearLayout.VERTICAL);
         bc.setGravity(Gravity.CENTER);
@@ -581,8 +584,8 @@ final class ControlCenter {
         tc.addView(tcap, fill(lp(0, 4), tcap, 8.5f));
         today.addView(tc, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        settings = place(button(a, R.drawable.ic_settings, act.getString(R.string.settings)), 0, 3, 2, 1);
-        standby = place(button(a, R.drawable.ic_power, act.getString(R.string.standby)), 2, 3, 2, 1);
+        settings = pill(a, R.drawable.ic_settings, act.getString(R.string.settings), 0);
+        standby = pill(a, R.drawable.ic_power, act.getString(R.string.standby), 2);
         focusables.addAll(Arrays.asList(inputs, picture, sound, boost, settings, standby, pick, vpnPill, nowCard));
         focusables.addAll(Arrays.asList(noteRows));
         focusables.add(notesOff);
@@ -639,15 +642,27 @@ final class ControlCenter {
     }
 
     private static GlassFrame module(Context c) {
-        GlassFrame m = new GlassFrame(c, null, 26, 0f);
-        m.plainColor = MODULE;
+        GlassFrame m = tile(new GlassFrame(c, null, 26, 0f));
         // what it holds stays inside it, and it draws its own rounded shape: LOW spares the clip
         if (Ui.light) m.setClipToOutline(false);
         return m;
     }
 
+    /** A tile on the board: plain glass lit from above, its hairline quieter than a pane's. */
+    private static <T extends GlassFrame> T tile(T g) {
+        g.plainColor = MODULE;
+        g.edgeStrength = 0.55f;
+        g.sheen = true;
+        return g;
+    }
+
     private <T extends View> T place(T v, int col, int row, int w, int h) {
-        FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(Ui.dp(span(w)), Ui.dp(span(h)));
+        return place(v, col, row, (float) span(w), (float) span(h));
+    }
+
+    /** At a grid cell, but {@code wDp} by {@code hDp} rather than whole cells. */
+    private <T extends View> T place(T v, int col, int row, float wDp, float hDp) {
+        FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(Ui.dp(wDp), Ui.dp(hDp));
         p.leftMargin = Ui.dp(col * (U + G));
         p.topMargin = Ui.dp(row * (U + G));
         board.addView(v, p);
@@ -667,10 +682,16 @@ final class ControlCenter {
             if (line == null || line.isEmpty()) return;
             t = p.tint(Ui.text(p.getContext(), 10, Ui.medium, 0xFFFFFFFF), 0.55f);
             t.setTag("caption");
-            t.setSingleLine(true);
+            // up to two lines: the picture and sound lines put their last detail on the second
+            t.setSingleLine(false);
+            t.setMaxLines(2);
+            t.setLineSpacing(0f, 0.95f);
             t.setEllipsize(android.text.TextUtils.TruncateAt.END);
             t.setGravity(Gravity.CENTER);
-            l.addView(t, fill(lp(0, 2), t, 8.5f));
+            t.setPadding(Ui.dp(6), 0, Ui.dp(6), 0);
+            LinearLayout.LayoutParams cp = lp(0, 2);
+            cp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+            l.addView(t, cp);
         }
         if (!android.text.TextUtils.equals(t.getText(), line)) t.setText(line);
         t.setVisibility(line == null || line.isEmpty() ? View.GONE : View.VISIBLE);
@@ -705,7 +726,8 @@ final class ControlCenter {
                         : types.contains(android.view.Display.HdrCapabilities.HDR_TYPE_HDR10) ? "HDR10"
                         : types.contains(android.view.Display.HdrCapabilities.HDR_TYPE_HLG) ? "HLG" : "";
             }
-            return res + " · " + hz + " Hz" + (hdr.isEmpty() ? "" : " · " + hdr);
+            // the HDR on a line of its own: two short lines read whole on the tile, one long one was cut
+            return res + " · " + hz + " Hz" + (hdr.isEmpty() ? "" : "\n" + hdr);
         } catch (RuntimeException e) {
             return null;
         }
@@ -748,7 +770,7 @@ final class ControlCenter {
                     : enc.contains(14 /* Dolby TrueHD */) ? "TrueHD"
                     : enc.contains(android.media.AudioFormat.ENCODING_E_AC3) || enc.contains(android.media.AudioFormat.ENCODING_AC3) ? "Dolby"
                     : enc.contains(android.media.AudioFormat.ENCODING_DTS) ? "DTS" : "";
-            return format.isEmpty() ? where : where + " · " + format;
+            return format.isEmpty() ? where : where + "\n" + format;
         } catch (RuntimeException e) {
             return null;
         }
@@ -975,17 +997,31 @@ final class ControlCenter {
     }
 
     private static Pad button(Context c, int iconRes, String label) {
-        Pad p = new Pad(c, null, 26, 0f);
-        p.plainColor = MODULE;
+        Pad p = tile(new Pad(c, null, 26, 0f));
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.VERTICAL);
         l.setGravity(Gravity.CENTER);
-        l.addView(p.tint(icon(c, iconRes), 1f), new LinearLayout.LayoutParams(Ui.dp(23), Ui.dp(23)));
+        l.addView(p.tint(icon(c, iconRes), 1f), new LinearLayout.LayoutParams(Ui.dp(21), Ui.dp(21)));
         TextView t = p.tint(Ui.text(c, 11, Ui.medium, 0xFFFFFFFF), 0.9f);
         t.setText(label);
-        l.addView(t, fill(lp(0, 8), t, 9f));
+        l.addView(t, fill(lp(0, 6), t, 9f));
         p.addView(l, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         return p;
+    }
+
+    /** A wide, short capsule along the board's foot: glyph and name side by side, as tvOS sets them. */
+    private Pad pill(Context c, int iconRes, String label, int col) {
+        Pad p = tile(new Pad(c, null, PILL_H / 2f, 0f));
+        LinearLayout l = new LinearLayout(c);
+        l.setGravity(Gravity.CENTER);
+        l.addView(p.tint(icon(c, iconRes), 1f), new LinearLayout.LayoutParams(Ui.dp(19), Ui.dp(19)));
+        TextView t = p.tint(Ui.text(c, 13, Ui.medium, 0xFFFFFFFF), 0.92f);
+        t.setText(label);
+        t.setSingleLine(true);
+        Ui.shrinkToWidth(t, 10f);
+        l.addView(t, lp(10, 0));
+        p.addView(l, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        return place(p, col, 3, (float) span(2), (float) PILL_H);
     }
 
     static ImageView icon(Context c, int res) {
@@ -1042,7 +1078,7 @@ final class ControlCenter {
      * against the board's left edge in the tvOS style, sharing the board's top.
      */
     private void clock(boolean tvos) {
-        time.setTextSize(TypedValue.COMPLEX_UNIT_SP, tvos ? 28 : 62);
+        time.setTextSize(TypedValue.COMPLEX_UNIT_SP, tvos ? 28 : TIME_SP);
         time.setLetterSpacing(tvos ? -0.035f : -0.045f);
         time.setIncludeFontPadding(!tvos);
         date.setTextSize(TypedValue.COMPLEX_UNIT_SP, tvos ? 13 : 16);
@@ -1778,9 +1814,12 @@ final class ControlCenter {
             glyph = c.getDrawable(iconRes).mutate();
             setFocusable(true);
             rim.setStyle(Paint.Style.STROKE);
-            rim.setStrokeWidth(Ui.dpf(2f));
+            rim.setStrokeWidth(Ui.hair());
             rim.setColor(0xFFFFFFFF);
         }
+
+        /** A toggle that's off: darker than the glass around it, so the lit ones stand out. */
+        private static final int OFF = 0x38000000;
 
         void setOn(boolean v) {
             on = v;
@@ -1790,16 +1829,22 @@ final class ControlCenter {
         @Override
         protected void onDraw(Canvas c) {
             float r = Math.min(getWidth(), getHeight()) / 2f - Ui.dpf(4), cx = getWidth() / 2f, cy = getHeight() / 2f;
-            fill.setColor(on ? activeColor : Ui.mix(0x2EFFFFFF, 0xF2FFFFFF, focus));
+            // on: a soft halo of its colour behind it (HIGH); off: smoked glass with a hairline
+            if (on && !Ui.light && focus < 1f) {
+                fill.setColor(Ui.withAlpha(activeColor, Math.round(70 * (1f - focus))));
+                c.drawCircle(cx, cy, r + Ui.dpf(3), fill);
+            }
+            // focused, it lights white as every other control does; its glyph keeps its colour when on
+            fill.setColor(Ui.mix(on ? activeColor : OFF, 0xF2FFFFFF, focus));
             c.drawCircle(cx, cy, r, fill);
-            glyph.setTint(on ? 0xFFFFFFFF : Ui.mix(0xFFFFFFFF, Pad.DARK, focus));
+            if (!on && focus < 1f) {
+                rim.setAlpha(Math.round(46 * (1f - focus)));
+                c.drawCircle(cx, cy, r - rim.getStrokeWidth() / 2f, rim);
+            }
+            glyph.setTint(Ui.mix(0xFFFFFFFF, on ? activeColor : Pad.DARK, focus));
             int s = Math.round(r * 0.9f);
             glyph.setBounds(Math.round(cx - s / 2f), Math.round(cy - s / 2f), Math.round(cx + s / 2f), Math.round(cy + s / 2f));
             glyph.draw(c);
-            if (on && focus > 0f) {
-                rim.setAlpha(Math.round(240 * focus));
-                c.drawCircle(cx, cy, r + Ui.dpf(3.5f), rim);
-            }
         }
 
         @Override
@@ -1865,7 +1910,7 @@ final class ControlCenter {
     /** Tall volume slider: fills from the bottom; up/down change the volume, OK mutes. */
     final class Slider extends View {
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG), rim = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG), hair = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path clip = new Path();
         private final Drawable on, off;
         private float shown = -1f, focus;
@@ -1893,6 +1938,9 @@ final class ControlCenter {
             rim.setStyle(Paint.Style.STROKE);
             rim.setStrokeWidth(Ui.dpf(2f));
             rim.setColor(0xFFFFFFFF);
+            hair.setStyle(Paint.Style.STROKE);
+            hair.setStrokeWidth(Ui.hair());
+            hair.setColor(0xFFFFFFFF);
             text.setTypeface(Ui.bold);
             text.setTextSize(12 * Ui.scaled);
             text.setTextAlign(Paint.Align.CENTER);
@@ -1952,6 +2000,12 @@ final class ControlCenter {
             float ty = Ui.dpf(26);
             text.setColor(fillTop < ty - Ui.dpf(10) ? Pad.DARK : 0xCCFFFFFF);
             c.drawText(muted ? "–" : String.valueOf(value), cx, ty, text);
+            // at rest, the same quiet hairline the tiles beside it have
+            if (focus < 1f) {
+                float i = hair.getStrokeWidth() / 2f;
+                hair.setAlpha(Math.round(40 * (1f - focus)));
+                c.drawRoundRect(i, i, w - i, h - i, Ui.dpf(26), Ui.dpf(26), hair);
+            }
             if (focus > 0f) {
                 rim.setAlpha(Math.round(230 * focus));
                 float o = Ui.dpf(3.5f);

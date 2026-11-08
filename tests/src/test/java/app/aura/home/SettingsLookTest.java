@@ -111,4 +111,49 @@ public class SettingsLookTest {
     public void low() throws Exception {
         look("on", "low");
     }
+
+    /** Control Center in the Aura style: at rest, then a toggle that's on in focus, then Settings' capsule in focus. */
+    private void cc(String light, String tier) throws Exception {
+        Context c = RuntimeEnvironment.getApplication();
+        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "aura").commit();
+        Prefs.device(c).edit().putBoolean("welcomed", true).putString("set_light", light).commit();
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16));
+        Field w = HomeActivity.class.getDeclaredField("warm");
+        w.setAccessible(true);
+        w.setBoolean(null, true);
+        HomeActivity a = Robolectric.buildActivity(HomeActivity.class).setup().get();
+        run(1500);
+        call(a, "openCc", new Class<?>[]{boolean.class}, false);
+        run(900);
+        ControlCenter cc = field(a, "cc");
+        ControlCenter.Round wifi = field(cc, "wifi");
+        wifi.setOn(true);
+        Pad sound = field(cc, "sound");
+        call(cc, "caption", new Class<?>[]{Pad.class, String.class}, sound, "TV speakers\nAtmos");
+        Pad picture = field(cc, "picture");
+        call(cc, "caption", new Class<?>[]{Pad.class, String.class}, picture, "720p · 60 Hz\nHDR10");
+        run(300);
+        shot(a, "cc-" + tier);
+        wifi.setFocusableInTouchMode(true);
+        wifi.requestFocus();
+        run(700);
+        shot(a, "cc-wifi-" + tier);
+        Pad settings = field(cc, "settings");
+        settings.setFocusableInTouchMode(true);
+        settings.requestFocus();
+        run(700);
+        shot(a, "cc-settings-" + tier);
+        Assert.assertTrue(settings.getHeight() < picture.getHeight());
+    }
+
+    @Test
+    public void ccHigh() throws Exception {
+        cc("off", "high");
+    }
+
+    @Test
+    public void ccLow() throws Exception {
+        cc("on", "low");
+    }
 }
