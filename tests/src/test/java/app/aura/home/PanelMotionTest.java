@@ -167,6 +167,45 @@ public class PanelMotionTest {
         Assert.assertEquals(View.LAYER_TYPE_NONE, header.getLayerType());
     }
 
+    /**
+     * On a Mali-470 the frost dissolving in over a home screen still drawing made every frame of the
+     * opening late: LOW has the frost whole and the home screen at rest from the first frame, and on
+     * the way out the frost goes at once, only the clock and the board fading. HIGH dissolves as before.
+     */
+    @Test
+    public void lowFrostIsThereAtOnceAndHomeStopsWithIt() throws Exception {
+        openCc(true);
+        View veil = field(cc, "veil"), home = field(a, "home"), board = field(cc, "board");
+        a.closeCc(false);
+        run(300);
+        call(a, "openCc", new Class<?>[]{boolean.class}, false);
+        Assert.assertEquals("the frost whole on the first frame", 1f, veil.getAlpha(), 0f);
+        Assert.assertEquals("the home screen beneath stops drawing with it", View.INVISIBLE, home.getVisibility());
+        Assert.assertEquals("the board still fades in", 0f, board.getAlpha(), 0.001f);
+        run(Ui.LOW_CC_OPEN + 100);
+        Assert.assertEquals(1f, board.getAlpha(), 0.001f);
+
+        a.closeCc(true);
+        Assert.assertEquals("the frost goes at once", 0f, veil.getAlpha(), 0f);
+        Assert.assertEquals("over the home screen, there again", View.VISIBLE, home.getVisibility());
+        run(Ui.CLOSE + 100);
+        Assert.assertEquals(View.GONE, cc.panel.getVisibility());
+    }
+
+    @Test
+    public void highFrostDissolvesInOverAHomeStillShowing() throws Exception {
+        openCc(false);
+        View veil = field(cc, "veil"), home = field(a, "home");
+        a.closeCc(false);
+        run(300);
+        call(a, "openCc", new Class<?>[]{boolean.class}, false);
+        Assert.assertEquals(0f, veil.getAlpha(), 0f);
+        Assert.assertEquals(View.VISIBLE, home.getVisibility());
+        run(ControlCenter.FROST_MS + 100);
+        Assert.assertEquals(1f, veil.getAlpha(), 0.001f);
+        Assert.assertEquals(View.INVISIBLE, home.getVisibility());
+    }
+
     /** HIGH: the board's modules come up one after another; the last is still on its way as the first has arrived. */
     @Test
     public void onHighTheModulesArriveOneAfterAnother() throws Exception {

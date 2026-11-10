@@ -1136,9 +1136,17 @@ final class ControlCenter {
         panel.animate().cancel();
         panel.setAlpha(1f);
         panel.setVisibility(View.VISIBLE);
-        // the frost is opaque by the time the home screen beneath stops drawing (FROST_MS)
-        veil.setAlpha(0f);
-        veil.animate().alpha(1f).setStartDelay(0).setDuration(FROST_MS).setInterpolator(Ui.SOFT).start();
+        veil.animate().cancel();
+        if (Ui.light) {
+            // LOW: the frost whole on the first frame, and the home screen beneath stops drawing with it.
+            // Dissolving it in drew the photograph, the home screen, the frost and the board over one
+            // another for 240 ms, 17 ms of GPU a frame on a Mali-470: every frame of the opening came late
+            veil.setAlpha(1f);
+        } else {
+            // the frost is opaque by the time the home screen beneath stops drawing (FROST_MS)
+            veil.setAlpha(0f);
+            veil.animate().alpha(1f).setStartDelay(0).setDuration(FROST_MS).setInterpolator(Ui.SOFT).start();
+        }
         // the column one frame ahead of the board; HIGH: the board's modules then one after another
         arrive(header, 0);
         arrive(board, Ui.light ? 0 : 16);
@@ -1214,6 +1222,12 @@ final class ControlCenter {
                 v.animate().scaleX(0.9f).scaleY(0.9f).setStartDelay(0).setDuration(Ui.CLOSE)
                         .setInterpolator(Ui.EASE_STANDARD).withLayer().start();
             }
+        }
+        // LOW: the frost goes at once and only the clock and the board fade, over the home screen:
+        // fading the frost too was one more full screen blended on every frame of the close
+        if (animate && Ui.light) {
+            veil.animate().cancel();
+            veil.setAlpha(0f);
         }
         panel.animate().alpha(0f).setStartDelay(0).setDuration(animate ? Ui.CLOSE : 0).setInterpolator(Ui.EASE_STANDARD)
                 .withEndAction(() -> {

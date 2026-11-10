@@ -6542,7 +6542,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         // the frost settles over a still home screen (scaling it would re-rasterise all its text
         // every frame); once the frost is opaque the home screen stops drawing altogether
-        handler.postDelayed(hideHome, ControlCenter.FROST_MS + 30);
+        // (Light mode has the frost whole on the first frame, and the home screen stops with it)
+        if (Perf.light(this)) hideHome.run();
+        else handler.postDelayed(hideHome, ControlCenter.FROST_MS + 30);
         bloom.setStrength(0.3f * glow(), 460);
         cc.open(inputs);
     }
