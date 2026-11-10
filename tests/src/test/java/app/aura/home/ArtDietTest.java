@@ -222,4 +222,61 @@ public class ArtDietTest {
         light(c, true);
         Assert.assertNull("Light mode reads the real list instead: its banners are bigger than it needs", AppRepo.saved(c));
     }
+
+    /** A Fire TV Stick 4K ran out of memory on an 18 MB icon: a 720-pixel one in a folder with no density, read at xxhdpi. */
+    @Test
+    public void aPictureWithNoDensityOfItsOwnIsNeverEnlarged() {
+        int asked = DisplayMetrics.DENSITY_XXHIGH;
+        Assert.assertEquals("a picture file counted as mdpi is read at mdpi, its own pixels",
+                DisplayMetrics.DENSITY_DEFAULT, AppRepo.ownDensity(android.util.TypedValue.DENSITY_DEFAULT, true, asked));
+        Assert.assertEquals("a drawing is read as sharp as asked", asked, AppRepo.ownDensity(android.util.TypedValue.DENSITY_DEFAULT, false, asked));
+        // as before
+        Assert.assertEquals(DisplayMetrics.DENSITY_XHIGH, AppRepo.ownDensity(DisplayMetrics.DENSITY_XHIGH, true, asked));
+        Assert.assertEquals(asked, AppRepo.ownDensity(DisplayMetrics.DENSITY_XXXHIGH, true, asked));
+        Assert.assertEquals(asked, AppRepo.ownDensity(android.util.TypedValue.DENSITY_NONE, true, asked));
+    }
+
+    @Test
+    public void anEnormousPictureIsKeptAtWhatItsTileCanShow() {
+        Resources res = RuntimeEnvironment.getApplication().getResources();
+        Bitmap huge = Bitmap.createBitmap(1024, 1024, Bitmap.Config.ARGB_8888);
+        huge.eraseColor(0xFF3366CC);
+        huge.setDensity(DisplayMetrics.DENSITY_XXHIGH);
+        Bitmap fitted = bitmap(AppRepo.fit(res, new BitmapDrawable(res, huge), 256, 256));
+        Assert.assertEquals(256, fitted.getWidth());
+        Assert.assertEquals(256, fitted.getHeight());
+        Assert.assertEquals("as many dp across as before", DisplayMetrics.DENSITY_XXHIGH / 4, fitted.getDensity());
+        Assert.assertEquals(0xFF3366CC, fitted.getPixel(128, 128));
+
+        // a wide one keeps its shape
+        Bitmap wide = bitmap(AppRepo.fit(res, new BitmapDrawable(res, Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)), 480, 270));
+        Assert.assertEquals(480, wide.getWidth());
+        Assert.assertEquals(270, wide.getHeight());
+
+        // what fits, and what isn't a bitmap, as it is
+        Drawable right = new BitmapDrawable(res, banner(DisplayMetrics.DENSITY_XXHIGH, 0xFF112233));
+        Assert.assertSame(right, AppRepo.fit(res, right, 480, 270));
+        Drawable drawn = new ColorDrawable(0xFF22AA66);
+        Assert.assertSame(drawn, AppRepo.fit(res, drawn, 256, 256));
+    }
+
+    @Test
+    public void aCopyKeptBeforePicturesWereFittedIsReadAgain() throws Exception {
+        Context c = RuntimeEnvironment.getApplication();
+        light(c, false);
+        List<AppRepo.App> list = new ArrayList<>();
+        list.add(app("tv.one", new BitmapDrawable(c.getResources(), banner(DisplayMetrics.DENSITY_XXHIGH, 0xFF112233)), false));
+        AppRepo.save(c, list);
+        Assert.assertNotNull(AppRepo.saved(c));
+
+        // as an Aura from before wrote it
+        File sig = new File(index(c).getParentFile(), "sig.json");
+        org.json.JSONObject o = new org.json.JSONObject(new String(Files.readAllBytes(sig.toPath()), StandardCharsets.UTF_8));
+        o.put("sig", o.getString("sig").replace(":fit", ""));
+        Files.write(sig.toPath(), o.toString().getBytes(StandardCharsets.UTF_8));
+        Assert.assertNull("its pictures may be far bigger than their tiles", AppRepo.saved(c));
+
+        AppRepo.save(c, list);
+        Assert.assertNotNull("kept again, fitted", AppRepo.saved(c));
+    }
 }

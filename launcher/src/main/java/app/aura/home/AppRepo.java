@@ -145,11 +145,13 @@ final class AppRepo {
             try {
                 PackageManager pm = c.getPackageManager();
                 ActivityInfo ai = pm.getActivityInfo(new android.content.ComponentName(pkg, cls), 0);
-                float density = c.getResources().getDisplayMetrics().density;
-                if (wantBanner) return loadBannerHighRes(pm, ai, bannerDensity(density, light));
+                Resources res = c.getResources();
+                float density = res.getDisplayMetrics().density;
+                int at = bannerDensity(density, wantBanner && light);
+                if (wantBanner) return fitBanner(res, loadBannerHighRes(pm, ai, at), at);
                 int resId = ai.getIconResource();
-                Drawable d = resId != 0 ? forDensity(pm, ai.applicationInfo, resId, bannerDensity(density, false)) : null;
-                return d != null ? d : ai.loadIcon(pm);
+                Drawable d = resId != 0 ? forDensity(pm, ai.applicationInfo, resId, at) : null;
+                return fitIcon(res, d != null ? d : ai.loadIcon(pm), at);
             } catch (PackageManager.NameNotFoundException | RuntimeException e) {
                 return null;
             }
@@ -259,8 +261,8 @@ final class AppRepo {
         App a = new App();
         a.pkg = ai.packageName;
         a.label = String.valueOf(ri.loadLabel(pm)).trim();
-        a.banner = loadBannerHighRes(pm, ai, bannerDensity);
-        a.icon = loadIconHighRes(pm, ri, ai, iconDensity);
+        a.banner = fitBanner(res, loadBannerHighRes(pm, ai, bannerDensity), bannerDensity);
+        a.icon = fitIcon(res, loadIconHighRes(pm, ri, ai, iconDensity), iconDensity);
         a.color = colorOf(a.banner != null ? a.banner : a.icon);
         if (light) a.banner = slim(res, a.banner);
         a.light = light;
@@ -293,6 +295,8 @@ final class AppRepo {
         synchronized (SAVE_LOCK) {
             File dir = new File(c.getFilesDir(), SAVED);
             try {
+                // a copy from before pictures were fitted may hold an 18 MB icon: the real list is read, and kept, instead
+                if (!new JSONObject(read(new File(dir, "sig.json"))).optString("sig").endsWith(FITTED)) return null;
                 JSONArray a = new JSONArray(read(new File(dir, "index.json")));
                 android.content.res.Resources res = c.getResources();
                 boolean light = Perf.light(c);
@@ -342,8 +346,11 @@ final class AppRepo {
             if (a.light) s.append("|light");
             s.append('\n');
         }
-        return Integer.toHexString(s.toString().hashCode()) + ":" + s.length();
+        return Integer.toHexString(s.toString().hashCode()) + ":" + s.length() + FITTED;
     }
+
+    /** Ends the signature of a copy whose pictures were kept no bigger than their tiles ({@link #fit}). */
+    private static final String FITTED = ":fit";
 
     /** Keeps {@code list} for the next start, unless it's what's kept already. Off the main thread, at low priority. */
     static void save(Context c, List<App> list) {
@@ -535,8 +542,7 @@ final class AppRepo {
                     // ResourcesImpl scales a lower-density bitmap up to the requested density in RAM;
                     // if the package only has a lower density, ask for its own density to keep it 1:1.
                     r.getValueForDensity(resId, density, v, true);
-                    int d = v.density > 0 && v.density != TypedValue.DENSITY_NONE && v.density < density
-                            ? v.density : density;
+                    int d = ownDensity(v.density, v.string != null && !v.string.toString().endsWith(".xml"), density);
                     Drawable dr = r.getDrawableForDensity(resId, d, null);
                     if (dr != null) return dr;
                 } catch (Exception ignored) {
@@ -545,6 +551,51 @@ final class AppRepo {
         } catch (Exception ignored) {
         }
         return null;
+    }
+
+    /**
+     * The density to ask for so a picture {@code found} at its own density comes as its own pixels,
+     * never enlarged to {@code asked}. A picture file in a folder that names no density counts as
+     * mdpi (Android reports 0 for it): asked for at xxhdpi, a 720-pixel icon came back 2160 wide,
+     * 18 MB, and on Android 7 and older, where pictures count against the app's own memory limit, a
+     * few of those left a Fire TV Stick with none. A drawing (XML) has no pixels of its own and is
+     * read as asked.
+     */
+    static int ownDensity(int found, boolean pictureFile, int asked) {
+        if (found == TypedValue.DENSITY_DEFAULT) return pictureFile ? DisplayMetrics.DENSITY_DEFAULT : asked;
+        return found != TypedValue.DENSITY_NONE && found < asked ? found : asked;
+    }
+
+    /**
+     * {@code d} no bigger than {@code maxW}×{@code maxH}: an app that ships one enormous picture
+     * (a 1024-pixel icon is 4 MB held for a tile that shows 200 of them) is kept at what its tile
+     * can show. Anything that fits, or isn't a bitmap, as it is. The original isn't recycled: the
+     * app's own resources may hand it out again.
+     */
+    static Drawable fit(Resources res, Drawable d, int maxW, int maxH) {
+        if (!(d instanceof BitmapDrawable)) return d;
+        Bitmap b = ((BitmapDrawable) d).getBitmap();
+        if (b == null || b.isRecycled() || b.getWidth() <= maxW && b.getHeight() <= maxH) return d;
+        float k = Math.min(maxW / (float) b.getWidth(), maxH / (float) b.getHeight());
+        try {
+            Bitmap out = Bitmap.createScaledBitmap(b, Math.max(1, Math.round(b.getWidth() * k)),
+                    Math.max(1, Math.round(b.getHeight() * k)), true);
+            // as many dp across as before
+            if (b.getDensity() > 0) out.setDensity(Math.max(1, Math.round(b.getDensity() * k)));
+            return new BitmapDrawable(res, out);
+        } catch (OutOfMemoryError e) {
+            return d;
+        }
+    }
+
+    /** A banner as wide in pixels as the density it was read at, which is what a banner made for it is. */
+    private static Drawable fitBanner(Resources res, Drawable d, int density) {
+        return fit(res, d, density, density * 9 / 16);
+    }
+
+    /** An icon at up to 256 pixels on a 1080p screen: a third more than the largest it's shown, in recent apps. */
+    private static Drawable fitIcon(Resources res, Drawable d, int density) {
+        return fit(res, d, density * 8 / 15, density * 8 / 15);
     }
 
     /**
