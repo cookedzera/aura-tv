@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 7 and older count every picture against the app's own memory limit (192 MB on a Fire TV
+         Stick 4K), and a home screen holds a picture or two for each app: the larger limit is asked for
+         there. From Android 8 pictures live outside it, and values-v26 says no. -->
+    <bool name="large_heap">true</bool>
+</resources>
