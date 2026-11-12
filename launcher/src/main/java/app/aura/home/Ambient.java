@@ -324,10 +324,11 @@ public class Ambient extends DreamService implements Backdrop.Listener {
     public void onWallpaperChanged(Backdrop.Wallpaper w, float lumaTop, float lumaBottom, boolean first) {
         if (photos) story.set(w, !first);
         if (!photos) return;
-        // the line fills again, over exactly the time until the next photograph
+        // the line fills again, over exactly the time until the next photograph; with one photograph on
+        // the wall (Pure Black always) none is coming, and the line filled once and stayed full
         progressFill.animate().cancel();
         progressFill.setScaleX(0f);
-        progressFill.animate().scaleX(1f).setDuration(backdrop.cycleMs()).setStartDelay(0)
+        if (backdrop.count() > 1) progressFill.animate().scaleX(1f).setDuration(backdrop.cycleMs()).setStartDelay(0)
                 .setInterpolator(new android.view.animation.LinearInterpolator()).start();
         // with the quotes, a new photograph brings a new quote
         if (!first && scene instanceof Sayings) ((Sayings) scene).turnNow();

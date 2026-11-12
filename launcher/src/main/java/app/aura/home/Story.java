@@ -2,6 +2,7 @@ package app.aura.home;
 
 import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
+import android.os.SystemClock;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextUtils;
@@ -129,7 +130,17 @@ final class Story extends FrameLayout implements Backdrop.Tick {
             s.setSpan(new ForegroundColorSpan(0x99FFFFFF), d.length(), s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             date.setText(s);
         }
+        // on show, the clock glides to its new place; out of sight, it's simply put there
+        if (SystemClock.uptimeMillis() - driftedAt >= REST_MS) drift(isShown() && getAlpha() > 0f);
     }
+
+    /**
+     * The type moves with each new photograph ({@link #drift}); with one photograph on the wall (Pure
+     * Black always) none comes, and the clock sat on the same pixels for as long as the screen stayed
+     * on. Left this long, it moves by itself.
+     */
+    private static final long REST_MS = 3 * 60_000L;
+    private long driftedAt = SystemClock.uptimeMillis();
 
     /** "  ·  24°  Partly cloudy" after the date. */
     void weather(Weather.Now w) {
@@ -183,7 +194,7 @@ final class Story extends FrameLayout implements Backdrop.Tick {
 
     /** The caption rises a few dp as it appears; a little later, it goes. */
     private void rise() {
-        drift();
+        drift(false);
         caption.setTranslationY(Ui.dp(10));
         caption.animate().alpha(1f).translationY(0f).setDuration(1400).setStartDelay(200).setInterpolator(Ui.EMPHASIZED)
                 .withEndAction(null).start();
@@ -195,10 +206,17 @@ final class Story extends FrameLayout implements Backdrop.Tick {
     }
 
     /** Moves both blocks a few dp so no edge of the type sits on the same pixels for long. */
-    void drift() {
-        clock.setTranslationX(rnd.nextInt(Ui.dp(24)));
-        clock.setTranslationY(-rnd.nextInt(Ui.dp(18)));
+    private void drift(boolean glide) {
+        driftedAt = SystemClock.uptimeMillis();
+        float x = rnd.nextInt(Ui.dp(24)), y = -rnd.nextInt(Ui.dp(18));
+        // (the caption comes in with a new photograph and has gone again long before a glide: it's just put there)
         caption.setTranslationX(-rnd.nextInt(Ui.dp(24)));
+        if (glide) {
+            clock.animate().translationX(x).translationY(y).setStartDelay(0).setDuration(2400).setInterpolator(Ui.SOFT).start();
+        } else {
+            clock.setTranslationX(x);
+            clock.setTranslationY(y);
+        }
     }
 
     /** Rises in: the clock first, then the caption. */

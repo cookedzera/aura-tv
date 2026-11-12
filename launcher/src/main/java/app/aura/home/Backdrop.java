@@ -506,7 +506,9 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     public void doFrame(long frameTimeNanos) {
         if (!running) return;
         long now = SystemClock.uptimeMillis();
-        boolean fade = incoming != null || intro < 1f || standIn != null || now - defocusStart < defocusMs;
+        // a crossfade (or the intro) changes what the glass shows; the rack focus changes only the photograph
+        boolean cross = incoming != null || intro < 1f || standIn != null;
+        boolean fade = cross || now - defocusStart < defocusMs;
         boolean parallax = now - parallaxStart < PARALLAX_MS;
         // Light mode: the photograph holds still (see path), so nothing is redrawn while nothing
         // changes. On a slow TV each redraw of the photograph and its glass took the GPU 15 ms, and
@@ -534,8 +536,10 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             for (int i = 0; i < ticks.size(); i++) ticks.get(i).onTick(now);
             // blur is 1/22 scale, so a 4dp parallax nudge is invisible inside glass; keep mirrors cached while focus animates
             // through a crossfade the glass follows every third frame: its blur changes too slowly for
-            // the difference to show, and two dozen panes redrawn per frame is what made fades stutter
-            if (fade ? frame % 3 == 0 : !parallax && now - lastMirror >= (calm ? 500 : 200)) {
+            // the difference to show, and two dozen panes redrawn per frame is what made fades stutter.
+            // Not through a rack focus: the glass's blur is the same at any focus, and every move of the
+            // focus between the apps and the widgets had all of it redrawn twenty times a second
+            if (cross ? frame % 3 == 0 : !parallax && now - lastMirror >= (calm ? 500 : 200)) {
                 lastMirror = now;
                 for (int i = 0; i < mirrors.size(); i++) {
                     View v = mirrors.get(i);
