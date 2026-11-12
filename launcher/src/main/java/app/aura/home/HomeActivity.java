@@ -448,8 +448,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (switcher.isOpen()) closeSwitcher();
         if (ccOpen) closeCc(false);
         closeOverlays();
-        if (!settings.isOpen()) openSettings();
-        settings.show("wallpaper");
+        // a kids' profile is asked for the parents' PIN first, as any way into Settings is, and Settings
+        // opens only once it's typed: its page is shown then, not now, or Settings opened on its first page
+        guarded(() -> {
+            openSettingsNow(null);
+            if (settings.isOpen()) settings.show("wallpaper");
+        });
     }
 
     /**
@@ -866,8 +870,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // Aura picked in Android's screensaver settings (res/xml/dream.xml): its screensaver page
         if (fromSaverSettings(intent)) {
             lastHomeAt = 0;
-            // a kids profile asks for the parents' PIN first, as any way into Settings does
-            handler.postDelayed(() -> guarded(this::openSaverSettings), 300);
+            handler.postDelayed(this::openSaverSettings, 300);
             return;
         }
         // Home twice inside an app (HomeKeys): the switcher over it, the home screen never showing
@@ -5697,7 +5700,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (editing || ccOpen || menu.isOpen() || zone != GRID || cells.isEmpty()) return;
         Cell c = cells.get(gridAt);
         if (c.tag.startsWith("input:")) {
-            // an input: it can't move (switched-on sources stand first) but it can leave the home screen
+            // an input: it can't move (switched-on sources stand first) but it can leave the home screen;
+            // not from a kids' profile, where hiding is a grown-up's to do: its one choice gone, no menu opens
+            if (Profiles.kids(this)) return;
             final String tag = c.tag, name = c.label.getText().toString();
             final Card card = c.card;
             stopPreview();
@@ -5850,19 +5855,24 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             closeMenu(w);
             openSettings("widgets");
         }));
-        if (widgets.size() > 1) items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.hide), () -> {
+        // a kids' profile can move its widgets, nothing more (as with its apps): hiding one, or all of
+        // them for the tvOS style, is undone in Settings, behind the parents' PIN
+        boolean kids = Profiles.kids(this);
+        if (!kids && widgets.size() > 1) items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.hide), () -> {
             closeMenu(w);
             Prefs.hideWidget(this, key, true);
             layoutWidgets(true);
             focusWidget(Math.min(n, widgets.size() - 1));
             hud(R.drawable.ic_hide, getString(R.string.name_is_hidden_settings, name));
         }));
-        else items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.only_apps_tvos_style), () -> {
+        else if (!kids) items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.only_apps_tvos_style), () -> {
             closeMenu(w);
             Prefs.of(this).edit().putString(Prefs.LAYOUT, "tvos").apply();
             applySetting("layout");
             hud(R.drawable.ic_check, getString(R.string.tvos_style_settings_home_screen));
         }));
+        // (a kids' profile's only widget, with nowhere to move to: nothing to offer)
+        if (items.isEmpty()) return;
         home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         menuBack = w;
         String head = card != null && card.title != null && !card.title.isEmpty() ? card.title : name;

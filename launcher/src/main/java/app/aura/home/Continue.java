@@ -97,15 +97,19 @@ final class Continue {
         // one list for everyone asking (the stack wants 4, Top Shelf 8): asking for fewer never
         // throws the minute's cache away, and the artwork with it
         long now = android.os.SystemClock.elapsedRealtime();
+        // the list is one profile's (a kids' profile is read without what it hides): another profile
+        // switched to within the minute was shown the last one's
+        String who = Profiles.current(c) + (Profiles.kids(c) ? "/kids" + Prefs.hidden(c).hashCode() : "");
         List<Item> all;
         // one reading at a time: the stack and Top Shelf both ask the moment home comes back, and the
         // second waits for the first one's list instead of asking the TV's listings all over again
         synchronized (READING) {
-            all = cached != null && max <= READ && now - cachedAt < 60_000 ? cached : null;
+            all = cached != null && max <= READ && now - cachedAt < 60_000 && who.equals(cachedFor) ? cached : null;
             if (all == null) {
                 all = read(c, Math.max(READ, max));
                 cached = all;
                 cachedAt = now;
+                cachedFor = who;
             }
         }
         // copies: Top Shelf labels its own, and the stack mustn't see a card change under it
@@ -119,6 +123,8 @@ final class Continue {
     private static final Object READING = new Object();
     private static List<Item> cached;
     private static long cachedAt;
+    /** Whose list {@link #cached} is: the profile and, for a kids' one, what it hid when read. */
+    private static String cachedFor;
 
     private static List<Item> read(Context c, int max) {
         List<Item> out = new ArrayList<>();
