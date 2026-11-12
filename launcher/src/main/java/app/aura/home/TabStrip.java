@@ -156,7 +156,9 @@ final class TabStrip extends LinearLayout {
                 v.removeOnLayoutChangeListener(this);
                 relaid = null;
                 relaidOn = null;
-                glideTo(v, false);
+                // to the tab the pill is on now: a label no wider than the last brings no layout, and this
+                // waited on the tab it was on then, through any number of others chosen since
+                if (on != null) glideTo(on, false);
             }
         };
         on.addOnLayoutChangeListener(relaid);

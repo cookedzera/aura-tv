@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.media.ExifInterface;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -32,18 +33,26 @@ final class Art {
         o.inJustDecodeBounds = true;
         BitmapFactory.decodeByteArray(data, 0, data.length, o);
         if (o.outWidth <= 0 || o.outHeight <= 0) return false;
+        // a phone's camera keeps a photo as its sensor lies and notes how it was held: turned upright
+        // here as a wallpaper is (Mine), or a photo taken upright made a tile lying on its side
+        int held = Mine.orientation(data);
+        boolean onSide = held == ExifInterface.ORIENTATION_ROTATE_90 || held == ExifInterface.ORIENTATION_ROTATE_270;
+        int wide = onSide ? o.outHeight : o.outWidth, tall = onSide ? o.outWidth : o.outHeight;
         // decoded no bigger than needed: a phone photo is 12 MP
         int sample = 1;
-        while (o.outWidth / (sample * 2) >= W && o.outHeight / (sample * 2) >= H) sample *= 2;
+        while (wide / (sample * 2) >= W && tall / (sample * 2) >= H) sample *= 2;
         BitmapFactory.Options d = new BitmapFactory.Options();
         d.inSampleSize = sample;
         Bitmap src;
         try {
             src = BitmapFactory.decodeByteArray(data, 0, data.length, d);
+            if (src == null) return false;
+            Bitmap upright = Mine.rotate(src, held);
+            if (upright != src) src.recycle();
+            src = upright;
         } catch (OutOfMemoryError e) {
             return false;
         }
-        if (src == null) return false;
         // the middle of it, at the tile's shape
         float k = Math.max(W / (float) src.getWidth(), H / (float) src.getHeight());
         int cw = Math.round(W / k), ch = Math.round(H / k);
@@ -63,7 +72,10 @@ final class Art {
         } finally {
             out.recycle();
         }
-        return part.renameTo(f);
+        if (part.renameTo(f)) return true;
+        //noinspection ResultOfMethodCallIgnored
+        part.delete();
+        return false;
     }
 
     /** Off the main thread: the app's own picture, or null. */

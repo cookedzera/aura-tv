@@ -160,7 +160,9 @@ final class Categories {
             final PackageManager pm = c.getPackageManager();
             final Map<String, String> names = new HashMap<>();
             for (String p : list) names.put(p, label(pm, p));
-            Collections.sort(list, (a, b) -> names.get(a).compareToIgnoreCase(names.get(b)));
+            // as the language in use sorts them (the order All Apps reads them in): letter by letter put É after Z
+            final java.text.Collator col = java.text.Collator.getInstance();
+            Collections.sort(list, (a, b) -> col.compare(names.get(a), names.get(b)));
         } else if (how.equals("most")) {
             final Map<String, Integer> n = counts(c);
             Collections.sort(list, (a, b) -> Integer.compare(n.containsKey(b) ? n.get(b) : 0, n.containsKey(a) ? n.get(a) : 0));
@@ -178,7 +180,8 @@ final class Categories {
      */
     static void warm(Context c, List<AppRepo.App> apps) {
         synchronized (Categories.class) {
-            for (AppRepo.App a : apps) if (a.label != null && !labels.containsKey(a.pkg)) labels.put(a.pkg, a.label);
+            // each reading's names replace the last one's: the TV's language may have changed in between
+            for (AppRepo.App a : apps) if (a.label != null) labels.put(a.pkg, a.label);
         }
         for (AppRepo.App a : apps) kind(c, a.pkg);
     }

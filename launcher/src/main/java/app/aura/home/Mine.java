@@ -347,7 +347,18 @@ final class Mine {
         }
     }
 
-    private static Bitmap rotate(Bitmap b, int orientation) {
+    /** As {@link #orientation(File)}, of a photo still in memory; upright before Android 7, which reads Exif from files only. */
+    static int orientation(byte[] data) {
+        if (android.os.Build.VERSION.SDK_INT < 24) return ExifInterface.ORIENTATION_NORMAL;
+        try {
+            return new ExifInterface(new java.io.ByteArrayInputStream(data)).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+        } catch (IOException | RuntimeException e) {
+            return ExifInterface.ORIENTATION_NORMAL;
+        }
+    }
+
+    /** {@code b} turned the way its camera said it was held ({@code orientation}, an Exif value); {@code b} itself when it's upright. */
+    static Bitmap rotate(Bitmap b, int orientation) {
         int deg = orientation == ExifInterface.ORIENTATION_ROTATE_90 ? 90
                 : orientation == ExifInterface.ORIENTATION_ROTATE_180 ? 180
                 : orientation == ExifInterface.ORIENTATION_ROTATE_270 ? 270 : 0;
