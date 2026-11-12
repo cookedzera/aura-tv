@@ -1119,6 +1119,7 @@
     <string name="watch_credit">Títulos e imagens de %1$s</string>
     <string name="watch_credit_where">Onde assistir: JustWatch</string>
     <string name="watch_on_home">Um bloco na tela inicial</string>
-    <string name="help_watch">Filmes e séries para escolher, por gênero, como um bloco entre seus apps. Usa a rede só enquanto está aberto e, desligado, não ocupa memória.</string>
+    <string name="help_watch">Filmes e séries para escolher, por gênero, como um bloco entre seus apps. Usa a rede só enquanto está aberto. Desligado, some da tela inicial e não ocupa memória.</string>
     <string name="watch_is_off">"Assistir está desligado  ·  Configurações, Tela inicial traz de volta"</string>
+    <string name="watch_turn_off">Desligar Assistir</string>
 </resources>

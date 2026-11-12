@@ -46,8 +46,9 @@ final class Prefs {
 
     /**
      * Watch ({@link WatchScreen}): a tile on the home screen that opens films and series to choose
-     * from. Off until asked for: it uses the network, and switched off nothing of it is made, read
-     * or kept in memory.
+     * from. On from the start, as a tile is all it is until it's opened: its screen is made and the
+     * network asked only then. Switched off (Settings, or its tile's own menu) nothing of it is
+     * made, read or kept.
      */
     static final String WATCH = "set_watch";
 
@@ -57,7 +58,7 @@ final class Prefs {
     }
 
     static boolean on(Context c, String key) {
-        if (SRC_WIKIMEDIA.equals(key) || SRC_WALLHAVEN.equals(key) || SRC_UNSPLASH.equals(key) || WATCH.equals(key)) return of(c).getBoolean(key, false);
+        if (SRC_WIKIMEDIA.equals(key) || SRC_WALLHAVEN.equals(key) || SRC_UNSPLASH.equals(key)) return of(c).getBoolean(key, false);
         // everything starts on, except always-visible app names, only your own photos and pure black;
         // flyovers download video, so they wait until asked for; and live pictures of inputs, which
         // some TVs draw over the whole screen (a soundbar on HDMI: black, with sound)

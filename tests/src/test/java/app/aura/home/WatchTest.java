@@ -278,14 +278,14 @@ public class WatchTest {
     }
 
     @Test
-    public void watchIsOffUntilAskedForThenATileThatLeavesNothingBehind() throws Exception {
+    public void watchIsATileThatLeavesNothingBehindAndGoesWhenSwitchedOff() throws Exception {
         keep("any", 4);
         HomeActivity a = Robolectric.buildActivity(HomeActivity.class).setup().get();
         run(1500);
-        // off until asked for: no tile, and its screen was never made
-        Assert.assertFalse(Prefs.watch(c));
-        Assert.assertEquals(-1, tileAt(a));
-        Assert.assertNull("nothing of Watch exists while it's off", WatchTest.<Object>field(a, "watch"));
+        // there from the start as a tile and nothing more: its screen isn't made until it's opened
+        Assert.assertTrue(Prefs.watch(c));
+        Assert.assertEquals("no input is live here: Watch opens the grid", 0, tileAt(a));
+        Assert.assertNull("nothing of the Watch screen exists until it's opened", WatchTest.<Object>field(a, "watch"));
         // the rail is Find, Inputs, Control Center and Settings: no Watch, no Photo mode, no Apps
         List<View> side = field(a, "side");
         Assert.assertEquals(4, side.size());
@@ -295,12 +295,6 @@ public class WatchTest {
         @SuppressWarnings("unchecked") List<AllApps.Tab> list = (List<AllApps.Tab>) tabs.invoke(a);
         for (AllApps.Tab t : list) Assert.assertNotEquals("watch", t.id);
 
-        // switched on: its tile stands first among the apps, and still nothing is made until it's opened
-        Prefs.set(c, Prefs.WATCH, true);
-        invoke(a, "populate");
-        run(300);
-        Assert.assertEquals("no input is live here: Watch opens the grid", 0, tileAt(a));
-        Assert.assertNull(WatchTest.<Object>field(a, "watch"));
         Assert.assertEquals("its Top Shelf is read from what was kept", 3, Watch.cards(c, 3).size());
 
         // OK on the tile makes the screen and opens it
@@ -347,5 +341,41 @@ public class WatchTest {
         }
         Assert.assertEquals("the shelves fetched are gone", 0, Watch.shelf(c, Watch.ANY).size());
         Assert.assertEquals("what was saved to My list stays", 1, Watch.mine(c).size());
+
+        // back on, then turned off from the tile itself: hold OK offers it, and it goes altogether
+        Prefs.set(c, Prefs.WATCH, true);
+        invoke(a, "populate");
+        run(300);
+        Assert.assertEquals(0, tileAt(a));
+        cells.get(0).card.requestFocus();
+        run(100);
+        invoke(a, "openMenu");
+        run(300);
+        Runnable off = menuRow(a, c.getString(R.string.watch_turn_off));
+        Assert.assertNotNull("hold OK on the tile offers to turn Watch off", off);
+        off.run();
+        run(400);
+        Assert.assertFalse(Prefs.on(c, Prefs.WATCH));
+        Assert.assertEquals(-1, tileAt(a));
+    }
+
+    /** What OK does on the row of home's menu that says {@code label}, or null when no row does. */
+    private static Runnable menuRow(HomeActivity a, String label) throws Exception {
+        AppMenu menu = field(a, "menu");
+        ViewGroup list = field(menu, "list");
+        for (int i = 0; i < list.getChildCount(); i++) {
+            View row = list.getChildAt(i);
+            if (row instanceof Pad && hasText((ViewGroup) row, label)) return ((Pad) row).onClick;
+        }
+        return null;
+    }
+
+    private static boolean hasText(ViewGroup g, String text) {
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View v = g.getChildAt(i);
+            if (v instanceof TextView && text.contentEquals(((TextView) v).getText())) return true;
+            if (v instanceof ViewGroup && hasText((ViewGroup) v, text)) return true;
+        }
+        return false;
     }
 }

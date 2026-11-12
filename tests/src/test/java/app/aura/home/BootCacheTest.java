@@ -154,6 +154,8 @@ public class BootCacheTest {
         Assert.assertNotNull(AppRepo.saved(c));
 
         Prefs.device(c).edit().putBoolean("welcomed", true).putString("set_light", "on").commit();
+        // these are about the apps' own tiles: Watch's tile, there by default, is switched off
+        Prefs.set(c, Prefs.WATCH, false);
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16));
         Field w = HomeActivity.class.getDeclaredField("warm");
@@ -214,6 +216,8 @@ public class BootCacheTest {
         }
         AppRepo.save(c, AppRepo.load(c));
         Prefs.device(c).edit().putBoolean("welcomed", true).putString("set_light", "on").commit();
+        // these are about the apps' own tiles: Watch's tile, there by default, is switched off
+        Prefs.set(c, Prefs.WATCH, false);
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16));
         Field w = HomeActivity.class.getDeclaredField("warm");

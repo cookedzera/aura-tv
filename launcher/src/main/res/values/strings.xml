@@ -1119,6 +1119,7 @@
     <string name="watch_credit">Titles and artwork from %1$s</string>
     <string name="watch_credit_where">Where to watch from JustWatch</string>
     <string name="watch_on_home">A tile on the home screen</string>
-    <string name="help_watch">Films and series to choose from, by genre, as a tile among your apps. It uses the network only while it’s open, and switched off it takes no memory.</string>
+    <string name="help_watch">Films and series to choose from, by genre, as a tile among your apps. It uses the network only while it’s open. Off, it’s gone from the home screen and takes no memory.</string>
     <string name="watch_is_off">"Watch is off  ·  Settings, Home screen brings it back"</string>
+    <string name="watch_turn_off">Turn off Watch</string>
 </resources>

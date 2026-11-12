@@ -59,6 +59,8 @@ public class BehindVideoTest {
         c = RuntimeEnvironment.getApplication();
         // Prefs.of and Prefs.device are one file for the main profile: cleared once
         Prefs.device(c).edit().clear().putBoolean("welcomed", true).putString(Perf.KEY, "on").commit();
+        // these are about the apps' own tiles: Watch's tile, there by default, is switched off
+        Prefs.set(c, Prefs.WATCH, false);
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16));
         Field w = HomeActivity.class.getDeclaredField("warm");

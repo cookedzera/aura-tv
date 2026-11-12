@@ -96,7 +96,8 @@ public class AllAppsTest {
         c = RuntimeEnvironment.getApplication();
         // the profile's settings first: on this TV they share a file with the device's, and clearing
         // them after would take LOW away again (each test runs on LOW, as a 1 GB TV does, unless it says)
-        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "tvos").commit();
+        // these are about the apps' own tiles: Watch's tile, there by default, is switched off
+        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "tvos").putBoolean(Prefs.WATCH, false).commit();
         Prefs.device(c).edit().putBoolean("welcomed", true).putString("set_light", "on").commit();
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16));

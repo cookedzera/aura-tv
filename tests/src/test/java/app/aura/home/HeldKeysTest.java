@@ -124,7 +124,8 @@ public class HeldKeysTest {
         // the main profile's file is the device's too: cleared once, or the second clear wipes the first's writes
         Prefs.of(c).edit().clear().commit();
         Prefs.device(c).edit().clear().putBoolean("welcomed", true).putString("set_light", "on").commit();
-        Prefs.of(c).edit().putString(Prefs.LAYOUT, "aura").commit();
+        // these are about the apps' own tiles: Watch's tile, there by default, is switched off
+        Prefs.of(c).edit().putString(Prefs.LAYOUT, "aura").putBoolean(Prefs.WATCH, false).commit();
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16));
         setStatic(HomeActivity.class, "warm", true);

@@ -2869,7 +2869,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return cell;
     }
 
-    /** Watch's tile: Aura's own, painted in its own light; OK opens the Watch screen, hold OK takes it off home. */
+    /** Watch's tile: Aura's own, painted in its own light; OK opens the Watch screen, hold OK offers to turn Watch off. */
     private Cell watchCell(Map<String, Cell> old, boolean tvosTiles, String nameMode, boolean calm) {
         String label = getString(R.string.watch), sig = "watch|" + tvosTiles + "|" + label;
         Cell cell = reuse(old, WATCH_TAG, sig);
@@ -5700,12 +5700,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             return;
         }
         if (c.tag.equals(WATCH_TAG)) {
-            // Watch: it keeps its place, and leaving the home screen switches it off altogether
+            // Watch: it keeps its place; its one choice switches it off altogether, tile, screen and what it fetched
             final String name = c.label.getText().toString();
             final Card card = c.card;
             swallow(heldConfirm);
             List<AppMenu.Item> items = new ArrayList<>();
-            items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.hide_from_home), () -> {
+            items.add(new AppMenu.Item(R.drawable.ic_hide, getString(R.string.watch_turn_off), () -> {
                 closeMenu(card);
                 Prefs.set(this, Prefs.WATCH, false);
                 watchOff();
