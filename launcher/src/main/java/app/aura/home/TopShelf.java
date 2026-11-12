@@ -252,18 +252,24 @@ final class TopShelf extends FrameLayout {
                     if (taste.skip(Continue.key(p.name))) continue;
                     Bitmap b = Picks.poster(p);
                     if (b == null) continue;
-                    Continue.Item it = new Continue.Item();
-                    it.title = p.name;
-                    it.sub = p.line;
-                    it.desc = p.about;
-                    it.kicker = "★  " + Words.get(R.string.tonights_pick_caps);
-                    it.art = b;
+                    Continue.Item it = posterCard(p, b, "★  " + Words.get(R.string.tonights_pick_caps));
                     it.intent = Picks.watch(c, p);
-                    it.posterCard = true;
                     out.add(it);
                 }
             }
         }
+    }
+
+    /** A film or series as a poster card: its poster, its name and line, under {@code kicker}. */
+    static Continue.Item posterCard(Picks.Pick p, Bitmap poster, String kicker) {
+        Continue.Item it = new Continue.Item();
+        it.title = p.name;
+        it.sub = p.line;
+        it.desc = p.about;
+        it.kicker = kicker;
+        it.art = poster;
+        it.posterCard = true;
+        return it;
     }
 
     /** Cards whose pictures were painted off the main thread, at the sizes they take in the row. */

@@ -46,6 +46,10 @@ import java.util.Set;
 final class Picks {
     static final class Pick {
         final String name, line, about, poster, query, why, yt, src;
+        /** Where its wide picture can be fetched, for the Watch screen's hero; "" when it has none (TVmaze). */
+        final String back;
+        /** TMDB's own number for it and whether it's a "movie" or a "tv" series, to ask where it streams; "" from TVmaze. */
+        final String tmdb, type;
 
         Pick(JSONObject o) {
             name = o.optString("name");
@@ -56,6 +60,9 @@ final class Picks {
             why = o.optString("why", "TOP RATED");
             yt = o.optString("yt");
             src = o.optString("src", "TVmaze");
+            back = o.optString("back");
+            tmdb = o.optString("tmdb");
+            type = o.optString("type");
         }
     }
 
@@ -124,7 +131,7 @@ final class Picks {
     // renamed (with the posters' "q" prefix) when the posters grew from 185 px, so the pool is made again
     private static final String DIR = "picks", INDEX = "picks2.json";
     private static final String MAZE = "https://api.tvmaze.com/shows?page=", TMDB = "https://api.themoviedb.org/3",
-            POSTER = "https://image.tmdb.org/t/p/w342";
+            POSTER = "https://image.tmdb.org/t/p/w342", BACKDROP = "https://image.tmdb.org/t/p/w1280";
     private static final String UA = "AuraTV/7 (open-source Android TV home screen)";
     private static final long WEEK = 7L * 24 * 3_600_000;
     private static final int POOL = 30;
@@ -140,6 +147,12 @@ final class Picks {
 
     static String key(Context c) {
         return prefs(c).getString(KEY, "");
+    }
+
+    /** The key a TMDB call is signed with: your own, else the one Aura was built with ("" when it has none). */
+    static String anyKey(Context c) {
+        String mine = key(c);
+        return mine.isEmpty() ? Keys.TMDB : mine;
     }
 
     /** Your own TMDB key is set: films, trending and your watchlist become possible. */
@@ -520,6 +533,74 @@ final class Picks {
         return out;
     }
 
+    /**
+     * One genre's shelf for the Watch tab ({@code genre}: one of {@link #GENRES}' ids, or "" for any):
+     * what people are watching that's also well liked, films and series taken turn about. One call
+     * for films and one for series, made only when someone opens that genre. With no TMDB key at
+     * all, series from TVmaze. Each with its "art" still to fetch. Off the main thread.
+     */
+    static List<JSONObject> browse(Context c, String genre) throws IOException, InterruptedException, JSONException {
+        Genre g = null;
+        for (Genre x : GENRES) if (x.id.equals(genre)) g = x;
+        if (anyKey(c).isEmpty()) return browseMaze(g);
+        List<List<JSONObject>> each = new ArrayList<>();
+        for (String type : new String[]{"movie", "tv"}) {
+            boolean film = type.equals("movie");
+            int id = g == null ? 0 : film ? g.film : g.show;
+            // Horror has no series genre on TMDB, Reality no film one: that kind is left out
+            if (g != null && id == 0) continue;
+            String q = TMDB + "/discover/" + type + "?include_adult=false&sort_by=popularity.desc&vote_average.gte=6.5"
+                    + "&vote_count.gte=" + (film ? 300 : 100) + "&language=" + language() + "&watch_region=" + region()
+                    + (id != 0 ? "&with_genres=" + id : "") + "&page=1";
+            List<JSONObject> got = new ArrayList<>();
+            add(c, got, json(get(q, c)), type, "", null, null);
+            each.add(got);
+        }
+        List<JSONObject> out = new ArrayList<>();
+        for (int i = 0; ; i++) {
+            boolean any = false;
+            for (List<JSONObject> l : each) {
+                if (i < l.size()) {
+                    out.add(l.get(i));
+                    any = true;
+                }
+            }
+            if (!any) return out;
+        }
+    }
+
+    /** The same from TVmaze, which has no way to ask for a genre: a few catalogue pages, the best rated that fit. */
+    private static List<JSONObject> browseMaze(Genre g) throws IOException, InterruptedException, JSONException {
+        Set<String> want = new HashSet<>();
+        if (g != null) want.add(g.id);
+        List<Integer> pages = new ArrayList<>();
+        for (int i = 0; i < 60; i++) pages.add(i);
+        Collections.shuffle(pages);
+        List<JSONObject> found = new ArrayList<>();
+        for (int i = 0; i < (g == null ? 2 : 5) && found.size() < 36; i++) {
+            if (i > 0) Thread.sleep(1500); // TVmaze asks for gentle request rates
+            JSONArray shows;
+            try {
+                shows = new JSONArray(new String(get(MAZE + pages.get(i), null), StandardCharsets.UTF_8));
+            } catch (IOException e) {
+                continue;
+            }
+            for (int k = 0; k < shows.length(); k++) {
+                JSONObject s = shows.getJSONObject(k);
+                JSONObject rating = s.optJSONObject("rating"), image = s.optJSONObject("image");
+                if (rating == null || image == null || rating.optDouble("average", 0) < 7.5) continue;
+                if (g != null && !mazeGenre(s, want)) continue;
+                JSONObject e = maze(s);
+                // a grid's poster, not the card's: the 210 px one is as wide as its tile
+                e.put("art", image.optString("medium", e.optString("art")));
+                found.add(e);
+            }
+        }
+        if (found.isEmpty()) throw new IOException("nothing from TVmaze");
+        Collections.sort(found, (a, b) -> b.optString("line").compareTo(a.optString("line")));
+        return found.size() > 36 ? new ArrayList<>(found.subList(0, 36)) : found;
+    }
+
     /** This week's most watched, in your genres and years (a rating would leave little that's new). */
     private static List<JSONObject> trending(Context c, String type) throws IOException, JSONException {
         boolean film = type.equals("movie");
@@ -587,6 +668,8 @@ final class Picks {
             e.put("line", line.toString());
             e.put("about", about(r.optString("overview", "")));
             e.put("art", POSTER + poster);
+            String wide = r.optString("backdrop_path", "");
+            if (!wide.isEmpty() && !wide.equals("null")) e.put("back", BACKDROP + wide);
             e.put("query", name + (y > 0 ? " " + y : "") + " trailer");
             e.put("why", why);
             e.put("src", "TMDB");
@@ -630,6 +713,37 @@ final class Picks {
     private static String genreName(Context c, int id, boolean film) {
         for (Genre x : GENRES) if ((film ? x.film : x.show) == id) return c.getString(x.name);
         return null;
+    }
+
+    /**
+     * The app on this TV that streams {@code p} where you live (TMDB's watch providers, which are
+     * JustWatch's), as its package name; "" when none of the apps here does or nobody can say (no
+     * key, a title from TVmaze), and null when the network didn't answer, which is worth asking
+     * again. One small call, made for the title the Watch screen rests on. Off the main thread.
+     */
+    static String where(Context c, Pick p) {
+        if (p.tmdb.isEmpty() || p.type.isEmpty() || anyKey(c).isEmpty()) return "";
+        try {
+            JSONObject all = json(get(TMDB + "/" + p.type + "/" + p.tmdb + "/watch/providers", c)).optJSONObject("results");
+            JSONObject here = all == null ? null : all.optJSONObject(region());
+            JSONArray flat = here == null ? null : here.optJSONArray("flatrate");
+            Set<String> ids = new HashSet<>();
+            for (int i = 0; flat != null && i < flat.length(); i++) ids.add(String.valueOf(flat.getJSONObject(i).optInt("provider_id")));
+            if (ids.isEmpty()) return "";
+            PackageManager pm = c.getPackageManager();
+            for (String[] app : PROVIDERS) {
+                if (Collections.disjoint(ids, Arrays.asList(app[1].split("\\|")))) continue;
+                try {
+                    pm.getApplicationInfo(app[0], 0);
+                    return app[0];
+                } catch (PackageManager.NameNotFoundException ignored) {
+                }
+            }
+        } catch (IOException e) {
+            return null;
+        } catch (JSONException ignored) {
+        }
+        return "";
     }
 
     /** The watch providers of the streaming apps installed here, joined with "|". */
@@ -738,9 +852,38 @@ final class Picks {
         return con;
     }
 
-    /** GET; with {@code c}, a TMDB call signed with your key. */
+    /** TMDB's other address for the same service: some networks (several in India) don't carry the first. */
+    private static final String TMDB_ALT = "https://api.tmdb.org/3";
+    /**
+     * The first address didn't answer and the other did: it's asked first from now on, and that's
+     * remembered on the TV, so each start of home doesn't wait fifteen seconds on the silent one again.
+     */
+    private static volatile boolean useAlt, altRead;
+    private static final String USE_ALT = "tmdb_alt";
+
+    /** GET; with {@code c}, a TMDB call signed with your key. A TMDB call that can't connect is made again at TMDB's other address. */
     private static byte[] get(String url, Context c) throws IOException {
-        HttpURLConnection con = open(url, c == null ? null : key(c));
+        if (!url.startsWith(TMDB)) return getOnce(url, c);
+        if (c != null && !altRead) {
+            altRead = true;
+            useAlt = Prefs.device(c).getBoolean(USE_ALT, false);
+        }
+        String alt = TMDB_ALT + url.substring(TMDB.length());
+        boolean wasAlt = useAlt;
+        try {
+            return getOnce(wasAlt ? alt : url, c);
+        } catch (IOException e) {
+            // an answer that says no (a wrong key, a title that's gone) is an answer: only silence is tried elsewhere
+            if (e.getMessage() != null && e.getMessage().startsWith("HTTP ")) throw e;
+            byte[] got = getOnce(wasAlt ? url : alt, c);
+            useAlt = !wasAlt;
+            if (c != null) Prefs.device(c).edit().putBoolean(USE_ALT, useAlt).apply();
+            return got;
+        }
+    }
+
+    private static byte[] getOnce(String url, Context c) throws IOException {
+        HttpURLConnection con = open(url, c == null ? null : anyKey(c));
         try {
             if (con.getResponseCode() != 200) throw new IOException("HTTP " + con.getResponseCode());
             try (InputStream in = con.getInputStream()) {
@@ -749,6 +892,11 @@ final class Picks {
         } finally {
             con.disconnect();
         }
+    }
+
+    /** A picture's bytes, for {@link Watch}'s posters. */
+    static byte[] fetch(String url) throws IOException {
+        return get(url, null);
     }
 
     private static byte[] post(String url, Context c, String body) throws IOException {

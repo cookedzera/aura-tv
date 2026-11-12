@@ -202,6 +202,9 @@ function send(file, el, i, n, title) {
   });
 }
 
+// An iPhone or iPad knows no file type for .apk and greys such a file out when types are listed: there, any file may be chosen
+if (/iP(hone|ad|od)/.test(navigator.userAgent) || (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1)) $('files').removeAttribute('accept');
+
 $('files').addEventListener('change', async e => {
   const files = [...e.target.files];
   e.target.value = '';

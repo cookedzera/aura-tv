@@ -597,6 +597,9 @@ final class SettingsPanel {
             // an app's own cards above it when it has focus (JioHotstar's rows, YouTube's videos); off for only apps
             toggle(tvos ? act.getString(R.string.app_cards) : act.getString(R.string.top_shelf), Prefs.TOP_SHELF, act.getString(R.string.on), act.getString(R.string.hidden_clean), "shelf");
             toggle(act.getString(R.string.tonights_pick), Prefs.PICKS, act.getString(R.string.shown), act.getString(R.string.hidden_clean), "picks");
+            // Watch: a tile among the apps that opens films and series to choose from. Off until asked
+            // for, and switched off nothing of it runs or is kept; not offered in a kids' profile
+            if (!Profiles.kids(act)) toggle(act.getString(R.string.watch), Prefs.WATCH, act.getString(R.string.watch_on_home), act.getString(R.string.off), "watch");
             toggle(act.getString(R.string.live_picture_on_input_tiles), Prefs.INPUT_PREVIEW, act.getString(R.string.on), act.getString(R.string.off), "inputs");
             section(act.getString(R.string.speed));
             // stillness for slow TVs; Auto decides from the TV's memory and chip
@@ -997,9 +1000,18 @@ final class SettingsPanel {
             if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
         } else if (page.equals("trouble")) {
             Ui.fit(title, act.getString(R.string.problem_reports), Ui.dp(300), 52, 30);
-            note.setText(act.getString(R.string.when_something_goes_wrong_aura));
+            boolean any = false;
+            for (Trouble.Item i : troubles) any |= i.problem;
+            note.setText((any ? "" : act.getString(R.string.nothing_has_gone_wrong) + "\n\n") + act.getString(R.string.when_something_goes_wrong_aura));
             if (keyCard != null) rows.addView(keyCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(200)));
-            if (Trouble.count(act) > 0) add(act.getString(R.string.clear_them), confirmClearTrouble ? act.getString(R.string.press_ok_again) : "", "trouble:clear", () -> {
+            // the problems themselves, the same one once: OK says the error; the whole of it is on the phone
+            int shown = 0;
+            for (Trouble.Item i : troubles) {
+                if (!i.problem || shown == 6) continue;
+                String said = i.first().length() > 110 ? i.first().substring(0, 109) + "…" : i.first();
+                add(Trouble.title(act, i), i.seen(), "trouble:" + shown++, () -> host.hud(R.drawable.ic_info, said.isEmpty() ? i.kind : said));
+            }
+            if (!troubles.isEmpty()) add(act.getString(R.string.clear_them), confirmClearTrouble ? act.getString(R.string.press_ok_again) : "", "trouble:clear", () -> {
                 if (!confirmClearTrouble) {
                     confirmClearTrouble = true;
                     build();
@@ -1008,6 +1020,7 @@ final class SettingsPanel {
                 }
                 confirmClearTrouble = false;
                 Trouble.clear(act);
+                troubles = new java.util.ArrayList<>();
                 host.hud(R.drawable.ic_check, act.getString(R.string.problem_reports_cleared));
                 build();
             });
@@ -1448,6 +1461,8 @@ final class SettingsPanel {
     }
 
     private boolean confirmClearTrouble;
+    /** What the Problem reports page lists: read once as it opens. */
+    private java.util.List<Trouble.Item> troubles = new java.util.ArrayList<>();
 
     /** What went wrong lately, read on the phone behind a QR code (see {@link Trouble}). */
     private void openTrouble() {
@@ -1456,6 +1471,7 @@ final class SettingsPanel {
         confirmClearTrouble = false;
         drop = new Drop(act, new Drop.Quiet());
         drop.only("/report", "/report.txt");
+        troubles = Trouble.items(act);
         String url = drop.start();
         keyCard = qrCard(url == null ? null : url + "/report", url != null ? act.getString(R.string.scan_with_your_phone) : act.getString(R.string.not_connected),
                 url != null ? act.getString(R.string.read_the_report) : act.getString(R.string.no_network), url != null ? act.getString(R.string.same_wi_fi_no_app) : act.getString(R.string.connect_the_tv_to_wi));
@@ -2917,6 +2933,12 @@ final class SettingsPanel {
             }
         }
 
+        /** The row over it is lit by {@code f}, 0 to 1: this piece of the card fades as the row turns white. */
+        void lit(float f) {
+            setAlpha(Math.round(255 * (1f - f)));
+            invalidateSelf();
+        }
+
         @Override
         public void setAlpha(int a) {
             fill.setAlpha(Math.round((FILL >>> 24) * a / 255f));
@@ -2973,7 +2995,11 @@ final class SettingsPanel {
         p.edgeLight = false;
         p.focusScale = 1.03f;
         p.setTag(tag);
-        p.setBackground(new Segment());
+        final Segment card = new Segment();
+        p.setBackground(card);
+        // lit, the row is a white pill a little larger than its place on the card: its piece of the
+        // card goes as it lights, or it grew with the row and its square corners stood out round the pill's
+        p.fillListener = card::lit;
         LinearLayout r = new LinearLayout(act);
         r.setGravity(Gravity.CENTER_VERTICAL);
         boolean picture = thumb != null || tag.startsWith("p:");
@@ -3031,7 +3057,10 @@ final class SettingsPanel {
             LinearLayout.LayoutParams swl = new LinearLayout.LayoutParams(Ui.dp(30), Ui.dp(18));
             swl.leftMargin = Ui.dp(10);
             r.addView(s, swl);
-            p.fillListener = s::lit;
+            p.fillListener = f -> {
+                card.lit(f);
+                s.lit(f);
+            };
         }
         p.addView(r, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         p.onClick = run;
@@ -3114,6 +3143,7 @@ final class SettingsPanel {
         HELP.put("widgets", R.string.help_widgets);
         HELP.put(Prefs.TOP_SHELF, R.string.help_top_shelf);
         HELP.put(Prefs.PICKS, R.string.help_picks_shown);
+        HELP.put(Prefs.WATCH, R.string.help_watch);
         HELP.put(Prefs.INPUT_PREVIEW, R.string.help_input_preview);
         HELP.put("light", R.string.help_light);
         HELP.put("homekeys", R.string.help_homekeys);

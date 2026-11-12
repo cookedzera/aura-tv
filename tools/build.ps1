@@ -36,6 +36,15 @@ Step "aapt2 link" {
         --java "$out\gen" --min-sdk-version 22 --target-sdk-version 28 `
         --version-code $VersionCode --version-name $VersionName @rename "$out\res.zip"
 }
+# The TMDB key the Watch tab uses when nobody typed their own: from the AURA_TMDB_KEY environment
+# variable, else the first line of tmdb.key beside this repo's README (ignored by git, never
+# committed). With neither the build is the same, and the Watch tab shows series from TVmaze only.
+$tmdb = if ($env:AURA_TMDB_KEY) { $env:AURA_TMDB_KEY } elseif (Test-Path (Join-Path $root "tmdb.key")) { Get-Content (Join-Path $root "tmdb.key") -TotalCount 1 } else { "" }
+$tmdb = "$tmdb".Trim()
+if ($tmdb -notmatch '^[A-Za-z0-9._-]*$') { throw "The TMDB key has characters a key never has: check AURA_TMDB_KEY or tmdb.key" }
+New-Item -ItemType Directory -Force "$out\gen\app\aura\home" | Out-Null
+[System.IO.File]::WriteAllText("$out\gen\app\aura\home\Keys.java",
+    "package app.aura.home;`n`n/** Made by tools/build.ps1 at build time; never committed. */`nfinal class Keys {`n    static final String TMDB = `"$tmdb`";`n`n    private Keys() { }`n}`n")
 $java = @(Get-ChildItem "$src\java", "$out\gen" -Recurse -Filter *.java | ForEach-Object { $_.FullName })
 $boot = "$jar;$bt\core-lambda-stubs.jar"
 Step "javac" { & javac -nowarn -Xlint:-options -encoding UTF-8 -source 8 -target 8 -bootclasspath $boot -classpath $jar -d "$out\classes" @java }

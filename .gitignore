@@ -5,6 +5,9 @@
 # Your TV's snapshot: lists your apps and settings; make your own with tools/backup.ps1
 /backup/
 
+# Your TMDB key for the Watch tab (tools/build.ps1 reads it; see the comment there)
+/tmdb.key
+
 # Build output
 /launcher/build/
 *.apk

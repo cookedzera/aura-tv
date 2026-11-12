@@ -48,7 +48,7 @@ final class Trouble {
     private static final long REPEAT_MS = 60 * 60_000L;
     private static final Map<String, Long> lastNoted = new HashMap<>();
     private static volatile Context app;
-    /** How many entries the file holds, once read: Settings asks on every redraw. */
+    /** How many problems the file holds, once read (what was only noted isn't counted): Settings asks on every redraw. */
     private static volatile int known = -1, pendingCount;
 
     private Trouble() { }
@@ -123,7 +123,7 @@ final class Trouble {
             java.util.concurrent.ExecutorService s;
             synchronized (QUEUE) {
                 pending.add(entry);
-                pendingCount = pending.size();
+                pendingCount = problems(pending);
                 if (saver == null) saver = Compat.background("trouble", android.os.Process.THREAD_PRIORITY_BACKGROUND);
                 s = saver;
             }
@@ -170,8 +170,8 @@ final class Trouble {
                 synchronized (QUEUE) {
                     // off the waiting list and onto the count in one step, so a reader between the
                     // two never sees the entry in neither (or both)
-                    if (!queued || pending.remove(entry)) known = entries.size();
-                    pendingCount = pending.size();
+                    if (!queued || pending.remove(entry)) known = problems(entries);
+                    pendingCount = problems(pending);
                 }
             } catch (Throwable ignored) {
                 // nothing more can be done about a problem with the problem log
@@ -231,13 +231,113 @@ final class Trouble {
         return out;
     }
 
-    /** How many entries are kept: Settings shows it. */
+    /**
+     * Whether an entry is a problem, or only something noted on the way: an install that went
+     * through, was asked about or was called off, home taking the remote back by itself, a phone
+     * page closed after wrong codes. Those stay in the report for whoever reads it, uncounted.
+     */
+    static boolean problem(String entry) {
+        int at = entry.indexOf("  ");
+        if (at < 0) return true;
+        String rest = entry.substring(at + 2);
+        if (rest.startsWith("FOCUS  ") || rest.startsWith("PHONE LINK  ")) return false;
+        if (!rest.startsWith("INSTALLER  ")) return true;
+        int nl = rest.indexOf('\n');
+        String said = nl < 0 ? "" : rest.substring(nl + 1);
+        return !(said.contains("(installed)") || said.contains("(asking to confirm)") || said.contains("(cancelled)"));
+    }
+
+    private static int problems(List<String> entries) {
+        int n = 0;
+        for (String e : entries) if (problem(e)) n++;
+        return n;
+    }
+
+    /** One thing that happened, however many times: a line on the TV's page, a card on the phone's. */
+    static final class Item {
+        /** CRASH, CAUGHT, FREEZE…; where it happened ("" when the kind says it all); when, last; what was said, last. */
+        final String kind, where;
+        String when, detail;
+        final boolean problem;
+        int times = 1;
+        /** Dated before an entry that came earlier: the TV hadn't set its clock yet (the first seconds after a boot). */
+        boolean clockUnset;
+
+        Item(String entry) {
+            int nl = entry.indexOf('\n');
+            String head = nl < 0 ? entry : entry.substring(0, nl);
+            detail = nl < 0 ? "" : entry.substring(nl + 1);
+            when = head.length() >= 19 ? head.substring(0, 19) : head;
+            int end = head.lastIndexOf("  (Aura ");
+            String what = head.length() > 21 ? head.substring(21, end > 21 ? end : head.length()) : "";
+            int two = what.indexOf("  ");
+            kind = two < 0 ? what : what.substring(0, two);
+            where = two < 0 ? "" : what.substring(two + 2);
+            problem = Trouble.problem(entry);
+        }
+
+        /** The first line of what was said: the error itself, without its trace. */
+        String first() {
+            int nl = detail.indexOf('\n');
+            return nl < 0 ? detail : detail.substring(0, nl);
+        }
+
+        /** The day and the minute, and how often when more than once. */
+        String seen() {
+            String day = when.length() >= 16 ? when.substring(5, 16) : when;
+            return (times > 1 ? times + "× · " : "") + day;
+        }
+    }
+
+    /**
+     * What happened, the same thing told once with how often: problems first, then what was only
+     * noted, each newest first. Reads the file: not for every redraw.
+     */
+    static List<Item> items(Context c) {
+        Map<String, Item> by = new java.util.LinkedHashMap<>();
+        String latest = "";
+        for (String e : entries(c)) {
+            Item i = new Item(e);
+            if (i.when.compareTo(latest) < 0) i.clockUnset = true;
+            else latest = i.when;
+            String key = i.kind + "|" + i.where + "|" + i.first();
+            Item was = by.remove(key);
+            if (was != null) i.times = was.times + 1;
+            by.put(key, i);
+        }
+        List<Item> out = new ArrayList<>();
+        for (Item i : by.values()) if (i.problem) out.add(0, i);
+        int problems = out.size();
+        for (Item i : by.values()) if (!i.problem) out.add(problems, i);
+        return out;
+    }
+
+    /** What a problem is, in the TV's language; for what was only noted, the note itself. */
+    static String title(Context c, Item i) {
+        if (!i.problem) return i.first().isEmpty() ? i.kind : i.first();
+        switch (i.kind) {
+            case "CRASH":
+            case "NATIVE CRASH": return c.getString(R.string.trouble_crashed);
+            case "CAUGHT": return c.getString(R.string.trouble_error, i.where.startsWith("in ") ? i.where.substring(3) : i.where);
+            case "FREEZE": return c.getString(R.string.trouble_froze);
+            case "NOT RESPONDING": return c.getString(R.string.trouble_not_answering);
+            case "OUT OF MEMORY": return c.getString(R.string.trouble_out_of_memory);
+            case "STOPPED BY ANDROID": return c.getString(R.string.trouble_stopped_by_android);
+            case "INSTALLER": return c.getString(R.string.trouble_app_didnt_install);
+            case "UPDATE": return c.getString(R.string.trouble_update_didnt_install);
+            case "CAST": return c.getString(R.string.trouble_cast);
+            case "AERIAL": return c.getString(R.string.trouble_aerial);
+            default: return i.kind;
+        }
+    }
+
+    /** How many problems are kept: Settings shows it. */
     static int count(Context c) {
         synchronized (QUEUE) {
             if (known >= 0) return Math.min(MAX_ENTRIES, known + pendingCount);
         }
         synchronized (DISK) {
-            if (known < 0) known = saved(c).size();
+            if (known < 0) known = problems(saved(c));
             synchronized (QUEUE) {
                 return Math.min(MAX_ENTRIES, known + pendingCount);
             }
@@ -257,15 +357,36 @@ final class Trouble {
         Prefs.device(c).edit().putInt("trouble_bg_kills", 0).apply();
     }
 
-    /** The whole report: what TV this is, then every entry, newest first. Off the main thread. */
+    /**
+     * The whole report: what TV this is, the problems (the same one once, with how often), then
+     * what was only noted. Newest first. Off the main thread.
+     */
     static String report(Context c) {
+        return report(c, items(c));
+    }
+
+    static String report(Context c, List<Item> items) {
         StringBuilder b = new StringBuilder();
         b.append("Aura problem report\n");
         b.append(about(c));
-        List<String> entries = entries(c);
-        b.append("\n").append(entries.isEmpty() ? "Nothing has gone wrong lately." : entries.size() + " entries, newest first:").append("\n");
-        for (int i = entries.size() - 1; i >= 0; i--) b.append("\n").append(entries.get(i)).append("\n");
+        int problems = 0;
+        for (Item i : items) if (i.problem) problems++;
+        b.append("\n").append(problems == 0 ? "Nothing has gone wrong lately." : problems + (problems == 1 ? " problem" : " problems") + ", newest first:").append("\n");
+        for (Item i : items) if (i.problem) told(b.append("\n"), i);
+        if (problems < items.size()) {
+            b.append("\nAlso noted (not problems):\n");
+            for (Item i : items) if (!i.problem) told(b.append("\n"), i);
+        }
         return b.toString();
+    }
+
+    private static void told(StringBuilder b, Item i) {
+        b.append(i.when).append("  ").append(i.kind);
+        if (!i.where.isEmpty()) b.append("  ").append(i.where);
+        if (i.times > 1) b.append("  (").append(i.times).append(" times, this the last)");
+        if (i.clockUnset) b.append("  (the TV's clock wasn't set yet)");
+        if (!i.detail.isEmpty()) b.append('\n').append(i.detail);
+        b.append('\n');
     }
 
     /** What TV this is and how Aura is set up on it: the questions every report starts with. */

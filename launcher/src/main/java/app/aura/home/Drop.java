@@ -28,6 +28,7 @@ import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -327,7 +328,7 @@ final class Drop {
                 final int count = n;
                 if (count >= 0) main.postDelayed(() -> listener.onRestored(count), 600);
             } else if (rest.equals("/report")) {
-                send(s, 200, "text/html; charset=utf-8", reportPage(Trouble.report(app)));
+                send(s, 200, "text/html; charset=utf-8", reportPage(app));
             } else if (rest.equals("/report.txt")) {
                 send(s, 200, "text/plain; charset=utf-8", Trouble.report(app).getBytes(StandardCharsets.UTF_8),
                         "Content-Disposition: attachment; filename=\"aura-report.txt\"\r\n");
@@ -411,15 +412,59 @@ final class Drop {
      * network, where browsers keep the clipboard API away, so it selects and copies the old way),
      * save, or take to a new GitHub issue.
      */
-    private static byte[] reportPage(String report) {
-        String text = report.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-        return page("Problem report", "What went wrong lately on this TV, and what TV it is. Copy it into a GitHub issue or a message to the developer.",
-                "<textarea id=\"r\" readonly style=\"width:100%;height:46vh;box-sizing:border-box;padding:14px;border-radius:18px;"
+    private static String esc(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
+    /** One problem as a card: what it was and when, and under it, opened with a tap, the error itself. */
+    private static void card(StringBuilder b, Context c, Trouble.Item i) {
+        b.append("<details class=\"t").append(i.problem ? "" : " n").append("\"><summary><b>").append(esc(Trouble.title(c, i))).append("</b><i>")
+                .append(esc(i.seen())).append(i.clockUnset ? " · clock not set yet" : "").append("</i></summary><pre>")
+                .append(esc(i.kind + (i.where.isEmpty() ? "" : "  " + i.where) + (i.detail.isEmpty() ? "" : "\n" + i.detail))).append("</pre></details>");
+    }
+
+    /**
+     * The report on the phone: how many problems and on what TV, each problem a card that opens,
+     * what was only noted folded away beneath, then the whole text to copy, save or put in an issue.
+     */
+    private static byte[] reportPage(Context c) {
+        List<Trouble.Item> items = Trouble.items(c);
+        int problems = 0;
+        for (Trouble.Item i : items) if (i.problem) problems++;
+        String tv = android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL;
+        StringBuilder b = new StringBuilder("<style>"
+                + ".sum{display:flex;gap:14px;align-items:center;padding:16px 18px;border-radius:22px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);margin-bottom:14px}"
+                + ".sum b{font-size:34px;line-height:1;letter-spacing:-.03em}.sum.ok b{color:#8fe3a6}.sum span{color:rgba(255,255,255,.7);font-size:14px}"
+                + ".t{border-radius:18px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);margin-top:8px;overflow:hidden}"
+                + ".t summary{list-style:none;padding:14px 16px;cursor:pointer;display:flex;flex-direction:column;gap:2px}.t summary::-webkit-details-marker{display:none}"
+                + ".t summary b{font-weight:650}.t summary i{font-style:normal;font-size:13px;color:rgba(255,255,255,.55)}.t.n summary b{font-weight:500;color:rgba(255,255,255,.8)}"
+                + ".t pre{margin:0;padding:12px 16px 16px;border-top:1px solid rgba(255,255,255,.1);font:12px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word;color:rgba(255,255,255,.8)}"
+                + "h2{font-size:13px;letter-spacing:.2em;text-transform:uppercase;color:rgba(255,255,255,.5);margin:26px 0 4px}"
+                + "</style>");
+        b.append("<div class=\"sum").append(problems == 0 ? " ok" : "").append("\"><b>").append(problems == 0 ? "✓" : String.valueOf(problems)).append("</b><span>")
+                .append(problems == 0 ? "Nothing has gone wrong lately" : problems == 1 ? "problem lately" : "problems lately")
+                .append("<br>Aura ").append(esc(Updater.installed(c))).append(" · ").append(esc(tv)).append("</span></div>");
+        String first = null;
+        for (Trouble.Item i : items) {
+            if (!i.problem) continue;
+            if (first == null) first = Trouble.title(c, i);
+            card(b, c, i);
+        }
+        if (problems < items.size()) {
+            b.append("<h2>Also noted, not problems</h2>");
+            for (Trouble.Item i : items) if (!i.problem) card(b, c, i);
+        }
+        String issue = "https://github.com/cookedzera/aura-tv/issues/new";
+        if (first != null) issue += "?title=" + android.net.Uri.encode(first + " (Aura " + Updater.installed(c) + ")");
+        String text = esc(Trouble.report(c, items));
+        b.append("<h2>The whole report</h2>");
+        return page("Problem report", "What went wrong lately on this TV, and what TV it is. Nothing is sent by itself: copy it into a GitHub issue or a message to the developer.",
+                b + "<textarea id=\"r\" readonly style=\"width:100%;height:30vh;box-sizing:border-box;padding:14px;border-radius:18px;"
                         + "border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff;font:12px/1.45 ui-monospace,Menlo,monospace\">"
                         + text + "</textarea>"
                         + "<button class=\"b\" id=\"c\" style=\"border:0\">Copy</button>"
                         + "<a class=\"b ghost\" href=\"report.txt\" download=\"aura-report.txt\">Save as a file</a>"
-                        + "<a class=\"b ghost\" href=\"https://github.com/cookedzera/aura-tv/issues/new\" target=\"_blank\" rel=\"noopener\">Open a GitHub issue</a>",
+                        + "<a class=\"b ghost\" href=\"" + issue + "\" target=\"_blank\" rel=\"noopener\">Open a GitHub issue</a>",
                 "c.onclick=()=>{r.focus();r.select();r.setSelectionRange(0,r.value.length);let ok=false;try{ok=document.execCommand('copy')}catch(e){}"
                         + "s.textContent=ok?'Copied. Paste it into the issue or message.':'Select the text and copy it.'}");
     }

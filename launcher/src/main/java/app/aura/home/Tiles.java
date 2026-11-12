@@ -689,6 +689,45 @@ final class Tiles {
         return (Math.abs(r(a) - r(b)) + Math.abs(g(a) - g(b)) + Math.abs(bl(a) - bl(b))) / 3;
     }
 
+    /** Watch's colour: the light its tile casts, and the one its Top Shelf's cards are tinted in. */
+    static final int WATCH = 0xFFFF7A45;
+
+    /**
+     * Watch's tile, Aura's own: an ember's light out of the dark at one corner, a play mark in a
+     * ring, and its name. Opaque, so it costs a frame no more than an app's banner does.
+     */
+    static Painter watch(String label) {
+        return (c, w, h) -> {
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+            p.setShader(new LinearGradient(0, 0, w, h, 0xFF2B1410, 0xFF0B0A0E, Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, w, h, p);
+            p.setShader(new android.graphics.RadialGradient(w * 0.92f, h * 0.05f, w * 0.85f,
+                    new int[]{Ui.withAlpha(WATCH, 0xC8), Ui.withAlpha(0xFFE0453A, 0x50), 0x00000000}, new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, w, h, p);
+            p.setShader(null);
+            // the play mark in its ring, top left where an input's glyph sits
+            float r = h * 0.155f, cx = w * 0.09f + r, cy = h * 0.22f + r;
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(Math.max(1.5f, h * 0.022f));
+            p.setColor(0xE6FFFFFF);
+            c.drawCircle(cx, cy, r, p);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(0xFFFFFFFF);
+            android.graphics.Path tri = new android.graphics.Path();
+            tri.moveTo(cx - r * 0.30f, cy - r * 0.46f);
+            tri.lineTo(cx + r * 0.50f, cy);
+            tri.lineTo(cx - r * 0.30f, cy + r * 0.46f);
+            tri.close();
+            c.drawPath(tri, p);
+            Paint t = new Paint(Paint.ANTI_ALIAS_FLAG);
+            t.setTypeface(Ui.heavy);
+            t.setTextSize(h * 0.2f);
+            t.setColor(0xFFFFFFFF);
+            t.setLetterSpacing(-0.02f);
+            c.drawText(label, w * 0.09f, h * 0.80f, t);
+        };
+    }
+
     /** A live HDMI source on glass: the glyph of what's plugged in, its name and a red LIVE tag. */
     static Painter input(Context ctx, String label, int glyph) {
         return (c, w, h) -> {

@@ -44,8 +44,20 @@ final class Prefs {
     static final String SRC_SPOTLIGHT = "src_spotlight", SRC_BING = "src_bing", SRC_WIKIMEDIA = "src_wikimedia",
             SRC_WALLHAVEN = "src_wallhaven", SRC_UNSPLASH = "src_unsplash", UNSPLASH_KEY = "unsplash_key";
 
+    /**
+     * Watch ({@link WatchScreen}): a tile on the home screen that opens films and series to choose
+     * from. Off until asked for: it uses the network, and switched off nothing of it is made, read
+     * or kept in memory.
+     */
+    static final String WATCH = "set_watch";
+
+    /** Watch is switched on, and this isn't a kids' profile (nothing vouches for what a shelf holds). */
+    static boolean watch(Context c) {
+        return on(c, WATCH) && !Profiles.kids(c);
+    }
+
     static boolean on(Context c, String key) {
-        if (SRC_WIKIMEDIA.equals(key) || SRC_WALLHAVEN.equals(key) || SRC_UNSPLASH.equals(key)) return of(c).getBoolean(key, false);
+        if (SRC_WIKIMEDIA.equals(key) || SRC_WALLHAVEN.equals(key) || SRC_UNSPLASH.equals(key) || WATCH.equals(key)) return of(c).getBoolean(key, false);
         // everything starts on, except always-visible app names, only your own photos and pure black;
         // flyovers download video, so they wait until asked for; and live pictures of inputs, which
         // some TVs draw over the whole screen (a soundbar on HDMI: black, with sound)

@@ -138,6 +138,30 @@ final class TabStrip extends LinearLayout {
         return tabs.get(k);
     }
 
+    /** The pill's tab was relabelled and hasn't been laid out since: the one listener waiting on that. */
+    private View relaidOn;
+    private OnLayoutChangeListener relaid;
+
+    /** Tab {@code k} reads {@code text} from now on; the pill follows the tabs to where they sit once that's laid out. */
+    void relabel(int k, CharSequence text) {
+        if (k < 0 || k >= tabs.size()) return;
+        tabs.get(k).setText(text);
+        if (on == null) return;
+        // a label as wide as the last moves nothing and no layout change comes: its listener is replaced, not added to
+        if (relaid != null) relaidOn.removeOnLayoutChangeListener(relaid);
+        relaidOn = on;
+        relaid = new OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) {
+                v.removeOnLayoutChangeListener(this);
+                relaid = null;
+                relaidOn = null;
+                glideTo(v, false);
+            }
+        };
+        on.addOnLayoutChangeListener(relaid);
+    }
+
     /** The tab in focus, or -1 when focus is elsewhere. */
     int focused() {
         for (int i = 0; i < tabs.size(); i++) if (tabs.get(i).isFocused()) return i;

@@ -57,7 +57,24 @@ public class LogicTest {
         // the same error from the same place within the hour: kept once
         for (int i = 0; i < 2; i++) Trouble.caught("test", new IllegalStateException("one"));
         assertEquals(1, Trouble.count(c));
+        // what was only noted isn't a problem: kept for the report, told once with how often, not counted
         Trouble.note("INSTALLER", "status 3 (cancelled)");
+        Trouble.note("INSTALLER", "status 0 (installed): INSTALL_SUCCEEDED for some.app");
+        for (int i = 0; i < 3; i++) Trouble.note("FOCUS", "home was on screen without the remote; it answered again once asked");
+        assertEquals(1, Trouble.count(c));
+        java.util.List<Trouble.Item> items = Trouble.items(c);
+        assertEquals(4, items.size());
+        assertTrue("the problem first", items.get(0).problem && items.get(0).kind.equals("CAUGHT") && items.get(0).where.equals("in test"));
+        assertEquals("An error: test", Trouble.title(c, items.get(0)));
+        assertTrue(items.get(0).first().contains("IllegalStateException: one"));
+        assertFalse(items.get(1).problem);
+        assertEquals("the newest note first, its three as one", 3, items.get(1).times);
+        assertTrue(items.get(1).seen().startsWith("3× · "));
+        String told = Trouble.report(c);
+        assertTrue(told, told.contains("1 problem, newest first:") && told.contains("Also noted (not problems):") && told.contains("(3 times, this the last)"));
+        assertTrue(told.indexOf("CAUGHT") < told.indexOf("Also noted"));
+        // an install that failed is one
+        Trouble.note("INSTALLER", "status 6 (no space)");
         assertEquals(2, Trouble.count(c));
         for (int i = 0; i < 40; i++) Trouble.note("N", "note " + i);
         assertEquals(30, Trouble.count(c));

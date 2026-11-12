@@ -640,6 +640,20 @@ final class Continue {
         return b;
     }
 
+    /** The kept pictures read from files under {@code dir} go: whoever showed them has gone. */
+    static void forget(java.io.File dir) {
+        String prefix = "file:" + dir.getPath();
+        synchronized (ART) {
+            java.util.Iterator<Map.Entry<String, Bitmap>> it = ART.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<String, Bitmap> e = it.next();
+                if (!e.getKey().startsWith(prefix)) continue;
+                artBytes -= e.getValue().getByteCount();
+                it.remove();
+            }
+        }
+    }
+
     /** Short on memory: the kept pictures go (cards on show keep their own). */
     static void trim() {
         synchronized (ART) {
