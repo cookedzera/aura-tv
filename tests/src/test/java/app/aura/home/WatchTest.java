@@ -30,7 +30,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -130,6 +132,39 @@ public class WatchTest {
         Assert.assertFalse("off the list again", Watch.toggle(c, mine.get(0)));
         Assert.assertEquals(0, Watch.mine(c).size());
         Assert.assertFalse("and its poster goes with it", copy.exists());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void aGenreFetchedMeanwhileIsntFetchedAgainAndASweepSparesPostersStillComing() throws Exception {
+        keep("any", 2);
+        // the screen asked while the fetch ahead was bringing the same genre in: it's fresh now, and no network is asked
+        Assert.assertTrue(Watch.fetch(c, Watch.ANY, false));
+
+        File dir = Watch.dir(c);
+        File orphan = new File(dir, "wgone.jpg"), coming = new File(dir, "wcoming.jpg"), comingWide = new File(dir, "hwcoming.jpg");
+        File oldPart = new File(dir, "wx.jpg.123.part"), newPart = new File(dir, "wy.jpg.456.part");
+        for (File f : new File[]{orphan, coming, comingWide, oldPart, newPart}) Files.write(f.toPath(), new byte[]{1});
+        Assert.assertTrue(oldPart.setLastModified(System.currentTimeMillis() - 11 * 60_000L));
+
+        Field d = Watch.class.getDeclaredField("DOWNLOADING");
+        d.setAccessible(true);
+        List<Set<String>> downloading = (List<Set<String>>) d.get(null);
+        Set<String> another = Collections.singleton("wcoming.jpg");
+        downloading.add(another);
+        try {
+            Method sweep = Watch.class.getDeclaredMethod("sweep", File.class);
+            sweep.setAccessible(true);
+            sweep.invoke(null, dir);
+        } finally {
+            downloading.remove(another);
+        }
+        Assert.assertFalse("a poster no shelf shows goes", orphan.exists());
+        Assert.assertTrue("one another genre's fetch is still bringing in stays", coming.exists());
+        Assert.assertTrue("and so does its wide picture", comingWide.exists());
+        Assert.assertEquals("the kept shelf's posters stay", 2, Watch.shelf(c, Watch.ANY).size());
+        Assert.assertFalse("a part left long ago goes", oldPart.exists());
+        Assert.assertTrue("one being written now stays", newPart.exists());
     }
 
     @Test

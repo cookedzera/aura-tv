@@ -577,7 +577,7 @@ final class WatchScreen extends FrameLayout {
             // posters of a genre already on the TV aren't read only after a slow network has answered
             fetcher.execute(() -> {
                 if (mine != asked) return;
-                if (Watch.fetch(act, id)) shelfRead(k, mine, Watch.shelf(act, id), false);
+                if (Watch.fetch(act, id, false)) shelfRead(k, mine, Watch.shelf(act, id), false);
                 else shelfRead(k, mine, onTv, onTv.isEmpty());
             });
         });
@@ -724,7 +724,7 @@ final class WatchScreen extends FrameLayout {
         for (final String id : ids) {
             if (id.equals(Watch.MINE)) continue;
             ahead.execute(() -> {
-                if (shown && Watch.stale(act, id)) Watch.fetch(act, id);
+                if (shown && Watch.stale(act, id)) Watch.fetch(act, id, true);
             });
         }
     }

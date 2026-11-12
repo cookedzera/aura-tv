@@ -15,8 +15,10 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -36,8 +38,13 @@ final class Watch {
     static final int MOST = 36;
     /** The files: a shelf written, the posters swept, a list read or changed. Never held across the network: the screen reads My list under it. */
     private static final Object LOCK = new Object();
-    /** One fetch at a time. */
-    private static final Object FETCHING = new Object();
+    /**
+     * One fetch of a genre at a time; genres apart from each other, so the genre chosen isn't kept
+     * waiting while another is fetched ahead of time.
+     */
+    private static final ConcurrentHashMap<String, Object> FETCHING = new ConcurrentHashMap<>();
+    /** The poster files of each fetch under way, which no sweep may take: they're on no shelf yet. Under {@link #LOCK}. */
+    private static final List<Set<String>> DOWNLOADING = new ArrayList<>();
 
     private Watch() { }
 
@@ -106,10 +113,14 @@ final class Watch {
 
     /**
      * Fetches {@code genre}'s shelf and its posters and keeps them. False when nothing could be
-     * fetched: what was kept before stays. Off the main thread.
+     * fetched: what was kept before stays. {@code ahead}: fetched before anyone chose it, its posters
+     * one at a time, so a genre chosen meanwhile has most of a slow network to itself. Off the main thread.
      */
-    static boolean fetch(Context c, String genre) {
-        synchronized (FETCHING) {
+    static boolean fetch(Context c, String genre, boolean ahead) {
+        Object mine = new Object(), held = FETCHING.putIfAbsent(genre, mine);
+        synchronized (held != null ? held : mine) {
+            // fetched by someone else while this waited (the screen and the fetch ahead both asked): nothing to do
+            if (!stale(c, genre)) return true;
             File dir = dir(c);
             if (!dir.isDirectory() && !dir.mkdirs()) return false;
             List<JSONObject> found;
@@ -122,41 +133,61 @@ final class Watch {
                 return false;
             }
             if (found.size() > MOST) found = found.subList(0, MOST);
-            // the posters a few at a time: thirty-six one after another kept the shelf waiting
-            java.util.concurrent.ExecutorService pool = Compat.pool("watch-posters", 4);
-            List<java.util.concurrent.Future<Boolean>> got = new ArrayList<>();
-            for (final JSONObject s : found) {
-                got.add(pool.submit(() -> {
-                    File img = new File(dir, "w" + s.optString("id") + ".jpg");
-                    if (!img.isFile()) {
-                        if (!keep(img, Picks.fetch(s.getString("art"))) && !img.isFile()) return false;
-                    }
-                    s.put("poster", img.getAbsolutePath());
-                    s.remove("art");
-                    return true;
-                }));
+            Set<String> names = new HashSet<>();
+            for (JSONObject s : found) names.add(posterName(s));
+            synchronized (LOCK) {
+                DOWNLOADING.add(names);
             }
-            pool.shutdown();
-            JSONArray out = new JSONArray();
-            for (int i = 0; i < found.size(); i++) {
-                try {
-                    if (got.get(i).get()) out.put(found.get(i));
-                } catch (java.util.concurrent.ExecutionException e) {
-                    // one poster didn't come: the rest of the shelf does
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return false;
+            try {
+                return keepShelf(c, genre, dir, found, ahead ? 1 : 4);
+            } finally {
+                synchronized (LOCK) {
+                    DOWNLOADING.remove(names);
                 }
             }
-            if (out.length() == 0) return false;
-            synchronized (LOCK) {
-                // switched off while this was on its way: nothing of it is kept
-                if (!Prefs.on(c, Prefs.WATCH)) return false;
-                if (!write(shelfFile(c, genre), out)) return false;
-                sweep(dir);
-            }
-            return true;
         }
+    }
+
+    private static String posterName(JSONObject s) {
+        return "w" + s.optString("id") + ".jpg";
+    }
+
+    /** {@code found}'s posters fetched, and the shelf of those that came kept: {@link #fetch}'s second half. */
+    private static boolean keepShelf(Context c, String genre, File dir, List<JSONObject> found, int atOnce) {
+        // the posters a few at a time: thirty-six one after another kept the shelf waiting
+        java.util.concurrent.ExecutorService pool = Compat.pool("watch-posters", atOnce);
+        List<java.util.concurrent.Future<Boolean>> got = new ArrayList<>();
+        for (final JSONObject s : found) {
+            got.add(pool.submit(() -> {
+                File img = new File(dir, posterName(s));
+                if (!img.isFile()) {
+                    if (!keep(img, Picks.fetch(s.getString("art"))) && !img.isFile()) return false;
+                }
+                s.put("poster", img.getAbsolutePath());
+                s.remove("art");
+                return true;
+            }));
+        }
+        pool.shutdown();
+        JSONArray out = new JSONArray();
+        for (int i = 0; i < found.size(); i++) {
+            try {
+                if (got.get(i).get()) out.put(found.get(i));
+            } catch (java.util.concurrent.ExecutionException e) {
+                // one poster didn't come: the rest of the shelf does
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        if (out.length() == 0) return false;
+        synchronized (LOCK) {
+            // switched off while this was on its way: nothing of it is kept
+            if (!Prefs.on(c, Prefs.WATCH)) return false;
+            if (!write(shelfFile(c, genre), out)) return false;
+            sweep(dir);
+        }
+        return true;
     }
 
     /** Posters no shelf shows any more go. */
@@ -173,14 +204,24 @@ final class Watch {
         }
         // a path in JSON has its slashes escaped: the file's name alone is looked for
         File[] posters = dir.listFiles((d, n) -> n.endsWith(".jpg"));
-        // (a title's wide picture is named after its poster, with an h before it)
-        if (posters != null) for (File p : posters) if (all.indexOf(p.getName().startsWith("h") ? p.getName().substring(1) : p.getName()) < 0) //noinspection ResultOfMethodCallIgnored
+        if (posters != null) for (File p : posters) {
+            // (a title's wide picture is named after its poster, with an h before it)
+            String name = p.getName().startsWith("h") ? p.getName().substring(1) : p.getName();
+            if (all.indexOf(name) >= 0 || downloading(name)) continue;
+            //noinspection ResultOfMethodCallIgnored
             p.delete();
+        }
         // parts left by a home that was stopped mid-write; one being written now is minutes younger
         long old = System.currentTimeMillis() - 10 * 60_000L;
         File[] parts = dir.listFiles((d, n) -> n.endsWith(".part"));
         if (parts != null) for (File p : parts) if (p.lastModified() < old) //noinspection ResultOfMethodCallIgnored
             p.delete();
+    }
+
+    /** A poster another genre's fetch is still bringing in. Under {@link #LOCK}. */
+    private static boolean downloading(String name) {
+        for (Set<String> names : DOWNLOADING) if (names.contains(name)) return true;
+        return false;
     }
 
     // ---- the wide picture behind the title in focus ---------------------------------------------
