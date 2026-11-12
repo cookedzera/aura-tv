@@ -1122,4 +1122,14 @@
     <string name="help_watch">Filme und Serien zur Auswahl, nach Genre, als Kachel zwischen deinen Apps. Nutzt das Netzwerk nur, solange es geöffnet ist. Ausgeschaltet verschwindet es vom Startbildschirm und braucht keinen Speicher.</string>
     <string name="watch_is_off">"Ansehen ist aus  ·  Einstellungen, Startbildschirm bringt es zurück"</string>
     <string name="watch_turn_off">Ansehen ausschalten</string>
+    <string name="whats_new">Das ist neu</string>
+    <string name="news_line">Fünf neue Dinge.</string>
+    <string name="news_open_watch">Ansehen öffnen</string>
+    <string name="news_once">Das siehst du nur einmal.</string>
+    <string name="news_watch_line">Etwas für heute Abend.</string>
+    <string name="news_all_apps_line">Jede App, nach Kategorie.</string>
+    <string name="news_cc_line">Neues Glas. Schneller.</string>
+    <string name="news_settings_line">Klarer, auf Karten.</string>
+    <string name="news_smoother">Flüssiger</string>
+    <string name="news_smoother_line">Leichter auf kleinen TVs.</string>
 </resources>

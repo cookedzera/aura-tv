@@ -115,6 +115,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private final List<Pad> tops = new ArrayList<>();
     private WeatherSheet weatherSheet;
     private WatchScreen watch;
+    private WhatsNew news;
     /** Who's watching: the remote's profile button, and Settings' Profile row. */
     private ProfilePicker who;
     private View beforeWho;
@@ -602,6 +603,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         handler.postDelayed(healKeys, 4000);
         // after the Home button service has let its key filter go (it waits for home to settle)
         checkFocusSoon(1500);
+        // what's new, once, to someone who has just updated: when home itself is up and at rest
+        handler.removeCallbacks(showNews);
+        if (news == null && WhatsNew.due(this)) handler.postDelayed(showNews, 1800);
         if (Prefs.on(this, Prefs.STACK_AUTO) && fyW.getVisibility() == View.VISIBLE) stack.start();
         askForListings();
         showUpdate();
@@ -653,6 +657,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         resumed = false;
         handler.removeCallbacks(focusCheck);
         handler.removeCallbacks(focusBack);
+        handler.removeCallbacks(showNews);
         focusBack.run();
         if (quietScreen) wakeQuietScreen();
         Trouble.watchMain(false);
@@ -840,6 +845,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (resumed) checkFocusSoon(600);
         if (quietScreen) {
             wakeQuietScreen();
+            return;
+        }
+        // see What's new again: am start -n app.aura.home/.HomeActivity --es aura_news show
+        if (intent.hasExtra("aura_news")) {
+            handler.postDelayed(this::openNews, 500);
             return;
         }
         // preview a sky moment: am start -n app.aura.home/.HomeActivity --es aura_moment golden
@@ -4677,7 +4687,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 || switcher != null && switcher.isOpen() || nowPlaying != null && nowPlaying.isOpen()
                 || menu != null && menu.isOpen() || ask != null && ask.isOpen() || findPanel != null && findPanel.isOpen()
                 || weatherSheet != null && weatherSheet.isOpen() || who != null && who.isOpen() || allApps != null && allApps.isOpen()
-                || watchOpen();
+                || watchOpen() || news != null;
     }
 
     private void setRacked(boolean on) {
@@ -4913,6 +4923,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             return super.dispatchKeyEvent(e);
         }
         // Watch: its genres and posters have the arrows and OK; Back closes an open title first, then (or Menu) goes home
+        // What's new: its two buttons have the arrows and OK; Back (or Menu) puts it away for good
+        if (news != null) {
+            if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS
+                    || code == KeyEvent.KEYCODE_INFO) {
+                closeNews();
+                return swallow(code);
+            }
+            return super.dispatchKeyEvent(e);
+        }
         if (watchOpen()) {
             if (code == KeyEvent.KEYCODE_BACK && watch.back()) return swallow(code);
             if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS
@@ -5873,7 +5892,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (!menu.isOpen()) return;
         menu.hide();
         // over All Apps, home stays out of reach and the focus stays in All Apps
-        boolean over = allApps.isOpen() || watchOpen();
+        boolean over = allApps.isOpen() || watchOpen() || news != null;
         home.setDescendantFocusability(over ? ViewGroup.FOCUS_BLOCK_DESCENDANTS : ViewGroup.FOCUS_AFTER_DESCENDANTS);
         if (back != null && back.isShown() && back.requestFocus()) return;
         if (!over) focusGrid(gridAt);
@@ -6010,6 +6029,73 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             else out.add(t);
         }
         return out;
+    }
+
+    /**
+     * What's new waits its turn: not over the boot screen, the welcome, a panel or the photograph on
+     * its own. It counts as seen the moment it's on screen, however it's then left.
+     */
+    private final Runnable showNews = new Runnable() {
+        @Override
+        public void run() {
+            if (!resumed || news != null) return;
+            if (splash != null || introPending || ccOpen || photo || overlayOpen()) {
+                handler.postDelayed(this, 2000);
+                return;
+            }
+            if (WhatsNew.due(HomeActivity.this)) openNews();
+        }
+    };
+
+    private void openNews() {
+        if (news != null || !resumed || welcome != null) return;
+        if (ccOpen) closeCc(false);
+        if (settings.isOpen()) closeSettings();
+        closeOverlays();
+        handler.removeCallbacks(rack);
+        handler.removeCallbacks(goPhoto);
+        stopPreview();
+        hideShelf();
+        news = new WhatsNew(this, new WhatsNew.Host() {
+            @Override
+            public Backdrop backdrop() {
+                return backdrop;
+            }
+
+            @Override
+            public void openWatch() {
+                closeNews();
+                HomeActivity.this.openWatch();
+            }
+
+            @Override
+            public void done() {
+                closeNews();
+            }
+        });
+        // over All Apps and Watch, under everything that opens over home (the switcher, Control Center, Settings)
+        root.addView(news, root.indexOfChild(watch != null ? watch : allApps) + 1, match());
+        home.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        stack.hold(true);
+        WhatsNew.seen(this);
+        news.open();
+        // its glass covers the screen: home under it is drawn for nothing once it's in (at once on LOW, which doesn't fade)
+        handler.postDelayed(() -> {
+            if (news != null) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
+        }, Perf.light(this) ? 32 : 300);
+    }
+
+    /** What's new put away: it leaves the window and is forgotten, and home has the remote again. */
+    private void closeNews() {
+        if (news == null) return;
+        final WhatsNew gone = news;
+        news = null;
+        gone.close(() -> root.removeView(gone));
+        for (View v : behindCc()) v.setVisibility(View.VISIBLE);
+        home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        stack.hold(false);
+        focusGrid(gridAt);
+        wake();
     }
 
     /** The Watch tile's tag among the home screen's tiles: not an app, as an input's ("input:…") isn't. */
@@ -6406,6 +6492,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (folderPanel.isOpen()) closeFolder();
         if (allApps.isOpen()) closeAllApps();
         closeWatch();
+        closeNews();
         if (nowPlaying.isOpen()) closeNowPlaying();
         if (weatherSheet.isOpen()) closeWeather();
         if (findPanel.isOpen()) closeFind();
@@ -6433,7 +6520,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     /** The home screen takes focus again, unless something still covers it. */
     private void unblockHome() {
-        if (!ccOpen && !settings.isOpen() && !switcher.isOpen()) home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        if (!ccOpen && !settings.isOpen() && !switcher.isOpen() && news == null) home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
     }
 
     private void afterAsk() {

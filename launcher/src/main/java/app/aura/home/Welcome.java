@@ -3,7 +3,6 @@ package app.aura.home;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.content.Context;
-import android.content.pm.PackageInfo;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
@@ -117,11 +116,7 @@ final class Welcome extends FrameLayout {
     /** Only on a fresh install, never after an update: the first install and the last one are the same moment. */
     static boolean due(Context c) {
         if (Prefs.device(c).getBoolean("welcomed", false)) return false;
-        try {
-            PackageInfo p = c.getPackageManager().getPackageInfo(c.getPackageName(), 0);
-            if (p.firstInstallTime == p.lastUpdateTime) return true;
-        } catch (Exception ignored) {
-        }
+        if (Updater.justInstalled(c)) return true;
         Prefs.device(c).edit().putBoolean("welcomed", true).apply();
         return false;
     }

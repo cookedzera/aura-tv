@@ -1122,4 +1122,14 @@
     <string name="help_watch">Películas y series para elegir, por género, como una casilla entre tus apps. Usa la red solo mientras está abierto. Apagado, desaparece de la pantalla de inicio y no ocupa memoria.</string>
     <string name="watch_is_off">"Ver está apagado  ·  Ajustes, Pantalla de inicio lo recupera"</string>
     <string name="watch_turn_off">Desactivar Ver</string>
+    <string name="whats_new">Novedades</string>
+    <string name="news_line">Cinco cosas nuevas.</string>
+    <string name="news_open_watch">Abrir Ver</string>
+    <string name="news_once">Lo verás solo una vez.</string>
+    <string name="news_watch_line">Algo para esta noche.</string>
+    <string name="news_all_apps_line">Cada app, por categoría.</string>
+    <string name="news_cc_line">Cristal nuevo. Más rápido.</string>
+    <string name="news_settings_line">Más claro, en tarjetas.</string>
+    <string name="news_smoother">Más fluido</string>
+    <string name="news_smoother_line">Más ligero en TV pequeñas.</string>
 </resources>

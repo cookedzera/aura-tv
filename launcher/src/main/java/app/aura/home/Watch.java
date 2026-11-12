@@ -208,6 +208,12 @@ final class Watch {
         }
     }
 
+    /** {@code p}'s wide picture when it's already on the TV, null when it was never fetched: nothing is asked of the network. */
+    static File heroKept(Context c, Picks.Pick p) {
+        File f = new File(dir(c), "h" + id(p));
+        return f.isFile() ? f : null;
+    }
+
     // ---- what the screen says of a title ---------------------------------------------------------
 
     /** A title's line ("Film · ★ 7.8 · Drama · Crime · 2019") taken apart: its score for the dial, its year, and the rest for the line over its name. */

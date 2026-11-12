@@ -128,6 +128,16 @@ final class Updater {
         return true;
     }
 
+    /** Installed and never updated: the first install and the last one are the same moment. False when Android can't say. */
+    static boolean justInstalled(Context c) {
+        try {
+            android.content.pm.PackageInfo p = c.getPackageManager().getPackageInfo(c.getPackageName(), 0);
+            return p.firstInstallTime == p.lastUpdateTime;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     static String installed(Context c) {
         try {
             return c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;

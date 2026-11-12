@@ -706,19 +706,8 @@ final class Tiles {
             c.drawRect(0, 0, w, h, p);
             p.setShader(null);
             // the play mark in its ring, top left where an input's glyph sits
-            float r = h * 0.155f, cx = w * 0.09f + r, cy = h * 0.22f + r;
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(Math.max(1.5f, h * 0.022f));
-            p.setColor(0xE6FFFFFF);
-            c.drawCircle(cx, cy, r, p);
-            p.setStyle(Paint.Style.FILL);
-            p.setColor(0xFFFFFFFF);
-            android.graphics.Path tri = new android.graphics.Path();
-            tri.moveTo(cx - r * 0.30f, cy - r * 0.46f);
-            tri.lineTo(cx + r * 0.50f, cy);
-            tri.lineTo(cx - r * 0.30f, cy + r * 0.46f);
-            tri.close();
-            c.drawPath(tri, p);
+            float r = h * 0.155f;
+            playMark(c, p, w * 0.09f + r, h * 0.22f + r, r, Math.max(1.5f, h * 0.022f));
             Paint t = new Paint(Paint.ANTI_ALIAS_FLAG);
             t.setTypeface(Ui.heavy);
             t.setTextSize(h * 0.2f);
@@ -726,6 +715,23 @@ final class Tiles {
             t.setLetterSpacing(-0.02f);
             c.drawText(label, w * 0.09f, h * 0.80f, t);
         };
+    }
+
+    /** Watch's mark: a white play triangle in a ring {@code r} across its radius, centred on ({@code cx}, {@code cy}). Leaves {@code p} filling. */
+    static void playMark(Canvas c, Paint p, float cx, float cy, float r, float stroke) {
+        p.setShader(null);
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(stroke);
+        p.setColor(0xE6FFFFFF);
+        c.drawCircle(cx, cy, r, p);
+        p.setStyle(Paint.Style.FILL);
+        p.setColor(0xFFFFFFFF);
+        android.graphics.Path tri = new android.graphics.Path();
+        tri.moveTo(cx - r * 0.30f, cy - r * 0.46f);
+        tri.lineTo(cx + r * 0.50f, cy);
+        tri.lineTo(cx - r * 0.30f, cy + r * 0.46f);
+        tri.close();
+        c.drawPath(tri, p);
     }
 
     /** A live HDMI source on glass: the glyph of what's plugged in, its name and a red LIVE tag. */

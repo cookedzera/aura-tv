@@ -1122,4 +1122,14 @@
     <string name="help_watch">Films and series to choose from, by genre, as a tile among your apps. It uses the network only while it’s open. Off, it’s gone from the home screen and takes no memory.</string>
     <string name="watch_is_off">"Watch is off  ·  Settings, Home screen brings it back"</string>
     <string name="watch_turn_off">Turn off Watch</string>
+    <string name="whats_new">What’s new</string>
+    <string name="news_line">Five new things.</string>
+    <string name="news_open_watch">Open Watch</string>
+    <string name="news_once">You’ll see this once.</string>
+    <string name="news_watch_line">Something for tonight.</string>
+    <string name="news_all_apps_line">Every app, by category.</string>
+    <string name="news_cc_line">New glass. Faster.</string>
+    <string name="news_settings_line">Clearer, on cards.</string>
+    <string name="news_smoother">Smoother</string>
+    <string name="news_smoother_line">Lighter on small TVs.</string>
 </resources>
