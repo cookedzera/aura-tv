@@ -129,12 +129,7 @@ final class Watch {
                 got.add(pool.submit(() -> {
                     File img = new File(dir, "w" + s.optString("id") + ".jpg");
                     if (!img.isFile()) {
-                        byte[] data = Picks.fetch(s.getString("art"));
-                        File part = new File(img.getPath() + ".part");
-                        try (FileOutputStream fo = new FileOutputStream(part)) {
-                            fo.write(data);
-                        }
-                        if (!part.renameTo(img)) return false;
+                        if (!keep(img, Picks.fetch(s.getString("art"))) && !img.isFile()) return false;
                     }
                     s.put("poster", img.getAbsolutePath());
                     s.remove("art");
@@ -181,6 +176,11 @@ final class Watch {
         // (a title's wide picture is named after its poster, with an h before it)
         if (posters != null) for (File p : posters) if (all.indexOf(p.getName().startsWith("h") ? p.getName().substring(1) : p.getName()) < 0) //noinspection ResultOfMethodCallIgnored
             p.delete();
+        // parts left by a home that was stopped mid-write; one being written now is minutes younger
+        long old = System.currentTimeMillis() - 10 * 60_000L;
+        File[] parts = dir.listFiles((d, n) -> n.endsWith(".part"));
+        if (parts != null) for (File p : parts) if (p.lastModified() < old) //noinspection ResultOfMethodCallIgnored
+            p.delete();
     }
 
     // ---- the wide picture behind the title in focus ---------------------------------------------
@@ -198,11 +198,8 @@ final class Watch {
             // a 720p screen (most low-end TVs draw at that) is given the 780-pixel picture: half the bytes to fetch and to read
             boolean small = c.getResources().getDisplayMetrics().widthPixels <= 1280;
             byte[] data = Picks.fetch(small ? p.back.replace("/w1280/", "/w780/") : p.back);
-            File part = new File(f.getPath() + ".part");
-            try (FileOutputStream fo = new FileOutputStream(part)) {
-                fo.write(data);
-            }
-            return part.renameTo(f) ? f : null;
+            // kept by another screen meanwhile counts too: a screen let go and a new one may fetch the same title at once
+            return keep(f, data) || f.isFile() ? f : null;
         } catch (IOException e) {
             return null;
         }
@@ -297,11 +294,12 @@ final class Watch {
         }
     }
 
-    private static final App NONE = new App("", "");
+    /** {@link #where}'s answer for a title no app here streams. */
+    static final App NONE = new App("", "");
     /** Where each title asked about streams, kept while home runs: a title is asked about once. */
     private static final Map<String, App> WHERE = new ConcurrentHashMap<>();
 
-    /** The app here that streams {@code p} ({@link Picks#where}), or null when none does. Off the main thread. */
+    /** The app here that streams {@code p} ({@link Picks#where}), {@link #NONE} when none does, or null when the network didn't answer. Off the main thread. */
     static App where(Context c, Picks.Pick p) {
         App a = WHERE.get(id(p));
         if (a == null) {
@@ -318,7 +316,7 @@ final class Watch {
             }
             WHERE.put(id(p), a);
         }
-        return a == NONE ? null : a;
+        return a;
     }
 
     // ---- my list -------------------------------------------------------------------------------
@@ -416,13 +414,31 @@ final class Watch {
     }
 
     private static boolean write(File f, JSONArray a) {
-        File part = new File(f.getPath() + ".part");
-        try (FileOutputStream fo = new FileOutputStream(part)) {
-            fo.write(a.toString().getBytes(StandardCharsets.UTF_8));
+        return keep(f, a.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * {@code data} becomes {@code f} whole or not at all: written to a part of its own first (two
+     * threads keeping the same file never write into one part), then put in its place. False when
+     * it couldn't be; no part is left behind.
+     */
+    private static boolean keep(File f, byte[] data) {
+        File part;
+        try {
+            part = File.createTempFile(f.getName() + ".", ".part", f.getParentFile());
         } catch (IOException e) {
             return false;
         }
-        return part.renameTo(f);
+        boolean written = false;
+        try (FileOutputStream fo = new FileOutputStream(part)) {
+            fo.write(data);
+            written = true;
+        } catch (IOException ignored) {
+        }
+        if (written && part.renameTo(f)) return true;
+        //noinspection ResultOfMethodCallIgnored
+        part.delete();
+        return false;
     }
 
     private static void copy(File from, File to) throws IOException {

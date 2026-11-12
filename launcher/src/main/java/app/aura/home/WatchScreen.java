@@ -107,6 +107,8 @@ final class WatchScreen extends FrameLayout {
     private final ExecutorService heroReader = Compat.background("watch-hero", android.os.Process.THREAD_PRIORITY_DEFAULT + 2);
     /** The other genres' shelves, fetched one after another once the first is on show: choosing one then waits for nothing. */
     private final ExecutorService ahead = Compat.background("watch-ahead", android.os.Process.THREAD_PRIORITY_BACKGROUND);
+    /** The chosen genre's shelf fetched from the network: a fetch that waits holds up no poster read from the TV. */
+    private final ExecutorService fetcher = Compat.background("watch-fetch", android.os.Process.THREAD_PRIORITY_DEFAULT + 4);
     /** Asks where the title in focus streams: a call that may wait on the network holds up no picture. */
     private final ExecutorService asker = Compat.background("watch-where", android.os.Process.THREAD_PRIORITY_BACKGROUND);
     private boolean fetchedAhead;
@@ -306,6 +308,7 @@ final class WatchScreen extends FrameLayout {
         reader.shutdown();
         heroReader.shutdown();
         ahead.shutdownNow();
+        fetcher.shutdownNow();
         asker.shutdownNow();
     }
 
@@ -560,34 +563,42 @@ final class WatchScreen extends FrameLayout {
         note.setText(id.equals(Watch.MINE) ? "" : act.getString(R.string.watch_finding));
         note.setVisibility(VISIBLE);
         reader.execute(() -> {
-            List<Picks.Pick> list;
-            boolean failed = false;
             if (id.equals(Watch.MINE)) {
-                list = Watch.mine(act);
-            } else {
-                list = Watch.shelf(act, id);
-                // kept and fresh: shown as it is; else fetched, and what was kept stands in if that fails
-                if (list.isEmpty() || Watch.stale(act, id)) {
-                    if (Watch.fetch(act, id)) list = Watch.shelf(act, id);
-                    else failed = list.isEmpty();
-                }
+                shelfRead(k, mine, Watch.mine(act), false);
+                return;
             }
-            final List<Picks.Pick> got = list;
-            final boolean none = failed;
-            post(() -> {
+            final List<Picks.Pick> onTv = Watch.shelf(act, id);
+            // kept on the TV and fresh: shown as it is
+            if (!onTv.isEmpty() && !Watch.stale(act, id)) {
+                shelfRead(k, mine, onTv, false);
+                return;
+            }
+            // else fetched, and what was kept stands in if that fails: on a thread of its own, so the
+            // posters of a genre already on the TV aren't read only after a slow network has answered
+            fetcher.execute(() -> {
                 if (mine != asked) return;
-                if (got.isEmpty()) {
-                    note.setText(act.getString(none ? R.string.watch_no_network : id.equals(Watch.MINE) ? R.string.watch_nothing_saved : R.string.watch_nothing_found));
-                    note.setVisibility(VISIBLE);
-                    wantRow = false;
-                    return;
-                }
-                Shelf s = build(got, strip.tab(k));
-                // LOW: one genre's posters at a time (a few MB each); HIGH keeps those visited while the screen lives
-                if (Ui.light) shelves.clear();
-                shelves.put(id, s);
-                install(s);
+                if (Watch.fetch(act, id)) shelfRead(k, mine, Watch.shelf(act, id), false);
+                else shelfRead(k, mine, onTv, onTv.isEmpty());
             });
+        });
+    }
+
+    /** Genre {@code k}'s shelf, read (and perhaps fetched), goes on show if it's still the one chosen. Off the main thread. */
+    private void shelfRead(int k, int mine, List<Picks.Pick> got, boolean none) {
+        final String id = ids.get(k);
+        post(() -> {
+            if (mine != asked) return;
+            if (got.isEmpty()) {
+                note.setText(act.getString(none ? R.string.watch_no_network : id.equals(Watch.MINE) ? R.string.watch_nothing_saved : R.string.watch_nothing_found));
+                note.setVisibility(VISIBLE);
+                wantRow = false;
+                return;
+            }
+            Shelf s = build(got, strip.tab(k));
+            // LOW: one genre's posters at a time (a few MB each); HIGH keeps those visited while the screen lives
+            if (Ui.light) shelves.clear();
+            shelves.put(id, s);
+            install(s);
         });
     }
 
@@ -768,7 +779,9 @@ final class WatchScreen extends FrameLayout {
                 return;
             }
             final Watch.App app = Watch.where(act, at.pick);
-            if (app != null) post(() -> {
+            // no answer from the network: asked again when the focus comes back
+            if (app == null) at.asked = false;
+            else if (app != Watch.NONE) post(() -> {
                 at.app = app;
                 if (at == inFocus) words.where(app);
                 if (page.open && page.from == at) page.label();
