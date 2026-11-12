@@ -490,13 +490,17 @@ final class Picks {
             final String t = p.optString("type"), id = p.optString("tmdb");
             trailers.add(pool.submit(() -> trailer(c, t, id)));
         }
-        pool.shutdown();
-        for (int i = 0; i < found.size(); i++) {
-            try {
-                String yt = trailers.get(i).get();
-                if (yt != null) found.get(i).put("yt", yt);
-            } catch (java.util.concurrent.ExecutionException ignored) {
+        try {
+            for (int i = 0; i < found.size(); i++) {
+                try {
+                    String yt = trailers.get(i).get();
+                    if (yt != null) found.get(i).put("yt", yt);
+                } catch (java.util.concurrent.ExecutionException ignored) {
+                }
             }
+        } finally {
+            // all asked by now; or nobody is waiting for the picks any more, and the trailers not asked for yet aren't
+            pool.shutdownNow();
         }
         return found;
     }
@@ -775,12 +779,8 @@ final class Picks {
     /** Whether TMDB accepts {@code key} (a v3 API key, or a v4 read access token). Off the main thread. */
     static boolean check(String key) {
         try {
-            HttpURLConnection con = open(TMDB + "/configuration", key);
-            try {
-                return con.getResponseCode() == 200;
-            } finally {
-                con.disconnect();
-            }
+            either(TMDB + "/configuration", null, u -> getOnce(u, key));
+            return true;
         } catch (IOException | IllegalArgumentException e) {
             // a pasted key with a stray line break is refused as a header, not a connection error
             return false;
@@ -863,7 +863,22 @@ final class Picks {
 
     /** GET; with {@code c}, a TMDB call signed with your key. A TMDB call that can't connect is made again at TMDB's other address. */
     private static byte[] get(String url, Context c) throws IOException {
-        if (!url.startsWith(TMDB)) return getOnce(url, c);
+        final String key = c == null ? null : anyKey(c);
+        return url.startsWith(TMDB) ? either(url, c, u -> getOnce(u, key)) : getOnce(url, key);
+    }
+
+    /** One call to TMDB, at the address given. */
+    private interface Call {
+        byte[] at(String url) throws IOException;
+    }
+
+    /**
+     * {@code call} at the TMDB address that answered last; when that one is silent, at the other,
+     * which is asked first from then on (and remembered on the TV, given {@code c}). Every call to
+     * TMDB goes through here: checking a key and signing in once asked the first address only, and
+     * on a network that doesn't carry it a good key was turned down and signing in never finished.
+     */
+    private static byte[] either(String url, Context c, Call call) throws IOException {
         if (c != null && !altRead) {
             altRead = true;
             useAlt = Prefs.device(c).getBoolean(USE_ALT, false);
@@ -871,19 +886,19 @@ final class Picks {
         String alt = TMDB_ALT + url.substring(TMDB.length());
         boolean wasAlt = useAlt;
         try {
-            return getOnce(wasAlt ? alt : url, c);
+            return call.at(wasAlt ? alt : url);
         } catch (IOException e) {
             // an answer that says no (a wrong key, a title that's gone) is an answer: only silence is tried elsewhere
             if (e.getMessage() != null && e.getMessage().startsWith("HTTP ")) throw e;
-            byte[] got = getOnce(wasAlt ? url : alt, c);
+            byte[] got = call.at(wasAlt ? url : alt);
             useAlt = !wasAlt;
             if (c != null) Prefs.device(c).edit().putBoolean(USE_ALT, useAlt).apply();
             return got;
         }
     }
 
-    private static byte[] getOnce(String url, Context c) throws IOException {
-        HttpURLConnection con = open(url, c == null ? null : anyKey(c));
+    private static byte[] getOnce(String url, String key) throws IOException {
+        HttpURLConnection con = open(url, key);
         try {
             if (con.getResponseCode() != 200) throw new IOException("HTTP " + con.getResponseCode());
             try (InputStream in = con.getInputStream()) {
@@ -899,8 +914,14 @@ final class Picks {
         return get(url, null);
     }
 
+    /** POST to TMDB, signed with your key. */
     private static byte[] post(String url, Context c, String body) throws IOException {
-        HttpURLConnection con = open(url, key(c));
+        final String key = key(c);
+        return either(url, c, u -> postOnce(u, key, body));
+    }
+
+    private static byte[] postOnce(String url, String key, String body) throws IOException {
+        HttpURLConnection con = open(url, key);
         try {
             con.setRequestMethod("POST");
             con.setDoOutput(true);

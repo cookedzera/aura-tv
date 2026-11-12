@@ -176,6 +176,8 @@ final class Watch {
             } catch (java.util.concurrent.ExecutionException e) {
                 // one poster didn't come: the rest of the shelf does
             } catch (InterruptedException e) {
+                // the screen was let go: the posters not fetched yet aren't, into a folder that may be gone
+                pool.shutdownNow();
                 Thread.currentThread().interrupt();
                 return false;
             }
@@ -192,12 +194,14 @@ final class Watch {
 
     /** Posters no shelf shows any more go. */
     private static void sweep(File dir) {
-        StringBuilder all = new StringBuilder();
-        File[] shelves = dir.listFiles((d, n) -> (n.startsWith("g-") || n.startsWith("t-")) && n.endsWith(".json"));
+        // a title saved to someone's list keeps its poster apart (KEPT), but its wide picture here: the
+        // lists are read for those, or a saved title off every shelf fetched its wide picture again each week
+        StringBuilder all = new StringBuilder(), lists = new StringBuilder();
+        File[] shelves = dir.listFiles((d, n) -> (n.startsWith("g-") || n.startsWith("t-") || n.startsWith("mine-")) && n.endsWith(".json"));
         if (shelves == null) return;
         for (File f : shelves) {
             try {
-                all.append(text(f));
+                (f.getName().startsWith("mine-") ? lists : all).append(text(f));
             } catch (IOException e) {
                 return; // a shelf that can't be read may still be showing its posters
             }
@@ -206,8 +210,9 @@ final class Watch {
         File[] posters = dir.listFiles((d, n) -> n.endsWith(".jpg"));
         if (posters != null) for (File p : posters) {
             // (a title's wide picture is named after its poster, with an h before it)
-            String name = p.getName().startsWith("h") ? p.getName().substring(1) : p.getName();
-            if (all.indexOf(name) >= 0 || downloading(name)) continue;
+            boolean wide = p.getName().startsWith("h");
+            String name = wide ? p.getName().substring(1) : p.getName();
+            if (all.indexOf(name) >= 0 || wide && lists.indexOf(name) >= 0 || downloading(name)) continue;
             //noinspection ResultOfMethodCallIgnored
             p.delete();
         }
