@@ -47,6 +47,8 @@ public class Cast extends Activity implements Renderer.Player {
     private int loadGen;
     /** The load the video view was last given: its player's word on anything earlier is let go. */
     private int videoGen;
+    /** The video's way in when it's plain http from the home network ({@link LanRelay}); null otherwise. */
+    private LanRelay relay;
 
     private final Runnable tick = new Runnable() {
         @Override
@@ -143,6 +145,7 @@ public class Cast extends Activity implements Renderer.Player {
         mp = null;
         // what was playing stops now, not once the next is checked and ready to take its place
         video.stopPlayback();
+        closeRelay();
         String uri = Renderer.uri;
         photo = Renderer.mime.startsWith("image/");
         boolean audio = Renderer.mime.startsWith("audio/");
@@ -177,11 +180,16 @@ public class Cast extends Activity implements Renderer.Player {
             // the same rule as for photos: the stream must come from somewhere other than the TV itself
             new SafeThread(() -> {
                 final boolean ok = !pointsAtTv(uri);
+                final LanRelay r = ok ? LanRelay.of(uri) : null;
                 runOnUiThread(() -> {
-                    if (isDestroyed() || gen != loadGen) return;
+                    if (isDestroyed() || gen != loadGen) {
+                        if (r != null) r.close();
+                        return;
+                    }
                     if (ok) {
                         videoGen = gen;
-                        video.setVideoURI(Uri.parse(uri));
+                        relay = r;
+                        video.setVideoURI(Uri.parse(r != null ? r.url() : uri));
                     } else {
                         fail(getString(R.string.this_cant_be_played_here));
                     }
@@ -317,6 +325,7 @@ public class Cast extends Activity implements Renderer.Player {
     protected void onDestroy() {
         main.removeCallbacksAndMessages(null);
         video.stopPlayback();
+        closeRelay();
         if (Renderer.player == this) Renderer.player = null;
         if (!"STOPPED".equals(Renderer.state) && !"NO_MEDIA_PRESENT".equals(Renderer.state)) Renderer.setState("STOPPED");
         super.onDestroy();
@@ -335,6 +344,11 @@ public class Cast extends Activity implements Renderer.Player {
         progress.set(dur > 0 ? Math.min(1f, pos / (float) dur) : 0f);
     }
 
+    private void closeRelay() {
+        if (relay != null) relay.close();
+        relay = null;
+    }
+
     private void fail(String why) {
         kicker.setText(getString(R.string.couldnt_play));
         titleText.setText(why);
@@ -350,12 +364,14 @@ public class Cast extends Activity implements Renderer.Player {
     /** A photograph from the network, decoded no larger than the screen. Off the main thread. */
     private static Bitmap fetch(String url, int w, int h) {
         HttpURLConnection c = null;
+        LanRelay relay = null;
         try {
             // a picture from the network, never from the TV itself or a link-local address: a phone
             // could otherwise point the TV at services that only answer the TV
             if (pointsAtTv(url)) return null;
-            URL u = new URL(url);
-            c = (HttpURLConnection) u.openConnection();
+            // plain http from the home network comes through the TV's loopback, where Android allows it
+            relay = LanRelay.of(url);
+            c = (HttpURLConnection) new URL(relay != null ? relay.url() : url).openConnection();
             // and no redirect onto one
             c.setInstanceFollowRedirects(false);
             c.setConnectTimeout(8000);
@@ -382,6 +398,7 @@ public class Cast extends Activity implements Renderer.Player {
             return null;
         } finally {
             if (c != null) c.disconnect();
+            if (relay != null) relay.close();
         }
     }
 }

@@ -3,8 +3,13 @@
      (Music scenes) come from a server whose certificate is signed by Apple's own roots, which Android
      doesn't carry; those roots (res/raw/apple_root_ca*.cer, from apple.com/certificateauthority: the
      original, G2 and G3, so a rotation on Apple's side doesn't quietly end the videos) are trusted for
-     that server alone, so the videos still arrive over a checked, encrypted connection. -->
+     that server alone, so the videos still arrive over a checked, encrypted connection.
+     And plain http to the TV's own loopback alone: what a phone casts over DLNA from the home network
+     comes in through Aura's relay there (LanRelay), as those apps serve nothing but plain http. -->
 <network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
     <domain-config>
         <domain includeSubdomains="false">sylvan.apple.com</domain>
         <trust-anchors>
