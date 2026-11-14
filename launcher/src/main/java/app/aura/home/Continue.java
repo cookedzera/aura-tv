@@ -132,11 +132,12 @@ final class Continue {
         // the Watch Next list arrived with Android 8
         if (android.os.Build.VERSION.SDK_INT < 26 || !Compat.granted(c, "android.permission.READ_TV_LISTINGS")) return out;
         List<Row> rows = new ArrayList<>();
-        try (Cursor cur = c.getContentResolver().query(TvContract.WatchNextPrograms.CONTENT_URI, COLUMNS, null, null,
+        try (Cursor cur = shown(c, TvContract.WatchNextPrograms.CONTENT_URI, COLUMNS,
                 TvContract.WatchNextPrograms.COLUMN_LAST_ENGAGEMENT_TIME_UTC_MILLIS + " DESC")) {
             if (cur == null) return out;
             long now = System.currentTimeMillis();
             while (cur.moveToNext()) {
+                if (removed(cur, COLUMNS.length)) continue;
                 String intentUri = cur.getString(8);
                 if (intentUri == null) continue;
                 // a watchlist entry (saved for later, never started) isn't something to continue; nor
@@ -285,9 +286,10 @@ final class Continue {
         // take a package to read one app's rows only; YouTube's clients also show YouTube's rows
         Uri uri = ytMusic || ytClient ? TvContract.PreviewPrograms.CONTENT_URI
                 : TvContract.PreviewPrograms.CONTENT_URI.buildUpon().appendQueryParameter("package", pkg).build();
-        try (Cursor cur = c.getContentResolver().query(uri, cols, null, null, null)) {
+        try (Cursor cur = shown(c, uri, cols, null)) {
             if (cur == null) return out;
             while (cur.moveToNext()) {
+                if (removed(cur, cols.length)) continue;
                 String intentUri = cur.getString(4), title = cur.getString(0), rowPkg = cur.getString(5);
                 String art = cur.getString(3) != null ? cur.getString(3) : cur.getString(2);
                 if (intentUri == null || title == null || art == null || rowPkg == null) continue;
@@ -475,10 +477,11 @@ final class Continue {
         Map<String, Item> best = new HashMap<>();
         Map<String, String> pictures = new HashMap<>();
         // no selection (see previews); the rows come in each app's own order, its first pick first
-        try (Cursor cur = c.getContentResolver().query(TvContract.PreviewPrograms.CONTENT_URI, cols, null, null,
+        try (Cursor cur = shown(c, TvContract.PreviewPrograms.CONTENT_URI, cols,
                 TvContract.PreviewPrograms.COLUMN_WEIGHT + " DESC")) {
             if (cur == null) return out;
             while (cur.moveToNext()) {
+                if (removed(cur, cols.length)) continue;
                 String title = cur.getString(0), intentUri = cur.getString(6), pkg = cur.getString(7);
                 String picture = cur.getString(5) != null ? cur.getString(5) : cur.getString(4);
                 if (title == null || intentUri == null || pkg == null || picture == null || !apps.contains(pkg)
@@ -733,6 +736,26 @@ final class Continue {
         } catch (Exception | OutOfMemoryError e) {
             return null;
         }
+    }
+
+    /**
+     * {@code cols} of a listing and, last, whether each row is still shown: one you removed from the
+     * TV's own home screen (Watch Next, an app's row) stays in the listing with "browsable" at 0. A
+     * TV whose listings don't offer that column is read without it, rather than not at all.
+     */
+    private static Cursor shown(Context c, Uri uri, String[] cols, String sort) {
+        String[] with = java.util.Arrays.copyOf(cols, cols.length + 1);
+        with[cols.length] = TvContract.PreviewPrograms.COLUMN_BROWSABLE;
+        try {
+            return c.getContentResolver().query(uri, with, null, null, sort);
+        } catch (IllegalArgumentException | android.database.SQLException e) {
+            return c.getContentResolver().query(uri, cols, null, null, sort);
+        }
+    }
+
+    /** The row was removed from the TV's home screen (see {@link #shown}). */
+    private static boolean removed(Cursor cur, int at) {
+        return cur.getColumnCount() > at && !cur.isNull(at) && cur.getInt(at) == 0;
     }
 
     /** {@code uri} asked over https when it says http; anything else as it is. */

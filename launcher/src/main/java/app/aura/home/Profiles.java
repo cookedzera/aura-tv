@@ -59,7 +59,11 @@ final class Profiles {
 
     /** The settings file of the profile in use: the main one keeps Aura's original file. */
     static String file(Context c) {
-        String id = current(c);
+        return file(current(c));
+    }
+
+    /** The settings file of profile {@code id}. */
+    static String file(String id) {
         return MAIN.equals(id) ? "aura" : "aura_" + id;
     }
 

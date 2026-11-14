@@ -2143,9 +2143,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     /** Find and Control Center as round glass buttons, top right beside the clock, as on Apple TV. */
     private void buildTopCc() {
         // Settings has its own button: with the sidebar hidden, Control Center's Settings is Android's
-        topCc = topButton(R.drawable.ic_tune, 40, () -> openCc(false));
-        topSettings = topButton(R.drawable.ic_settings, 40 + 50, this::openSettings);
-        topFind = topButton(R.drawable.ic_search, 40 + 2 * 50, () -> openFind(""));
+        topCc = topButton(R.drawable.ic_tune, R.string.control_center_2, 40, () -> openCc(false));
+        topSettings = topButton(R.drawable.ic_settings, R.string.settings, 40 + 50, this::openSettings);
+        topFind = topButton(R.drawable.ic_search, R.string.find_an_app, 40 + 2 * 50, () -> openFind(""));
         tops.add(topFind);
         tops.add(topSettings);
         tops.add(topCc);
@@ -2196,8 +2196,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
     }
 
-    private Pad topButton(int icon, int right, Runnable run) {
+    /** A round button of the tvOS top bar: an icon alone, so its name is what TalkBack says. */
+    private Pad topButton(int icon, int name, int right, Runnable run) {
         Pad b = new Pad(this, backdrop, 20, 0.26f);
+        b.setContentDescription(getString(name));
         b.frost = 0.06f;
         b.focusScale = Ui.FOCUS_SCALE_CONTROL;
         ImageView iv = b.tint(ControlCenter.icon(this, icon), 1f);

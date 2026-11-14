@@ -332,9 +332,12 @@ final class Picks {
                     File img = new File(dir, "q" + s.getString("id") + ".jpg");
                     if (!img.isFile()) {
                         byte[] data = get(s.getString("art"), null);
-                        try (FileOutputStream fo = new FileOutputStream(img)) {
+                        // written whole, then named: a poster cut off by a power cut was never fetched again
+                        File part = new File(dir, img.getName() + ".part");
+                        try (FileOutputStream fo = new FileOutputStream(part)) {
                             fo.write(data);
                         }
+                        if (!part.renameTo(img)) throw new IOException("poster not kept");
                     }
                     s.put("poster", img.getAbsolutePath());
                     s.remove("art");
@@ -345,7 +348,7 @@ final class Picks {
             if (out.length() == 0 && !found.isEmpty()) return false;
             // posters of picks no longer in the pool go
             String keep = out.toString();
-            File[] old = dir.listFiles((d, n) -> n.endsWith(".jpg"));
+            File[] old = dir.listFiles((d, n) -> n.endsWith(".jpg") || n.endsWith(".part"));
             if (old != null) for (File f : old) if (!keep.contains(f.getName())) //noinspection ResultOfMethodCallIgnored
                 f.delete();
             File tmp = new File(dir, INDEX + ".tmp");

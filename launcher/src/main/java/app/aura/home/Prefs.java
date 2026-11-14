@@ -62,6 +62,14 @@ final class Prefs {
         return on(c, PICKS) && !Profiles.kids(c);
     }
 
+    /** Someone on this TV (not a kids' profile) has Tonight's pick on: only then is its pool kept fresh. */
+    static boolean picksAnywhere(Context c) {
+        for (Profiles.Profile p : Profiles.all(c)) {
+            if (!p.kids && c.getSharedPreferences(Profiles.file(p.id), Context.MODE_PRIVATE).getBoolean(PICKS, true)) return true;
+        }
+        return false;
+    }
+
     static boolean on(Context c, String key) {
         if (SRC_WIKIMEDIA.equals(key) || SRC_WALLHAVEN.equals(key) || SRC_UNSPLASH.equals(key)) return of(c).getBoolean(key, false);
         // everything starts on, except always-visible app names, only your own photos and pure black;

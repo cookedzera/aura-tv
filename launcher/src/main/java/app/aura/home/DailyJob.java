@@ -71,8 +71,9 @@ public class DailyJob extends JobService {
                 complete &= step("daily", () -> Daily.run(c));
                 // then a few photographs for the wall, from the sources switched on
                 complete &= step("photos", () -> Gallery.run(c));
+                // switched off for everyone, nothing is asked for it
                 complete &= step("picks", () -> {
-                    Picks.refresh(c, false);
+                    if (Prefs.picksAnywhere(c)) Picks.refresh(c, false);
                     return true;
                 });
                 complete &= step("new-today", () -> {
