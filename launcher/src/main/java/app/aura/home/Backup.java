@@ -34,9 +34,6 @@ final class Backup {
             "watched", "wx_json", "wx_temp", "wx_code", "wx_day", "wx_f", "tidied_76",
             "home_choice_ignored", "retired_home", "debloated", "orig_home"));
 
-    /** The parents' PIN: carried with the kids' profiles it guards, and never taken away by a backup made without one. */
-    private static final String PIN = "parent_pin";
-
     private Backup() { }
 
     /** Every settings file Aura keeps: the shared one (also the first profile's), the profile list, each other profile. */
@@ -105,7 +102,8 @@ final class Backup {
                 ed.clear();
             } else {
                 for (String existing : sp.getAll().keySet()) {
-                    if (!LOCAL.contains(existing) && !PIN.equals(existing)) ed.remove(existing);
+                    // the parents' PIN goes with the kids' profiles it guards, never taken away by a backup made without one
+                    if (!LOCAL.contains(existing) && !Profiles.PIN.equals(existing)) ed.remove(existing);
                 }
             }
             for (Iterator<String> ks = o.keys(); ks.hasNext(); ) {

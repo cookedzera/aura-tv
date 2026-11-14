@@ -598,8 +598,10 @@ final class SettingsPanel {
             toggle(tvos ? act.getString(R.string.app_cards) : act.getString(R.string.top_shelf), Prefs.TOP_SHELF, act.getString(R.string.on), act.getString(R.string.hidden_clean), "shelf");
             // Tonight's pick and Watch: films and series to choose from, not offered in a kids' profile.
             // Watch is a tile among the apps; switched off, nothing of it runs or is kept
-            if (!Profiles.kids(act)) toggle(act.getString(R.string.tonights_pick), Prefs.PICKS, act.getString(R.string.shown), act.getString(R.string.hidden_clean), "picks");
-            if (!Profiles.kids(act)) toggle(act.getString(R.string.watch), Prefs.WATCH, act.getString(R.string.beta), act.getString(R.string.off), "watch");
+            if (!Profiles.kids(act)) {
+                toggle(act.getString(R.string.tonights_pick), Prefs.PICKS, act.getString(R.string.shown), act.getString(R.string.hidden_clean), "picks");
+                toggle(act.getString(R.string.watch), Prefs.WATCH, act.getString(R.string.beta), act.getString(R.string.off), "watch");
+            }
             toggle(act.getString(R.string.live_picture_on_input_tiles), Prefs.INPUT_PREVIEW, act.getString(R.string.on), act.getString(R.string.off), "inputs");
             section(act.getString(R.string.speed));
             // stillness for slow TVs; Auto decides from the TV's memory and chip

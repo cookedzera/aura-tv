@@ -126,6 +126,14 @@ final class Continue {
     /** Whose list {@link #cached} is: the profile and, for a kids' one, what it hid when read. */
     private static String cachedFor;
 
+    /** Read afresh next time (the tests' listings change under it). */
+    static void clearCache() {
+        synchronized (READING) {
+            cached = null;
+            cachedFor = null;
+        }
+    }
+
     private static List<Item> read(Context c, int max) {
         List<Item> out = new ArrayList<>();
         List<String> pictures = new ArrayList<>();

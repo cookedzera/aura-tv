@@ -21,8 +21,7 @@ import java.util.Locale;
  * else, and ends with the cast.
  */
 final class LanRelay {
-    private final InetAddress to;
-    private final int port;
+    private final InetSocketAddress to;
     private final String host;
     private final ServerSocket server;
     private final String url;
@@ -46,8 +45,7 @@ final class LanRelay {
     }
 
     LanRelay(URL u, InetAddress at) throws IOException {
-        to = at;
-        port = u.getPort() > 0 ? u.getPort() : 80;
+        to = new InetSocketAddress(at, u.getPort() > 0 ? u.getPort() : 80);
         host = u.getPort() > 0 ? u.getHost() + ":" + u.getPort() : u.getHost();
         server = new ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"));
         url = "http://127.0.0.1:" + server.getLocalPort() + (u.getFile().isEmpty() ? "/" : u.getFile());
@@ -85,7 +83,7 @@ final class LanRelay {
         try (Socket player = in; Socket sender = new Socket()) {
             byte[] head = head(player.getInputStream());
             if (head == null) return;
-            sender.connect(new InetSocketAddress(to, port), 8000);
+            sender.connect(to, 8000);
             OutputStream o = sender.getOutputStream();
             o.write(rewrite(new String(head, StandardCharsets.ISO_8859_1)).getBytes(StandardCharsets.ISO_8859_1));
             o.flush();
@@ -103,23 +101,21 @@ final class LanRelay {
     /** The request's head, up to its blank line; null when it doesn't come (or is far too long to be one). */
     private static byte[] head(InputStream in) throws IOException {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
-        int matched = 0;
-        for (int c; (c = in.read()) >= 0; ) {
+        int last4 = 0;
+        for (int c; b.size() < 16 * 1024 && (c = in.read()) >= 0; ) {
             b.write(c);
-            matched = c == (matched % 2 == 0 ? '\r' : '\n') ? matched + 1 : c == '\r' ? 1 : 0;
-            if (matched == 4) return b.toByteArray();
-            if (b.size() > 16 * 1024) return null;
+            last4 = last4 << 8 | c;
+            if (last4 == 0x0D0A0D0A) return b.toByteArray();
         }
         return null;
     }
 
     private String rewrite(String head) {
-        StringBuilder out = new StringBuilder();
-        for (String line : head.split("\r\n")) {
-            String l = line.toLowerCase(Locale.ROOT);
-            if (l.startsWith("host:") || l.startsWith("connection:") || l.startsWith("keep-alive:")) continue;
-            out.append(line).append("\r\n");
-            if (out.length() == line.length() + 2) out.append("Host: ").append(host).append("\r\nConnection: close\r\n");
+        String[] lines = head.split("\r\n");
+        StringBuilder out = new StringBuilder(lines[0]).append("\r\nHost: ").append(host).append("\r\nConnection: close\r\n");
+        for (int i = 1; i < lines.length; i++) {
+            String l = lines[i].toLowerCase(Locale.ROOT);
+            if (!l.startsWith("host:") && !l.startsWith("connection:") && !l.startsWith("keep-alive:")) out.append(lines[i]).append("\r\n");
         }
         return out.append("\r\n").toString();
     }

@@ -154,16 +154,19 @@ final class Profiles {
 
     // ---- the parents' PIN, kept only as a hash ---------------------------------------------------
 
+    /** Where the PIN's hash is kept, in the shared settings (a backup carries it: {@link Backup}). */
+    static final String PIN = "parent_pin";
+
     static boolean hasPin(Context c) {
-        return !c.getSharedPreferences("aura", Context.MODE_PRIVATE).getString("parent_pin", "").isEmpty();
+        return !c.getSharedPreferences("aura", Context.MODE_PRIVATE).getString(PIN, "").isEmpty();
     }
 
     static void setPin(Context c, String pin) {
-        c.getSharedPreferences("aura", Context.MODE_PRIVATE).edit().putString("parent_pin", hash(pin)).apply();
+        c.getSharedPreferences("aura", Context.MODE_PRIVATE).edit().putString(PIN, hash(pin)).apply();
     }
 
     static boolean pinOk(Context c, String pin) {
-        return hash(pin).equals(c.getSharedPreferences("aura", Context.MODE_PRIVATE).getString("parent_pin", "-"));
+        return hash(pin).equals(c.getSharedPreferences("aura", Context.MODE_PRIVATE).getString(PIN, "-"));
     }
 
     private static String hash(String pin) {

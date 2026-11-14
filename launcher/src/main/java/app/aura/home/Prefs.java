@@ -65,17 +65,22 @@ final class Prefs {
     /** Someone on this TV (not a kids' profile) has Tonight's pick on: only then is its pool kept fresh. */
     static boolean picksAnywhere(Context c) {
         for (Profiles.Profile p : Profiles.all(c)) {
-            if (!p.kids && c.getSharedPreferences(Profiles.file(p.id), Context.MODE_PRIVATE).getBoolean(PICKS, true)) return true;
+            if (!p.kids && on(c.getSharedPreferences(Profiles.file(p.id), Context.MODE_PRIVATE), PICKS)) return true;
         }
         return false;
     }
 
     static boolean on(Context c, String key) {
-        if (SRC_WIKIMEDIA.equals(key) || SRC_WALLHAVEN.equals(key) || SRC_UNSPLASH.equals(key)) return of(c).getBoolean(key, false);
+        return on(of(c), key);
+    }
+
+    /** {@code key} in one profile's settings, {@code sp}, with the same defaults. */
+    static boolean on(SharedPreferences sp, String key) {
+        if (SRC_WIKIMEDIA.equals(key) || SRC_WALLHAVEN.equals(key) || SRC_UNSPLASH.equals(key)) return sp.getBoolean(key, false);
         // everything starts on, except always-visible app names, only your own photos and pure black;
         // flyovers download video, so they wait until asked for; and live pictures of inputs, which
         // some TVs draw over the whole screen (a soundbar on HDMI: black, with sound); and Watch, in beta
-        return of(c).getBoolean(key, !NAMES_ALWAYS.equals(key) && !MINE_ONLY.equals(key) && !BLACK.equals(key)
+        return sp.getBoolean(key, !NAMES_ALWAYS.equals(key) && !MINE_ONLY.equals(key) && !BLACK.equals(key)
                 && !FLYOVERS.equals(key) && !INPUT_PREVIEW.equals(key) && !SCENES.equals(key) && !BEAT.equals(key)
                 && !AERIALS_AUTO.equals(key) && !AERIALS_METERED.equals(key) && !PHOTO_SHARP.equals(key) && !WATCH.equals(key));
     }

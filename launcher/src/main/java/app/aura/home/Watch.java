@@ -468,7 +468,7 @@ final class Watch {
      * threads keeping the same file never write into one part), then put in its place. False when
      * it couldn't be; no part is left behind.
      */
-    private static boolean keep(File f, byte[] data) {
+    static boolean keep(File f, byte[] data) {
         File part;
         try {
             part = File.createTempFile(f.getName() + ".", ".part", f.getParentFile());

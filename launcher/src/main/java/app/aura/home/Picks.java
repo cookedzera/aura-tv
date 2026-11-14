@@ -331,13 +331,8 @@ final class Picks {
                 try {
                     File img = new File(dir, "q" + s.getString("id") + ".jpg");
                     if (!img.isFile()) {
-                        byte[] data = get(s.getString("art"), null);
                         // written whole, then named: a poster cut off by a power cut was never fetched again
-                        File part = new File(dir, img.getName() + ".part");
-                        try (FileOutputStream fo = new FileOutputStream(part)) {
-                            fo.write(data);
-                        }
-                        if (!part.renameTo(img)) throw new IOException("poster not kept");
+                        if (!Watch.keep(img, get(s.getString("art"), null))) throw new IOException("poster not kept");
                     }
                     s.put("poster", img.getAbsolutePath());
                     s.remove("art");

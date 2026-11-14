@@ -17,7 +17,6 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -35,18 +34,12 @@ public class RemovedRowsTest {
     private Context c;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         c = RuntimeEnvironment.getApplication();
         Profiles.forget();
         Profiles.use(c, Profiles.MAIN);
         shadowOf(RuntimeEnvironment.getApplication()).grantPermissions("android.permission.READ_TV_LISTINGS");
         Robolectric.buildContentProvider(Listings.class).create(TvContract.AUTHORITY);
-        for (String f : new String[]{"cached", "cachedFor"}) {
-            Field k = Continue.class.getDeclaredField(f);
-            k.setAccessible(true);
-            k.set(null, null);
-        }
-        TopShelf.clearCache();
     }
 
     private static Object[] row(String title, int browsable) {
@@ -55,12 +48,9 @@ public class RemovedRowsTest {
                 TvContract.WatchNextPrograms.WATCH_NEXT_TYPE_CONTINUE, System.currentTimeMillis() - 3_600_000L, browsable};
     }
 
-    private List<String> titles() throws Exception {
-        for (String f : new String[]{"cached", "cachedFor"}) {
-            Field k = Continue.class.getDeclaredField(f);
-            k.setAccessible(true);
-            k.set(null, null);
-        }
+    private List<String> titles() {
+        Continue.clearCache();
+        TopShelf.clearCache();
         List<String> out = new ArrayList<>();
         for (Continue.Item it : TopShelf.items(c, APP)) out.add(it.title);
         TopShelf.clearCache();
@@ -68,14 +58,14 @@ public class RemovedRowsTest {
     }
 
     @Test
-    public void aShowRemovedFromTheTvsHomeStaysAway() throws Exception {
+    public void aShowRemovedFromTheTvsHomeStaysAway() {
         Listings.rows = Arrays.asList(row("Kept", 1), row("Removed", 0));
         Listings.knowsBrowsable = true;
         Assert.assertEquals(Arrays.asList("Kept"), titles());
     }
 
     @Test
-    public void listingsWithoutTheColumnAreStillRead() throws Exception {
+    public void listingsWithoutTheColumnAreStillRead() {
         Listings.rows = Arrays.asList(row("Kept", 1), row("Removed", 0));
         Listings.knowsBrowsable = false;
         Assert.assertEquals(Arrays.asList("Kept", "Removed"), titles());

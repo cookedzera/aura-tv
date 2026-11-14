@@ -53,7 +53,7 @@ public class KidsGuardTest {
     @After
     public void tearDown() {
         if (ac != null) ac.pause().stop().destroy();
-        c.getSharedPreferences("aura", Context.MODE_PRIVATE).edit().remove("parent_pin").commit();
+        c.getSharedPreferences("aura", Context.MODE_PRIVATE).edit().remove(Profiles.PIN).commit();
         Profiles.forget();
         Profiles.use(c, Profiles.MAIN);
     }
@@ -137,7 +137,7 @@ public class KidsGuardTest {
         String backup = Backup.export(c);
 
         // onto another TV, with no PIN yet: the kids' profile arrives locked by the same PIN
-        c.getSharedPreferences("aura", Context.MODE_PRIVATE).edit().remove("parent_pin").commit();
+        c.getSharedPreferences("aura", Context.MODE_PRIVATE).edit().remove(Profiles.PIN).commit();
         Assert.assertFalse(Profiles.hasPin(c));
         Backup.restore(c, backup);
         Assert.assertTrue(Profiles.hasPin(c));
@@ -145,7 +145,7 @@ public class KidsGuardTest {
 
         // a backup made before there was a PIN leaves the one this TV has
         JSONObject old = new JSONObject(backup);
-        old.getJSONObject("files").getJSONObject("aura").remove("parent_pin");
+        old.getJSONObject("files").getJSONObject("aura").remove(Profiles.PIN);
         Profiles.setPin(c, "4321");
         Backup.restore(c, old.toString());
         Assert.assertTrue("the TV's PIN stays", Profiles.pinOk(c, "4321"));
@@ -181,24 +181,23 @@ public class KidsGuardTest {
         Assert.assertTrue(i.getComponent() == null || !YT.equals(i.getComponent().getPackageName()));
     }
 
-    @Test
-    public void searchEverywhereIsntOfferedInAKidsProfile() throws Exception {
-        kids();
+    /** Find opened with something typed that no app is called: is "Search everywhere" offered? */
+    private int everywhereRow() throws Exception {
         HomeActivity a = start();
         call(a, "openFind", new Class<?>[]{String.class}, "zzz");
         run(300);
-        Find find = field(a, "findPanel");
-        View row = field(find, "everywhereRow");
-        Assert.assertEquals("the TV's search reaches the hidden apps too", View.GONE, row.getVisibility());
+        View row = field(field(a, "findPanel"), "everywhereRow");
+        return row.getVisibility();
+    }
+
+    @Test
+    public void searchEverywhereIsntOfferedInAKidsProfile() throws Exception {
+        kids();
+        Assert.assertEquals("the TV's search reaches the hidden apps too", View.GONE, everywhereRow());
     }
 
     @Test
     public void searchEverywhereStaysForGrownUps() throws Exception {
-        HomeActivity a = start();
-        call(a, "openFind", new Class<?>[]{String.class}, "zzz");
-        run(300);
-        Find find = field(a, "findPanel");
-        View row = field(find, "everywhereRow");
-        Assert.assertEquals(View.VISIBLE, row.getVisibility());
+        Assert.assertEquals(View.VISIBLE, everywhereRow());
     }
 }
