@@ -1,5 +1,6 @@
 package app.aura.home;
 
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -41,14 +42,19 @@ final class TabStrip extends LinearLayout {
     private final int padX, padY;
     private final List<TextView> tabs = new ArrayList<>();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final GradientDrawable capsule = new GradientDrawable();
     private final RectF r = new RectF();
     private final Spring.Mover left, right;
+    private final ValueAnimator litAnim = ValueAnimator.ofFloat(0f, 1f);
     /** The left edge leads (heading left), on {@link Spring#pillLead}; the right one otherwise. */
     private boolean leftLeads;
     /** The tab the pill sits on: it grows with that tab. */
     private View on;
     private float top, bottom;
     private boolean lit;
+    private float litFrac, litFrom, litTo;
+    private float dockFrac = -1f;
     /** The tab chosen (whose content is on show), -1 before any. */
     private int current = -1;
     /** Off while the screen it's on goes away: no picks, and tabs losing focus snap back to size. */
@@ -68,15 +74,30 @@ final class TabStrip extends LinearLayout {
         setWillNotDraw(false);
         int in = Ui.dp(4);
         setPadding(in, in, in, in);
+        rim.setStyle(Paint.Style.STROKE);
+        rim.setStrokeWidth(Math.max(1f, Ui.dpf(0.75f)));
         paint.setColor(0x2EFFFFFF);
         // the capsule: a pane of light glass with a hairline round it, its own background
-        GradientDrawable capsule = new GradientDrawable();
-        capsule.setColor(0x1FFFFFFF);
-        capsule.setStroke(Math.max(1, Ui.dp(0.75f)), 0x33FFFFFF);
         capsule.setCornerRadius(Ui.dpf(999));
         setBackground(capsule);
+        setDocked(0f);
         left = new Spring.Mover(Spring.pillTrail(), 0.5f, 0f, v -> invalidate());
         right = new Spring.Mover(Spring.pillLead(), 0.5f, 0f, v -> invalidate());
+        litAnim.addUpdateListener(a -> {
+            litFrac = litFrom + (litTo - litFrom) * a.getAnimatedFraction();
+            paintColors();
+            invalidate();
+        });
+    }
+
+    /** Deepens the capsule glass as it docks over scrolling rows ({@code 0} at rest, {@code 1} docked). */
+    void setDocked(float f) {
+        float c = Ui.clamp(f, 0f, 1f);
+        if (Math.abs(c - dockFrac) < 0.004f) return;
+        dockFrac = c;
+        capsule.setColor(Ui.mix(0x1FFFFFFF, 0xCF0D1017, c));
+        capsule.setStroke(Math.max(1, Ui.dp(0.75f)), Ui.mix(0x36FFFFFF, 0x5EFFFFFF, c));
+        invalidate();
     }
 
     /** New tabs with these names, none chosen yet. */
@@ -193,23 +214,40 @@ final class TabStrip extends LinearLayout {
     void live(boolean on) {
         live = on;
         if (on) return;
+        if (litAnim.isStarted()) litAnim.end();
         removeCallbacks(pick);
         removeCallbacks(held);
         armed = false;
     }
 
-    /** The chosen tab dark on a white pill while the tabs have the focus, light on a faint one once it's gone. */
+    /** Smoothly transitions the chosen pill and tab text between bright focus and soft resting glass. */
     private void paint() {
         boolean onTabs = focused() >= 0;
         if (lit != onTabs) {
             lit = onTabs;
-            paint.setColor(onTabs ? 0xF7FFFFFF : 0x2EFFFFFF);
-            invalidate();
+            litAnim.cancel();
+            litFrom = litFrac;
+            litTo = onTabs ? 1f : 0f;
+            if (!live) {
+                litFrac = litTo;
+            } else {
+                litAnim.setDuration(onTabs ? Ui.CTRL_HILITE_IN : Ui.CTRL_HILITE_OUT);
+                litAnim.setInterpolator(onTabs ? Ui.EASE_DECEL : Ui.EASE_STANDARD);
+                litAnim.start();
+            }
         }
+        paintColors();
+        invalidate();
+    }
+
+    private void paintColors() {
+        paint.setColor(Ui.mix(0x2EFFFFFF, 0xF7FFFFFF, litFrac));
+        boolean onTabs = focused() >= 0;
+        int chosenColor = Ui.mix(0xFFFFFFFF, 0xFF1C1C1E, litFrac);
         for (int i = 0; i < tabs.size(); i++) {
             TextView t = tabs.get(i);
             boolean chosen = onTabs ? t.isFocused() : i == current;
-            t.setTextColor(chosen && onTabs ? 0xFF1C1C1E : chosen ? 0xFFFFFFFF : 0x99FFFFFF);
+            t.setTextColor(chosen ? chosenColor : 0xA6FFFFFF);
         }
     }
 
@@ -286,5 +324,11 @@ final class TabStrip extends LinearLayout {
         if (s != 1f) r.inset(-(rt - l) * (s - 1f) / 2f, -(bottom - top) * (s - 1f) / 2f);
         float rad = r.height() / 2f;
         c.drawRoundRect(r, rad, rad, paint);
+        if (litFrac > 0.02f) {
+            rim.setColor(Ui.alpha(0x52FFFFFF, litFrac));
+            float inset = rim.getStrokeWidth() / 2f;
+            r.inset(inset, inset);
+            c.drawRoundRect(r, rad, rad, rim);
+        }
     }
 }

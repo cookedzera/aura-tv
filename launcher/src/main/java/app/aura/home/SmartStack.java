@@ -13,6 +13,7 @@ import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.RectF;
 import android.graphics.Shader;
@@ -79,6 +80,8 @@ final class SmartStack extends FrameLayout {
     private final Page[] pages = new Page[2];
     private final Dots dots;
     private final List<Slide> slides = new ArrayList<>();
+    private final Path clipPath = new Path();
+    private final float cornerRadius;
     private int at, front;
     private boolean held, running;
     Listener listener;
@@ -93,7 +96,8 @@ final class SmartStack extends FrameLayout {
 
     SmartStack(Context c, float radiusDp) {
         super(c);
-        final float r = Ui.dpf(radiusDp);
+        cornerRadius = Ui.dpf(radiusDp);
+        final float r = cornerRadius;
         setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View v, Outline o) {
@@ -101,7 +105,11 @@ final class SmartStack extends FrameLayout {
             }
         });
         setClipToOutline(true);
-        setBackgroundColor(0xFF0B0D12);
+        // Rounded translucent smoked glass lets Widget's live wallpaper blur harmonise across all corners.
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(r);
+        bg.setColor(0x3810131A);
+        setBackground(bg);
         for (int i = 0; i < 2; i++) {
             pages[i] = new Page(c);
             addView(pages[i], new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -111,6 +119,25 @@ final class SmartStack extends FrameLayout {
         LayoutParams dl = new LayoutParams(Ui.dp(6), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END);
         dl.rightMargin = Ui.dp(12);
         addView(dots, dl);
+    }
+
+    @Override
+    protected void onSizeChanged(int w, int h, int ow, int oh) {
+        super.onSizeChanged(w, h, ow, oh);
+        clipPath.reset();
+        clipPath.addRoundRect(0, 0, w, h, cornerRadius, cornerRadius, Path.Direction.CW);
+    }
+
+    @Override
+    protected void dispatchDraw(Canvas c) {
+        if (!c.isHardwareAccelerated() && !clipPath.isEmpty()) {
+            int sc = c.save();
+            c.clipPath(clipPath);
+            super.dispatchDraw(c);
+            c.restoreToCount(sc);
+            return;
+        }
+        super.dispatchDraw(c);
     }
 
     /** Fades between pages without an offscreen layer, like the other glass. */
@@ -319,6 +346,7 @@ final class SmartStack extends FrameLayout {
             pill.setColor(0xF2FFFFFF);
             pill.setCornerRadius(Ui.dpf(8));
             badge.setBackground(pill);
+            badge.setVisibility(View.GONE);
             LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             bl.leftMargin = Ui.dp(8);
             head.addView(badge, bl);
@@ -446,6 +474,20 @@ final class SmartStack extends FrameLayout {
                         if (bound == s) drawArt(s);
                     });
                     c.restore();
+                } else if (s.mark == null) {
+                    // Ambient focal glow and subtle glass halo when a status/alert slide has no logo mark.
+                    Paint glow = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    glow.setShader(new android.graphics.RadialGradient(
+                            w * 0.82f, h * 0.34f, Math.max(1f, w * 0.56f),
+                            Ui.withAlpha(s.color, 0x6E), 0x00000000, Shader.TileMode.CLAMP));
+                    c.drawRect(0, 0, w, h, glow);
+                    Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    ring.setStyle(Paint.Style.STROKE);
+                    ring.setStrokeWidth(Math.max(1f, Ui.dpf(1f)));
+                    ring.setColor(0x16FFFFFF);
+                    c.drawCircle(w * 0.84f, h * 0.36f, Math.min(w, h) * 0.30f, ring);
+                    ring.setColor(0x0DFFFFFF);
+                    c.drawCircle(w * 0.84f, h * 0.36f, Math.min(w, h) * 0.48f, ring);
                 }
                 return b;
             } catch (OutOfMemoryError e) {
@@ -576,9 +618,9 @@ final class SmartStack extends FrameLayout {
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF r = new RectF();
         private int count;
-        private float pos;
+        private float pos, litFrac, litFrom, litTo;
         private boolean lit;
-        private ValueAnimator glide;
+        private ValueAnimator glide, litAnim;
 
         Dots(Context c) {
             super(c);
@@ -593,7 +635,19 @@ final class SmartStack extends FrameLayout {
         void setLit(boolean on) {
             if (lit == on) return;
             lit = on;
-            invalidate();
+            if (litAnim == null) {
+                litAnim = ValueAnimator.ofFloat(0f, 1f);
+                litAnim.addUpdateListener(a -> {
+                    litFrac = litFrom + (litTo - litFrom) * a.getAnimatedFraction();
+                    invalidate();
+                });
+            }
+            litAnim.cancel();
+            litFrom = litFrac;
+            litTo = on ? 1f : 0f;
+            litAnim.setDuration(on ? Ui.CTRL_HILITE_IN : Ui.CTRL_HILITE_OUT);
+            litAnim.setInterpolator(on ? Ui.EASE_DECEL : Ui.EASE_STANDARD);
+            litAnim.start();
         }
 
         void moveTo(int i, boolean animate) {
@@ -619,6 +673,7 @@ final class SmartStack extends FrameLayout {
         /** A glide under way ends at once with the pill on its dot: never left between two, nor running on unseen. */
         void settle() {
             if (glide != null && glide.isRunning()) glide.end();
+            if (litAnim != null && litAnim.isRunning()) litAnim.end();
         }
 
         @Override
@@ -633,11 +688,13 @@ final class SmartStack extends FrameLayout {
             float w = getWidth(), dot = Ui.dpf(4.5f), gap = Ui.dpf(6), pill = Ui.dpf(14);
             float total = (count - 1) * (dot + gap) + pill;
             float y = (getHeight() - total) / 2f, cx = w / 2f;
+            float baseA = 80f + 30f * litFrac;
+            float spanA = 150f - 5f * litFrac;
             for (int i = 0; i < count; i++) {
                 // how much of the pill sits on this dot right now, 0 to 1
                 float k = Math.max(0f, 1f - Math.abs(pos - i));
                 float h = dot + (pill - dot) * k;
-                p.setColor(Ui.withAlpha(0xFFFFFFFF, Math.round((lit ? 110 : 80) + (lit ? 145 : 150) * k)));
+                p.setColor(Ui.withAlpha(0xFFFFFFFF, Math.round(baseA + spanA * k)));
                 r.set(cx - dot / 2f, y, cx + dot / 2f, y + h);
                 c.drawRoundRect(r, dot / 2f, dot / 2f, p);
                 y += h + gap;

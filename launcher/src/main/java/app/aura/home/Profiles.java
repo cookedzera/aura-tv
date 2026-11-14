@@ -101,10 +101,14 @@ final class Profiles {
     }
 
     static String name(Context c) {
+        return active(c).name;
+    }
+
+    static Profile active(Context c) {
         List<Profile> list = cachedAll != null ? cachedAll : all(c);
         String cur = current(c);
-        for (Profile p : list) if (p.id.equals(cur)) return p.name;
-        return c.getString(R.string.me);
+        for (Profile p : list) if (p.id.equals(cur)) return p;
+        return new Profile(MAIN, c.getString(R.string.me), COLORS[0]);
     }
 
     private static void save(Context c, List<Profile> list) {

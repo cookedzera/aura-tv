@@ -37,6 +37,9 @@ class GlassFrame extends FrameLayout {
     /** HIGH: a soft light across the top of plain glass, as if lit from above. Never on LOW. */
     boolean sheen;
     float highlight;
+    /** Optional animated display width (< 0 uses the laid-out width) for layout-free width morphs. */
+    float displayWidth = -1f;
+    boolean clipToDisplayWidth;
 
     private final Paint blurPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -58,12 +61,25 @@ class GlassFrame extends FrameLayout {
         setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View v, Outline o) {
-                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), radius);
+                int w = displayWidth >= 0f ? Math.round(Math.min(v.getWidth(), displayWidth)) : v.getWidth();
+                o.setRoundRect(0, 0, Math.max(0, w), v.getHeight(), radius);
                 // LOW: no pane casts a shadow, whatever lifts it (soft edges are filled every frame they draw)
                 o.setAlpha(Ui.light ? 0f : 1f);
             }
         });
         setClipToOutline(true);
+    }
+
+    /** Updates the drawn/clipped width without triggering a layout pass on every animation frame. */
+    void setDisplayWidth(float w) {
+        if (Math.abs(displayWidth - w) < 0.25f) return;
+        displayWidth = w;
+        if (getClipToOutline() || !Ui.light) invalidateOutline();
+        invalidate();
+    }
+
+    private float dw() {
+        return displayWidth >= 0f ? Math.min(getWidth(), Math.max(0f, displayWidth)) : getWidth();
     }
 
     /**
@@ -108,6 +124,8 @@ class GlassFrame extends FrameLayout {
 
     @Override
     protected void onDraw(Canvas c) {
+        float w = dw();
+        box.set(0, 0, w, getHeight());
         int frostC = Ui.withAlpha(Ui.IVORY, Math.round(255 * frost));
         int hi = Ui.withAlpha(0xFFFFFFFF, Math.round(245 * highlight));
         if (backdrop == null) {
@@ -145,11 +163,19 @@ class GlassFrame extends FrameLayout {
 
     @Override
     protected void dispatchDraw(Canvas c) {
-        super.dispatchDraw(c);
+        float w = dw();
+        if (clipToDisplayWidth && displayWidth >= 0f) {
+            int sc = c.save();
+            c.clipRect(0f, -Ui.dpf(8), w, getHeight() + Ui.dpf(8));
+            super.dispatchDraw(c);
+            c.restoreToCount(sc);
+        } else {
+            super.dispatchDraw(c);
+        }
         if (edgeLight) {
             float i = edge.getStrokeWidth() / 2f;
             edge.setAlpha(Math.round(255 * edgeStrength * (1f - highlight * 0.7f)));
-            c.drawRoundRect(i, i, getWidth() - i, getHeight() - i, radius, radius, edge);
+            c.drawRoundRect(i, i, Math.max(i, w - i), getHeight() - i, radius, radius, edge);
         }
     }
 

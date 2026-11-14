@@ -46,11 +46,12 @@ final class SkyArc extends View {
 
     @Override
     protected void onSizeChanged(int w, int h, int ow, int oh) {
-        float pad = Ui.dpf(7), base = h - Ui.dpf(3), top = Ui.dpf(7);
+        float pad = Ui.dpf(7), base = Math.max(Ui.dpf(12), h - Ui.dpf(3)), top = Math.min(Ui.dpf(6), h * 0.16f);
         arc.reset();
         arc.arcTo(new RectF(pad, top, w - pad, base + (base - top)), 180, 180, true);
         lit.setShader(new LinearGradient(pad, 0, w - pad, 0, 0xFFFFA65C, 0xFFFFF0C8, Shader.TileMode.CLAMP));
-        float r = Ui.dpf(5.5f), cx = pad + Ui.dpf(4), cy = base - Ui.dpf(10);
+        float r = Math.min(Ui.dpf(5.5f), Math.max(Ui.dpf(3.5f), (base - top) * 0.22f));
+        float cx = pad + r * 0.75f, cy = Math.max(top + r + Ui.dpf(1), base - r * 1.8f);
         Path a = new Path(), b = new Path();
         a.addCircle(cx, cy, r, Path.Direction.CW);
         b.addCircle(cx + r * 0.55f, cy - r * 0.35f, r * 0.9f, Path.Direction.CW);
