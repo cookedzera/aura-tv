@@ -5553,7 +5553,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     if (go != null) launch(go, shelf.cards.isEmpty() ? cells.get(gridAt).card : shelf.cards.get(shelfAt), it.title);
                 }, ofWatch ? null : this::openShelfMenu);
                 for (Widget w : widgets) {
-                    android.view.ViewPropertyAnimator wa = w.animate().alpha(0f).setDuration(260).setStartDelay(0).setInterpolator(Ui.EASE_STANDARD);
+                    android.view.ViewPropertyAnimator wa = w.animate().alpha(0f)
+                            .setDuration(Ui.light ? Ui.CLOSE : 260).setStartDelay(0).setInterpolator(Ui.EASE_STANDARD);
                     if (!Ui.light) wa.scaleX(0.95f).scaleY(0.95f);
                     wa.start();
                 }
@@ -5591,7 +5592,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         shelf.hide();
         if (dashboard) {
             for (Widget w : widgets) {
-                android.view.ViewPropertyAnimator wa = w.animate().alpha(1f).setDuration(400).setStartDelay(90).setInterpolator(Ui.EMPHASIZED);
+                android.view.ViewPropertyAnimator wa = w.animate().alpha(1f)
+                        .setDuration(Ui.light ? Ui.LOW_FOCUS_IN : 400)
+                        .setStartDelay(Ui.light ? 0 : 90)
+                        .setInterpolator(Ui.light ? Ui.EASE_DECEL : Ui.EMPHASIZED);
                 if (!Ui.light) wa.scaleX(1f).scaleY(1f);
                 wa.start();
             }

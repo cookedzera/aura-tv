@@ -65,16 +65,16 @@ final class Widget extends GlassFrame {
     protected void onFocusChanged(boolean gained, int direction, Rect previous) {
         super.onFocusChanged(gained, direction, previous);
         if (!gained) removeCallbacks(hold);
+        boolean low = Ui.light;
         anim.cancel();
         focusFrom = focus;
         focusTo = gained ? 1f : 0f;
-        anim.setDuration(gained ? 300 : 200);
+        anim.setDuration(low ? (gained ? Ui.LOW_FOCUS_IN : Ui.APP_FOCUS_OUT) : (gained ? 300 : 200));
         anim.start();
         // LOW: no elevation (the baked shadow above is the only one) and no overshoot
-        boolean low = Ui.light;
         animate().scaleX(gained ? 1.035f : 1f).scaleY(gained ? 1.035f : 1f).translationZ(gained && !low ? Ui.dpf(14) : 0f)
                 .setInterpolator(!gained ? Ui.DECEL : low ? Ui.EASE_DECEL : Ui.SPRING)
-                .setDuration(!gained ? 240 : low ? Ui.LOW_FOCUS_IN : 460).setStartDelay(0)
+                .setDuration(!gained ? (low ? Ui.APP_FOCUS_OUT : 240) : low ? Ui.LOW_FOCUS_IN : 460).setStartDelay(0)
                 .setUpdateListener(null).start();
     }
 

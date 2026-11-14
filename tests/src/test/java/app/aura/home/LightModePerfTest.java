@@ -238,4 +238,141 @@ public class LightModePerfTest {
             org.robolectric.shadows.ShadowChoreographer.setPaused(false);
         }
     }
+
+    private static <T extends View> T findViewByType(View root, Class<T> cls) {
+        if (cls.isInstance(root)) return cls.cast(root);
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) root;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                T found = findViewByType(g.getChildAt(i), cls);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    @Test
+    public void widgetFocusTopShelfAndSmartStackUseFastPathsInLightMode() throws Exception {
+        install("demo.a1", "Alpha", ApplicationInfo.CATEGORY_VIDEO);
+        install("demo.a2", "Beta", ApplicationInfo.CATEGORY_AUDIO);
+        Profiles.forget();
+        Profiles.use(c, Profiles.MAIN);
+        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "aura").commit();
+        Prefs.device(c).edit()
+                .putBoolean("welcomed", true)
+                .putString("set_light", "on")
+                .commit();
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(java.time.Duration.ofMillis(16));
+        try {
+            Field w = HomeActivity.class.getDeclaredField("warm");
+            w.setAccessible(true);
+            w.setBoolean(null, true);
+
+            org.robolectric.android.controller.ActivityController<HomeActivity> ac = Robolectric.buildActivity(HomeActivity.class).setup();
+            controllers.add(ac);
+            HomeActivity home = ac.get();
+            for (int t = 0; t < 300; t += 16) org.robolectric.shadows.ShadowLooper.idleMainLooper(16, java.util.concurrent.TimeUnit.MILLISECONDS);
+
+            @SuppressWarnings("unchecked")
+            java.util.List<Widget> widgets = field(home, "widgets");
+            Assert.assertFalse(widgets.isEmpty());
+            Widget widget = widgets.get(0);
+            ValueAnimator wAnim = field(widget, "anim");
+
+            // Widget focus/unfocus in Light mode
+            Ui.light = true;
+            call(widget, "onFocusChanged", new Class<?>[]{boolean.class, int.class, android.graphics.Rect.class},
+                    true, View.FOCUS_RIGHT, null);
+            Assert.assertEquals(Ui.LOW_FOCUS_IN, wAnim.getDuration());
+            Assert.assertEquals(Ui.LOW_FOCUS_IN, widget.animate().getDuration());
+            call(widget, "onFocusChanged", new Class<?>[]{boolean.class, int.class, android.graphics.Rect.class},
+                    false, View.FOCUS_RIGHT, null);
+            Assert.assertEquals(Ui.APP_FOCUS_OUT, wAnim.getDuration());
+            Assert.assertEquals(Ui.APP_FOCUS_OUT, widget.animate().getDuration());
+
+            // TopShelf overlapping rendering + show/hide + HomeActivity widget return in Light mode
+            TopShelf shelf = field(home, "shelf");
+            View shelfRow = field(shelf, "row");
+            Assert.assertFalse("TopShelf skips offscreen alpha layer in Light mode", shelf.hasOverlappingRendering());
+            Assert.assertFalse("TopShelf row skips offscreen alpha layer in Light mode", shelfRow.hasOverlappingRendering());
+
+            java.lang.reflect.Constructor<TopShelf.Ready> rc = TopShelf.Ready.class.getDeclaredConstructor(
+                    java.util.List.class, android.graphics.Bitmap[].class, int[].class, int.class,
+                    android.graphics.drawable.Drawable.class, String.class);
+            rc.setAccessible(true);
+            TopShelf.Ready ready = rc.newInstance(
+                    java.util.Collections.emptyList(), new android.graphics.Bitmap[0], new int[0],
+                    0xFF223344, null, "sig");
+            shelf.show("demo.a1", ready, it -> {}, null);
+            Assert.assertEquals(Ui.LOW_FOCUS_IN, shelf.animate().getDuration());
+            Assert.assertEquals(Ui.EASE_DECEL, shelf.animate().getInterpolator());
+            call(home, "hideShelf", new Class<?>[0]);
+            Assert.assertEquals(Ui.CLOSE, shelf.animate().getDuration());
+            Assert.assertEquals(Ui.LOW_FOCUS_IN, widget.animate().getDuration());
+            Assert.assertEquals(0L, widget.animate().getStartDelay());
+            Assert.assertEquals(Ui.EASE_DECEL, widget.animate().getInterpolator());
+
+            // SmartStack flip and RGB_565 fallback art in Light mode
+            SmartStack stack = findViewByType(home.getWindow().getDecorView(), SmartStack.class);
+            Assert.assertNotNull(stack);
+            @SuppressWarnings("unchecked")
+            java.util.List<SmartStack.Slide> slides = field(stack, "slides");
+            while (slides.size() < 2) {
+                SmartStack.Slide s = new SmartStack.Slide();
+                s.title = "Slide " + slides.size();
+                s.color = 0xFF336699;
+                slides.add(s);
+            }
+            call(stack, "show", new Class<?>[]{int.class, int.class}, 1, 1);
+            Object[] pages = field(stack, "pages");
+            int front = ((Number) field(stack, "front")).intValue();
+            View inPage = (View) pages[front];
+            View outPage = (View) pages[1 - front];
+            View inArt = field(inPage, "art");
+            Assert.assertEquals(200L, inPage.animate().getDuration());
+            Assert.assertEquals(0L, inPage.animate().getStartDelay());
+            Assert.assertEquals(Ui.CLOSE, outPage.animate().getDuration());
+            Assert.assertEquals(0f, inArt.getTranslationY(), 1e-4f);
+            android.graphics.Bitmap lightMark = (android.graphics.Bitmap) call(inPage, "markArt",
+                    new Class<?>[]{SmartStack.Slide.class, int.class, int.class}, slides.get(0), 32, 32);
+            Assert.assertEquals(android.graphics.Bitmap.Config.RGB_565, lightMark.getConfig());
+
+            // HIGH mode: unchanged behavior
+            Ui.light = false;
+            call(widget, "onFocusChanged", new Class<?>[]{boolean.class, int.class, android.graphics.Rect.class},
+                    true, View.FOCUS_RIGHT, null);
+            Assert.assertEquals(300L, wAnim.getDuration());
+            Assert.assertEquals(460L, widget.animate().getDuration());
+            call(widget, "onFocusChanged", new Class<?>[]{boolean.class, int.class, android.graphics.Rect.class},
+                    false, View.FOCUS_RIGHT, null);
+            Assert.assertEquals(200L, wAnim.getDuration());
+            Assert.assertEquals(240L, widget.animate().getDuration());
+
+            Assert.assertTrue(shelf.hasOverlappingRendering());
+            shelf.show("demo.a1", ready, it -> {}, null);
+            Assert.assertEquals(420L, shelf.animate().getDuration());
+            Assert.assertEquals(Ui.EMPHASIZED, shelf.animate().getInterpolator());
+            call(home, "hideShelf", new Class<?>[0]);
+            Assert.assertEquals(240L, shelf.animate().getDuration());
+            Assert.assertEquals(400L, widget.animate().getDuration());
+            Assert.assertEquals(90L, widget.animate().getStartDelay());
+            Assert.assertEquals(Ui.EMPHASIZED, widget.animate().getInterpolator());
+
+            call(stack, "show", new Class<?>[]{int.class, int.class}, 0, 1);
+            front = ((Number) field(stack, "front")).intValue();
+            inPage = (View) pages[front];
+            outPage = (View) pages[1 - front];
+            inArt = field(inPage, "art");
+            Assert.assertEquals(640L, inPage.animate().getDuration());
+            Assert.assertEquals(60L, inPage.animate().getStartDelay());
+            Assert.assertEquals(520L, outPage.animate().getDuration());
+            Assert.assertEquals(760L, inArt.animate().getDuration());
+            android.graphics.Bitmap highMark = (android.graphics.Bitmap) call(inPage, "markArt",
+                    new Class<?>[]{SmartStack.Slide.class, int.class, int.class}, slides.get(0), 32, 32);
+            Assert.assertEquals(android.graphics.Bitmap.Config.ARGB_8888, highMark.getConfig());
+        } finally {
+            org.robolectric.shadows.ShadowChoreographer.setPaused(false);
+        }
+    }
 }

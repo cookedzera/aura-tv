@@ -48,9 +48,19 @@ final class TopShelf extends FrameLayout {
         super(c);
         setVisibility(GONE);
         setClipChildren(false);
-        row = new LinearLayout(c);
+        row = new LinearLayout(c) {
+            @Override
+            public boolean hasOverlappingRendering() {
+                return !Ui.light && super.hasOverlappingRendering();
+            }
+        };
         row.setClipChildren(false);
         addView(row, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    @Override
+    public boolean hasOverlappingRendering() {
+        return !Ui.light && super.hasOverlappingRendering();
     }
 
     String shownFor() {
@@ -385,7 +395,8 @@ final class TopShelf extends FrameLayout {
             setAlpha(0f);
             setTranslationY(Ui.dp(10));
         }
-        animate().alpha(1f).translationY(0f).setDuration(420).setStartDelay(0).setInterpolator(Ui.EMPHASIZED).withEndAction(null).start();
+        animate().alpha(1f).translationY(0f).setDuration(Ui.light ? Ui.LOW_FOCUS_IN : 420).setStartDelay(0)
+                .setInterpolator(Ui.light ? Ui.EASE_DECEL : Ui.EMPHASIZED).withEndAction(null).start();
     }
 
     /** Behind a video on LOW: the cards let go of their pictures, painted again behind the screen as home comes back. */
@@ -397,7 +408,7 @@ final class TopShelf extends FrameLayout {
         shown = null;
         if (getVisibility() != VISIBLE) return;
         animate().cancel();
-        animate().alpha(0f).translationY(Ui.dp(6)).setDuration(240).setStartDelay(0).setInterpolator(Ui.SOFT)
+        animate().alpha(0f).translationY(Ui.dp(6)).setDuration(Ui.light ? Ui.CLOSE : 240).setStartDelay(0).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     setVisibility(GONE);
                     row.removeAllViews();

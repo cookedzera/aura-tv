@@ -279,17 +279,28 @@ final class SmartStack extends FrameLayout {
             in.bringToFront();
             dots.bringToFront();
             float lift = dir == 2 ? 0f : Ui.dpf(26);
-            // the old card lifts away as the new one rises from just below. Only position and
-            // fade move: no scaling and no offscreen layers, which cost this TV's GPU a frame each
-            out.animate().translationY(-lift).alpha(0f).setStartDelay(0)
-                    .setDuration(520).setInterpolator(Ui.EMPHASIZED).withEndAction(out::settle).start();
-            in.setTranslationY(lift);
-            in.setAlpha(0f);
-            in.animate().translationY(0f).alpha(1f).setStartDelay(60)
-                    .setDuration(640).setInterpolator(Ui.EMPHASIZED).start();
-            // the picture travels further than the words: depth without any extra drawing later
-            in.art.setTranslationY(lift * 0.6f);
-            in.art.animate().translationY(0f).setStartDelay(60).setDuration(760).setInterpolator(Ui.EMPHASIZED).start();
+            if (Ui.light) {
+                out.animate().translationY(-lift).alpha(0f).setStartDelay(0)
+                        .setDuration(Ui.CLOSE).setInterpolator(Ui.EASE_STANDARD).withEndAction(out::settle).start();
+                in.setTranslationY(lift);
+                in.setAlpha(0f);
+                in.animate().translationY(0f).alpha(1f).setStartDelay(0)
+                        .setDuration(200).setInterpolator(Ui.EASE_DECEL).start();
+                in.art.animate().cancel();
+                in.art.setTranslationY(0f);
+            } else {
+                // the old card lifts away as the new one rises from just below. Only position and
+                // fade move: no scaling and no offscreen layers, which cost this TV's GPU a frame each
+                out.animate().translationY(-lift).alpha(0f).setStartDelay(0)
+                        .setDuration(520).setInterpolator(Ui.EMPHASIZED).withEndAction(out::settle).start();
+                in.setTranslationY(lift);
+                in.setAlpha(0f);
+                in.animate().translationY(0f).alpha(1f).setStartDelay(60)
+                        .setDuration(640).setInterpolator(Ui.EMPHASIZED).start();
+                // the picture travels further than the words: depth without any extra drawing later
+                in.art.setTranslationY(lift * 0.6f);
+                in.art.animate().translationY(0f).setStartDelay(60).setDuration(760).setInterpolator(Ui.EMPHASIZED).start();
+            }
             front = 1 - front;
         }
         if (listener != null) listener.onSlide(s);
@@ -455,7 +466,7 @@ final class SmartStack extends FrameLayout {
         private Bitmap markArt(Slide s, int w, int h) {
             Bitmap b = null;
             try {
-                b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                b = Bitmap.createBitmap(w, h, Ui.light ? Bitmap.Config.RGB_565 : Bitmap.Config.ARGB_8888);
                 Canvas c = new Canvas(b);
                 Paint p = new Paint();
                 p.setShader(new LinearGradient(0, 0, w, h, Ui.mix(s.color, 0xFF000000, 0.72f), Ui.mix(s.color, 0xFF000000, 0.35f),
