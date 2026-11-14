@@ -52,6 +52,7 @@ final class SettingsPanel {
     }
 
     final FrameLayout panel;
+    final GlassFrame veil;
     private final Activity act;
     /** The request code for the beat glow's sound permission, answered in HomeActivity. */
     static final int BEAT_ASK = 42;
@@ -108,7 +109,7 @@ final class SettingsPanel {
         act = a;
         host = h;
         panel = HomeActivity.flat(a);
-        GlassFrame veil = new GlassFrame(a, h.backdrop(), 0, 0.5f);
+        veil = new GlassFrame(a, h.backdrop(), 0, 0.5f);
         veil.edgeLight = false;
         panel.addView(veil, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -262,12 +263,20 @@ final class SettingsPanel {
         builtPage = "";
         scroll.scrollTo(0, 0);
         panel.animate().cancel();
+        veil.animate().cancel();
         build();
         // the list comes in 24 dp from the right as the title slides in; LOW does it all in 200 ms
         boolean low = Ui.light;
         panel.setVisibility(View.VISIBLE);
-        panel.setAlpha(0f);
-        panel.animate().alpha(1f).setStartDelay(0).setDuration(low ? Ui.LOW_SHEET_IN : 260).setInterpolator(Ui.SOFT).start();
+        if (low) {
+            // Light mode: frost arrives opaque on frame 0 as Home stops drawing behind it
+            veil.setAlpha(1f);
+            panel.setAlpha(1f);
+        } else {
+            veil.setAlpha(1f);
+            panel.setAlpha(0f);
+            panel.animate().alpha(1f).setStartDelay(0).setDuration(260).setInterpolator(Ui.SOFT).start();
+        }
         head.setAlpha(0f);
         head.setTranslationX(-Ui.dp(20));
         head.animate().alpha(1f).translationX(0f).setStartDelay(low ? 0 : 40).setDuration(low ? Ui.LOW_SHEET_IN : 460).setInterpolator(Ui.EMPHASIZED).start();
@@ -326,6 +335,10 @@ final class SettingsPanel {
             HomeKeys.stopTeaching();
         }
         hideKeyboard();
+        if (Ui.light) {
+            veil.animate().cancel();
+            veil.setAlpha(0f);
+        }
         panel.animate().alpha(0f).setStartDelay(0).setDuration(Ui.CLOSE).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     if (!open) panel.setVisibility(View.GONE);
@@ -2689,7 +2702,8 @@ final class SettingsPanel {
             float a = 1f;
             if (y > 0) a = Math.min(a, top / e);
             if (y < max) a = Math.min(a, (h - bottom) / e);
-            c.setAlpha(Math.max(0f, Math.min(1f, a)));
+            float next = Math.max(0f, Math.min(1f, a));
+            if (c.getAlpha() != next) c.setAlpha(next);
         }
     }
 

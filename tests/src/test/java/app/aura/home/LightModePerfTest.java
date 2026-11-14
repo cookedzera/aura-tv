@@ -182,4 +182,60 @@ public class LightModePerfTest {
         Assert.assertEquals("Settled scroll glass repaints once in Light mode", -Ui.dpf(40),
                 ((Number) field(home, "scrollBlurY")).floatValue(), 1e-4f);
     }
+
+    @Test
+    public void settingsSkipsVeilFadeAndHidesHomeImmediatelyInLightMode() throws Exception {
+        install("demo.a1", "Alpha", ApplicationInfo.CATEGORY_VIDEO);
+        Profiles.forget();
+        Profiles.use(c, Profiles.MAIN);
+        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "aura").commit();
+        Prefs.device(c).edit()
+                .putBoolean("welcomed", true)
+                .putString("set_light", "on")
+                .commit();
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(java.time.Duration.ofMillis(16));
+        try {
+            Field w = HomeActivity.class.getDeclaredField("warm");
+            w.setAccessible(true);
+            w.setBoolean(null, true);
+
+            org.robolectric.android.controller.ActivityController<HomeActivity> ac = Robolectric.buildActivity(HomeActivity.class).setup();
+            controllers.add(ac);
+            HomeActivity home = ac.get();
+            for (int t = 0; t < 300; t += 16) org.robolectric.shadows.ShadowLooper.idleMainLooper(16, java.util.concurrent.TimeUnit.MILLISECONDS);
+
+            SettingsPanel settings = field(home, "settings");
+            View homeView = field(home, "home");
+            Assert.assertEquals(View.VISIBLE, homeView.getVisibility());
+
+            // Light mode: Settings frost arrives whole and home hides immediately on open()
+            Ui.light = true;
+            call(home, "openSettingsNow", new Class<?>[]{String.class}, new Object[]{null});
+            Assert.assertEquals("Light mode sets Settings panel opaque on frame 0", 1f, settings.panel.getAlpha(), 1e-4f);
+            Assert.assertEquals("Light mode keeps Settings veil opaque on frame 0", 1f, settings.veil.getAlpha(), 1e-4f);
+            Assert.assertEquals("Light mode hides home views behind Settings immediately", View.INVISIBLE, homeView.getVisibility());
+
+            // Light mode: close drops full-screen veil at once so only columns fade over home
+            call(home, "closeSettings", new Class<?>[0]);
+            Assert.assertEquals("Light mode drops Settings veil immediately on close", 0f, settings.veil.getAlpha(), 1e-4f);
+            Assert.assertEquals(View.VISIBLE, homeView.getVisibility());
+            for (int t = 0; t < 300; t += 16) org.robolectric.shadows.ShadowLooper.idleMainLooper(16, java.util.concurrent.TimeUnit.MILLISECONDS);
+
+            // HIGH mode: unchanged behavior (panel fades from 0, veil stays intact during panel close)
+            Prefs.device(c).edit().putString("set_light", "off").commit();
+            Ui.light = false;
+            call(home, "applyLight", new Class<?>[0]);
+            call(home, "openSettingsNow", new Class<?>[]{String.class}, new Object[]{null});
+            Assert.assertEquals("HIGH mode fades Settings panel from 0", 0f, settings.panel.getAlpha(), 1e-4f);
+            Assert.assertEquals("HIGH mode waits 300 ms before hiding home", View.VISIBLE, homeView.getVisibility());
+            for (int t = 0; t < 350; t += 16) org.robolectric.shadows.ShadowLooper.idleMainLooper(16, java.util.concurrent.TimeUnit.MILLISECONDS);
+            Assert.assertEquals(View.INVISIBLE, homeView.getVisibility());
+            call(home, "closeSettings", new Class<?>[0]);
+            Assert.assertEquals("HIGH mode leaves Settings veil alpha at 1 inside panel fade", 1f, settings.veil.getAlpha(), 1e-4f);
+            for (int t = 0; t < 300; t += 16) org.robolectric.shadows.ShadowLooper.idleMainLooper(16, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } finally {
+            org.robolectric.shadows.ShadowChoreographer.setPaused(false);
+        }
+    }
 }

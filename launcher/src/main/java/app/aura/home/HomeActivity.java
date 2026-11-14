@@ -218,9 +218,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      * (two full-screen passes), the light, the shading and the home screen. The frost samples the
      * photograph's blurred copy directly, so it keeps drifting.
      */
-    private final Runnable hideHome = () -> {
-        if (ccOpen) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
-    };
+    private final Runnable hideHome = this::hideHomeViews;
+
+    private void hideHomeViews() {
+        if (ccOpen || settings.isOpen()) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
+    }
 
     private View[] behindCc() {
         // Light mode keeps the bloom gone (applyLight): a panel closing mustn't bring a full-screen layer back
@@ -7257,14 +7259,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (page != null) settings.open(page);
         else settings.open();
         // as with Control Center, nothing under the frost keeps drawing
-        handler.postDelayed(() -> {
-            if (settings.isOpen()) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
-        }, 300);
+        if (Perf.light(this)) hideHome.run();
+        else handler.postDelayed(hideHome, 300);
     }
 
     private void closeSettings() {
         if (!settings.isOpen()) return;
         unlockedUntil = 0;
+        handler.removeCallbacks(hideHome);
         settings.close();
         for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
