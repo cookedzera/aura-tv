@@ -98,11 +98,15 @@ final class TopShelf extends FrameLayout {
     /** Off the main thread: up to three things to show for {@code pkg}, cached for two minutes, plus any live/recent song or video. */
     @SuppressWarnings("unchecked")
     static List<Continue.Item> items(Context c, String pkg) {
+        if (pkg == null || !HomeKeys.allowed(c, pkg)) return new ArrayList<>();
         long now = SystemClock.elapsedRealtime();
+        String who = Continue.profileKey(c);
         List<Continue.Item> base = null;
         synchronized (CACHE) {
             Object[] hit = CACHE.get(pkg);
-            if (hit != null && now - (Long) hit[0] < 120_000) base = (List<Continue.Item>) hit[1];
+            if (hit != null && hit.length > 2 && who.equals(hit[2]) && now - (Long) hit[0] < 120_000) {
+                base = (List<Continue.Item>) hit[1];
+            }
         }
         boolean ytClient = "io.gh.reisxd.tizentube.cobalt".equals(pkg)
                 || "com.liskovsoft.smarttubetv".equals(pkg)
@@ -113,7 +117,7 @@ final class TopShelf extends FrameLayout {
             Taste.View taste = Taste.view(c);
             // what you're partway through in this app comes first, then what the app itself features
             for (Continue.Item it : Continue.all(c, 8)) {
-                if (taste.declined(Continue.key(it.title))) continue;
+                if (taste.declined(Continue.key(it.title)) || containsTitle(base, it.title)) continue;
                 boolean match = pkg.equals(it.pkg) || (ytClient && "com.google.android.youtube.tv".equals(it.pkg));
                 // kept without a picture too: it's what you're partway through, and the Smart Stack
                 // shows it all the same (Stremio's posters can't always be read); it's painted in the app's colour
@@ -142,14 +146,15 @@ final class TopShelf extends FrameLayout {
                 java.util.Set<String> have = new java.util.HashSet<>();
                 for (Continue.Item it : base) have.add(Continue.key(it.title));
                 for (Continue.Item it : Watched.recent(c, have, MAX - base.size(), pkg)) {
-                    if (it.art == null || taste.declined(Continue.key(it.title))) continue;
+                    if (taste.declined(Continue.key(it.title)) || containsTitle(base, it.title)) continue;
                     it.kicker = "▶  " + Words.get(R.string.continue_watching_caps);
                     base.add(it);
                 }
             }
             if (base.size() < MAX) {
                 for (Fresh.Show s : Fresh.load(c)) {
-                    if (!pkg.equals(s.pkg) || base.size() >= MAX || taste.declined(Continue.key(s.name))) continue;
+                    if (!pkg.equals(s.pkg) || base.size() >= MAX || taste.declined(Continue.key(s.name))
+                            || containsTitle(base, s.name)) continue;
                     Continue.Item it = new Continue.Item();
                     it.title = s.name;
                     it.sub = s.episode.isEmpty() ? Words.get(R.string.new_today) : Words.get(R.string.new_today_value, s.episode);
@@ -160,13 +165,16 @@ final class TopShelf extends FrameLayout {
                 }
             }
             synchronized (CACHE) {
-                CACHE.put(pkg, new Object[]{now, base});
+                CACHE.put(pkg, new Object[]{now, base, who});
             }
         }
         boolean hasWidgets = (!Prefs.tvos(c) || Prefs.dockWidgets(c)) && Prefs.hiddenWidgets(c).size() < 3;
         boolean tvosFallback = Prefs.tvos(c) && !hasWidgets && base.isEmpty();
         MediaWatch.Playing mp = MediaWatch.forApp(c, pkg);
-        if (mp == null && tvosFallback) mp = MediaWatch.nowOrLast(c);
+        if (mp == null && tvosFallback) {
+            MediaWatch.Playing last = MediaWatch.nowOrLast(c);
+            if (last != null && (last.pkg == null || HomeKeys.allowed(c, last.pkg))) mp = last;
+        }
         if (mp != null) {
             List<Continue.Item> out = new ArrayList<>();
             Continue.Item live = new Continue.Item();
@@ -180,9 +188,10 @@ final class TopShelf extends FrameLayout {
             live.nowPlaying = true;
             live.intent = launchForMedia(c, pkg, mp);
             out.add(live);
+            String liveRawKey = Continue.key(mp.title);
             for (Continue.Item it : base) {
                 if (out.size() >= MAX) break;
-                if (!mp.title.equalsIgnoreCase(it.title)) out.add(it);
+                if (!liveRawKey.equals(Continue.key(it.title)) && !containsTitle(out, it.title)) out.add(it);
             }
             if (tvosFallback && out.size() < MAX) fillTvosUpNext(c, out);
             return out;
@@ -240,7 +249,17 @@ final class TopShelf extends FrameLayout {
             if (out.size() >= MAX) return;
             // a kids' profile isn't offered what it hides, as the Smart Stack already does
             if (it.pkg != null && !HomeKeys.allowed(c, it.pkg) || taste.declined(Continue.key(it.title))) continue;
-            if (it.art != null && !containsTitle(out, it.title)) {
+            if ((it.art != null || it.progress > 0f) && !containsTitle(out, it.title)) {
+                it.kicker = "▶  " + Words.get(R.string.continue_watching_caps);
+                out.add(it);
+            }
+        }
+        if (out.size() < MAX) {
+            java.util.Set<String> have = new java.util.HashSet<>();
+            for (Continue.Item it : out) have.add(Continue.key(it.title));
+            for (Continue.Item it : Watched.recent(c, have, MAX - out.size())) {
+                if (out.size() >= MAX) return;
+                if (taste.declined(Continue.key(it.title)) || containsTitle(out, it.title)) continue;
                 it.kicker = "▶  " + Words.get(R.string.continue_watching_caps);
                 out.add(it);
             }
@@ -251,7 +270,7 @@ final class TopShelf extends FrameLayout {
                 int day = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR);
                 for (int i = 0; i < picks.size() && out.size() < MAX; i++) {
                     Picks.Pick p = picks.get((day + i) % picks.size());
-                    if (taste.skip(Continue.key(p.name))) continue;
+                    if (taste.skip(Continue.key(p.name)) || containsTitle(out, p.name)) continue;
                     Bitmap b = Picks.poster(p);
                     if (b == null) continue;
                     Continue.Item it = posterCard(p, b, "★  " + Words.get(R.string.tonights_pick_caps));
@@ -392,6 +411,12 @@ final class TopShelf extends FrameLayout {
                 if (i > 0) l.leftMargin = Ui.dp(18);
                 row.addView(card, l);
                 cards.add(card);
+                if (!Ui.light) {
+                    card.setAlpha(0f);
+                    card.setTranslationY(Ui.dpf(10));
+                    card.animate().alpha(1f).translationY(0f).setStartDelay(i * 42L).setDuration(360)
+                            .setInterpolator(Ui.EMPHASIZED).start();
+                }
             }
         }
         if (getVisibility() != VISIBLE) {

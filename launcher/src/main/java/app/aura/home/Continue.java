@@ -99,7 +99,7 @@ final class Continue {
         long now = android.os.SystemClock.elapsedRealtime();
         // the list is one profile's (a kids' profile is read without what it hides): another profile
         // switched to within the minute was shown the last one's
-        String who = Profiles.current(c) + (Profiles.kids(c) ? "/kids" + Prefs.hidden(c).hashCode() : "");
+        String who = profileKey(c);
         List<Item> all;
         // one reading at a time: the stack and Top Shelf both ask the moment home comes back, and the
         // second waits for the first one's list instead of asking the TV's listings all over again
@@ -126,11 +126,20 @@ final class Continue {
     /** Whose list {@link #cached} is: the profile and, for a kids' one, what it hid when read. */
     private static String cachedFor;
 
-    /** Read afresh next time (the tests' listings change under it). */
+    /** Read afresh next time (the tests' listings change under it, or an app was just left). */
     static void clearCache() {
         synchronized (READING) {
             cached = null;
             cachedFor = null;
+        }
+        synchronized (PREVIEWS_LOCK) {
+            previewsCached.clear();
+            previewsAt.clear();
+        }
+        synchronized (CHANNELS_LOCK) {
+            channelsCached = null;
+            channelsId = null;
+            channelsAt = 0;
         }
     }
 
@@ -166,23 +175,10 @@ final class Continue {
                 }
                 it.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 long pos = cur.getLong(6), dur = cur.getLong(7);
-                it.progress = dur > 0 ? Math.min(1f, pos / (float) dur) : 0f;
-                String shortDesc = cur.getString(10);
-                if (shortDesc != null && !shortDesc.trim().isEmpty() && !shortDesc.trim().equalsIgnoreCase(it.title)) {
-                    it.desc = shortDesc.trim();
-                }
-                List<String> parts = new ArrayList<>();
-                String season = cur.getString(2), episode = cur.getString(3);
-                if (season != null && !season.isEmpty()) parts.add("S" + season);
-                if (episode != null && !episode.isEmpty()) parts.add("E" + episode);
-                if (dur > 0 && pos > 0) {
-                    long left = Math.max(1, (dur - pos) / 60_000);
-                    it.leftMin = left;
-                    parts.add(left < 60 ? Words.get(R.string.min_left, left) : Words.get(R.string.h_min_left, left / 60, left % 60));
-                } else if (cur.getString(1) != null && !cur.getString(1).isEmpty()) {
-                    parts.add(cur.getString(1));
-                }
-                it.sub = TextUtils.join("  ·  ", parts);
+                if (dur > 0 && pos > 0 && pos / (float) dur > 0.95f) continue;
+                it.progress = progressOf(pos, dur);
+                it.desc = cleanDesc(it.title, cur.getString(10));
+                it.sub = subline(it, cur.getString(2), cur.getString(3), cur.getString(1), pos, dur, null, null);
                 rows.add(new Row(it, cur.getString(5) != null ? cur.getString(5) : cur.getString(4), touched));
             }
         } catch (Exception ignored) {
@@ -266,12 +262,14 @@ final class Continue {
 
     static List<Item> previews(Context c, String pkg, int max) {
         List<Item> out = new ArrayList<>();
-        if (pkg == null || max <= 0 || android.os.Build.VERSION.SDK_INT < 26 || !Compat.granted(c, "android.permission.READ_TV_LISTINGS")) return out;
+        if (pkg == null || max <= 0 || !HomeKeys.allowed(c, pkg)
+                || android.os.Build.VERSION.SDK_INT < 26 || !Compat.granted(c, "android.permission.READ_TV_LISTINGS")) return out;
+        String cacheKey = profileKey(c) + "|" + pkg;
         long now = android.os.SystemClock.elapsedRealtime();
         synchronized (PREVIEWS_LOCK) {
-            List<Item> hit = previewsCached.get(pkg);
-            Long at = previewsAt.get(pkg);
-            if (hit != null && at != null && now - at < 60_000 && hit.size() >= max) {
+            List<Item> hit = previewsCached.get(cacheKey);
+            Long at = previewsAt.get(cacheKey);
+            if (hit != null && at != null && now - at < 60_000 && (max <= READ || hit.size() >= max)) {
                 for (int i = 0; i < hit.size() && i < max; i++) out.add(hit.get(i).copy());
                 return out;
             }
@@ -300,7 +298,10 @@ final class Continue {
                 if (removed(cur, cols.length)) continue;
                 String intentUri = cur.getString(4), title = cur.getString(0), rowPkg = cur.getString(5);
                 String art = cur.getString(3) != null ? cur.getString(3) : cur.getString(2);
-                if (intentUri == null || title == null || art == null || rowPkg == null) continue;
+                long pos = cur.getLong(6), dur = cur.getLong(7);
+                float progress = progressOf(pos, dur);
+                if (intentUri == null || title == null || (art == null && progress <= 0f)
+                        || rowPkg == null || !HomeKeys.allowed(c, rowPkg)) continue;
                 boolean direct = pkg.equals(rowPkg);
                 boolean fromYt = (ytMusic || ytClient) && "com.google.android.youtube.tv".equals(rowPkg);
                 if (!direct && !fromYt) continue;
@@ -310,7 +311,7 @@ final class Continue {
                 Item it = new Item();
                 it.title = title;
                 it.pkg = pkg;
-                if (desc != null && !desc.trim().isEmpty() && !desc.trim().equalsIgnoreCase(title)) it.desc = desc.trim();
+                it.desc = cleanDesc(title, desc);
                 try {
                     it.intent = Intent.parseUri(intentUri, Intent.URI_INTENT_SCHEME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 } catch (java.net.URISyntaxException e) {
@@ -322,22 +323,8 @@ final class Continue {
                     it.intent.setComponent(null);
                     it.intent.setPackage(pkg);
                 }
-                long pos = cur.getLong(6), dur = cur.getLong(7);
-                it.progress = dur > 0 && pos > 0 ? Math.min(1f, pos / (float) dur) : 0f;
-                List<String> parts = new ArrayList<>();
-                String season = cur.getString(8), episode = cur.getString(9);
-                if (season != null && !season.isEmpty()) parts.add("S" + season);
-                if (episode != null && !episode.isEmpty()) parts.add("E" + episode);
-                if (it.progress > 0f) {
-                    long left = Math.max(1, (dur - pos) / 60_000);
-                    it.leftMin = left;
-                    parts.add(left < 60 ? Words.get(R.string.min_left, left) : Words.get(R.string.h_min_left, left / 60, left % 60));
-                } else if (desc != null && !desc.isEmpty()) {
-                    parts.add(desc);
-                } else if (author != null && !author.isEmpty()) {
-                    parts.add(author);
-                }
-                it.sub = TextUtils.join("  ·  ", parts);
+                it.progress = progress;
+                it.sub = subline(it, cur.getString(8), cur.getString(9), null, pos, dur, desc, author);
                 if (direct || musicRow) {
                     raw.add(it);
                     uris.add(art);
@@ -356,21 +343,23 @@ final class Continue {
         // anything partway through in this app's channel rises to the front so you can resume it at once
         List<Item> candidates = new ArrayList<>();
         List<String> candidateUris = new ArrayList<>();
+        java.util.Set<String> seenTitles = new java.util.HashSet<>();
         int want = Math.max(READ, max) + 2;
         for (int pass = 0; pass < 2 && candidates.size() < want; pass++) {
             for (int i = 0; i < raw.size() && candidates.size() < want; i++) {
                 Item it = raw.get(i);
                 if ((pass == 0) != (it.progress > 0f)) continue;
+                if (!seenTitles.add(key(it.title))) continue;
                 candidates.add(it);
                 candidateUris.add(uris.get(i));
             }
         }
         loadAll(c, candidates, candidateUris);
         List<Item> kept = new ArrayList<>();
-        for (Item it : candidates) if (it.art != null && kept.size() < Math.max(READ, max)) kept.add(it);
+        for (Item it : candidates) if ((it.art != null || it.progress > 0f) && kept.size() < Math.max(READ, max)) kept.add(it);
         synchronized (PREVIEWS_LOCK) {
-            previewsCached.put(pkg, kept);
-            previewsAt.put(pkg, now);
+            previewsCached.put(cacheKey, kept);
+            previewsAt.put(cacheKey, now);
             java.util.Iterator<String> old = previewsCached.keySet().iterator();
             while (previewsCached.size() > PREVIEWS_KEPT && old.hasNext()) {
                 previewsAt.remove(old.next());
@@ -448,10 +437,10 @@ final class Continue {
         if (apps == null || apps.isEmpty() || max <= 0) return Collections.emptyList();
         if (skip == null) skip = Collections.emptySet();
         long now = android.os.SystemClock.elapsedRealtime();
-        int id = (apps.hashCode() * 31 + skip.hashCode()) * 31 + max;
+        String id = profileKey(c) + "|" + apps.hashCode() + "|" + skip.hashCode() + "|" + max;
         List<Item> all;
         synchronized (CHANNELS_LOCK) {
-            all = channelsCached != null && channelsId == id && now - channelsAt < 60_000 ? channelsCached : null;
+            all = channelsCached != null && id.equals(channelsId) && now - channelsAt < 60_000 ? channelsCached : null;
             if (all == null) {
                 all = readChannels(c, apps, skip, max);
                 channelsCached = all;
@@ -466,7 +455,7 @@ final class Continue {
 
     private static final Object CHANNELS_LOCK = new Object();
     private static List<Item> channelsCached;
-    private static int channelsId;
+    private static String channelsId;
     private static long channelsAt;
 
     private static List<Item> readChannels(Context c, List<String> apps, Set<String> skip, int max) {
@@ -492,15 +481,16 @@ final class Continue {
                 if (removed(cur, cols.length)) continue;
                 String title = cur.getString(0), intentUri = cur.getString(6), pkg = cur.getString(7);
                 String picture = cur.getString(5) != null ? cur.getString(5) : cur.getString(4);
-                if (title == null || intentUri == null || pkg == null || picture == null || !apps.contains(pkg)
-                        || skip.contains(key(title))) continue;
                 long pos = cur.getLong(8), dur = cur.getLong(9);
+                float progress = progressOf(pos, dur);
+                if (title == null || intentUri == null || pkg == null || (picture == null && progress <= 0f)
+                        || !apps.contains(pkg) || !HomeKeys.allowed(c, pkg) || skip.contains(key(title))) continue;
                 Integer r = rowRank.get(cur.getLong(10));
                 int rank = r != null ? r : 0;
                 Item had = best.get(pkg);
                 // an app's first pick from its most personal row; something partway through beats all
                 if (had != null) {
-                    boolean partway = pos > 0 && dur > 0;
+                    boolean partway = progress > 0f;
                     if (had.progress > 0f || !partway && rank <= bestRank.get(pkg)) continue;
                 }
                 Item it = new Item();
@@ -512,23 +502,10 @@ final class Continue {
                 }
                 it.title = title;
                 it.pkg = pkg;
-                it.progress = dur > 0 && pos > 0 ? Math.min(1f, pos / (float) dur) : 0f;
+                it.progress = progress;
                 String shortDesc = cur.getString(3);
-                if (shortDesc != null && !shortDesc.trim().isEmpty() && !shortDesc.trim().equalsIgnoreCase(title)) {
-                    it.desc = shortDesc.trim();
-                }
-                List<String> parts = new ArrayList<>();
-                String season = cur.getString(1), episode = cur.getString(2);
-                if (season != null && !season.isEmpty()) parts.add("S" + season);
-                if (episode != null && !episode.isEmpty()) parts.add("E" + episode);
-                if (it.progress > 0f) {
-                    long left = Math.max(1, (dur - pos) / 60_000);
-                    it.leftMin = left;
-                    parts.add(left < 60 ? Words.get(R.string.min_left, left) : Words.get(R.string.h_min_left, left / 60, left % 60));
-                } else if (parts.isEmpty() && shortDesc != null) {
-                    parts.add(shortDesc);
-                }
-                it.sub = TextUtils.join("  ·  ", parts);
+                it.desc = cleanDesc(title, shortDesc);
+                it.sub = subline(it, cur.getString(1), cur.getString(2), null, pos, dur, shortDesc, null);
                 // what the row is called says what it is, even when the app leaves out the progress
                 if (it.progress <= 0f) it.kicker = rank == 3 ? Words.get(R.string.continue_watching_caps) : rank == 2 ? Words.get(R.string.on_your_list) : null;
                 best.put(pkg, it);
@@ -550,7 +527,8 @@ final class Continue {
             uris.add(pictures.get(order.get(i)));
         }
         loadAll(c, tried, uris);
-        for (Item it : tried) if (it.art != null && out.size() < max) out.add(it);
+        java.util.Set<String> seenTitles = new java.util.HashSet<>();
+        for (Item it : tried) if ((it.art != null || it.progress > 0f) && seenTitles.add(key(it.title)) && out.size() < max) out.add(it);
         return out;
     }
 
@@ -591,6 +569,55 @@ final class Continue {
     /** A title as compared across sources: lower case, letters and digits only. */
     static String key(String title) {
         return title == null ? "" : title.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+    }
+
+    /** Cache identity for the active profile (and a kids' profile's hidden-app set). */
+    static String profileKey(Context c) {
+        return Profiles.current(c) + (Profiles.kids(c) ? "/kids" + Prefs.hidden(c).hashCode() : "");
+    }
+
+    /** Normalized progress within the "partway through" band (2% to 95%); 0 otherwise. */
+    static float progressOf(long pos, long dur) {
+        if (dur <= 0 || pos <= 0) return 0f;
+        float p = Math.min(1f, pos / (float) dur);
+        return p >= 0.02f && p <= 0.95f ? p : 0f;
+    }
+
+    /** Trimmed description, omitted when blank or identical to the title. */
+    static String cleanDesc(String title, String raw) {
+        if (raw == null) return null;
+        String s = raw.trim();
+        return s.isEmpty() || s.equalsIgnoreCase(title) ? null : s;
+    }
+
+    /** Remaining playback duration label shared across Watch Next, channels, previews and Watched. */
+    static String timeLeft(long leftMin) {
+        return leftMin < 60
+                ? Words.get(R.string.min_left, leftMin)
+                : Words.get(R.string.h_min_left, leftMin / 60, leftMin % 60);
+    }
+
+    /** Formats a consistent subtitle ("S1 · E1 · 20 min left" when partway, or episode/description). */
+    static String subline(Item it, String season, String episode, String epTitle,
+                          long pos, long dur, String fallback1, String fallback2) {
+        List<String> parts = new ArrayList<>();
+        if (season != null && !season.trim().isEmpty()) parts.add("S" + season.trim());
+        if (episode != null && !episode.trim().isEmpty()) parts.add("E" + episode.trim());
+        if (it.progress > 0f && dur > 0 && pos >= 0) {
+            long left = Math.max(1, (dur - pos) / 60_000);
+            it.leftMin = left;
+            parts.add(timeLeft(left));
+        } else if (epTitle != null && !epTitle.trim().isEmpty()) {
+            parts.add(epTitle.trim());
+        } else if (parts.isEmpty()) {
+            String f1 = cleanDesc(it.title, fallback1);
+            if (f1 != null) parts.add(f1);
+            else {
+                String f2 = cleanDesc(it.title, fallback2);
+                if (f2 != null) parts.add(f2);
+            }
+        }
+        return TextUtils.join("  ·  ", parts);
     }
 
     /**
@@ -681,6 +708,11 @@ final class Continue {
         synchronized (PREVIEWS_LOCK) {
             previewsCached.clear();
             previewsAt.clear();
+        }
+        synchronized (CHANNELS_LOCK) {
+            channelsCached = null;
+            channelsId = null;
+            channelsAt = 0;
         }
         TopShelf.clearCache();
     }

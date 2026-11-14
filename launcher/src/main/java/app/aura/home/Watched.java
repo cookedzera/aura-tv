@@ -59,8 +59,7 @@ final class Watched {
         if (length < MIN_LENGTH || position <= 0 || LISTENING.contains(p.pkg) || p.pkg.equals(ctx.getPackageName())) return;
         String key = p.pkg + "|" + Continue.key(p.title);
         long now = System.currentTimeMillis();
-        float progress = Math.min(1f, position / (float) length);
-        boolean partway = progress >= 0.02f && progress <= 0.95f;
+        boolean partway = Continue.progressOf(position, length) > 0f;
         // a minute apart at most while it plays: enough to resume within a minute of where you were,
         // while crossing into or out of the list (past 2%, or finished past 95%) is written at once
         if (key.equals(lastKey) && partway == lastPartway && now - lastAt < 60_000) return;
@@ -187,9 +186,9 @@ final class Watched {
             long length = o.optLong("length"), position = o.optLong("position");
             if (now - o.optLong("at") > KEEP_MS || length <= 0 || !HomeKeys.allowed(c, pkg)
                     || skip != null && skip.contains(Continue.key(title))) continue;
-            float progress = Math.min(1f, position / (float) length);
+            float progress = Continue.progressOf(position, length);
             // just started, or as good as watched: not something to come back to
-            if (progress < 0.02f || progress > 0.95f) continue;
+            if (progress <= 0f) continue;
             Intent open = c.getPackageManager().getLeanbackLaunchIntentForPackage(pkg);
             if (open == null) open = c.getPackageManager().getLaunchIntentForPackage(pkg);
             if (open == null) continue;
@@ -200,10 +199,9 @@ final class Watched {
             it.progress = progress;
             long left = Math.max(1, (length - position) / 60_000);
             it.leftMin = left;
-            String by = o.optString("by", "");
-            if (!by.isEmpty() && !by.equalsIgnoreCase(title)) it.desc = by;
-            it.sub = (by.isEmpty() || by.equalsIgnoreCase(title) ? "" : by + "  ·  ")
-                    + (left < 60 ? Words.get(R.string.min_left, left) : Words.get(R.string.h_min_left, left / 60, left % 60));
+            String by = Continue.cleanDesc(title, o.optString("by", ""));
+            if (by != null) it.desc = by;
+            it.sub = (by != null ? by + "  ·  " : "") + Continue.timeLeft(left);
             String pic = o.optString("art", "");
             if (!pic.isEmpty()) {
                 it.art = Continue.picture(new File(new File(c.getFilesDir(), DIR), pic).getPath(), 320);

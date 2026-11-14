@@ -587,7 +587,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // home resumes while the app it replaces is still pausing (resumeWhilePausing): the list waits for a quiet moment
         if (appsDirty) Looper.myQueue().addIdleHandler(reloadWhenIdle);
         wake();
-        if (awayAt > 0) TopShelf.clearCache();
+        if (leftApp) {
+            leftApp = false;
+            TopShelf.clearCache();
+            Continue.clearCache();
+        }
         // back from an app: "jump back in" now knows what you just watched
         refreshWidgets(true);
         refreshStatus();
@@ -690,9 +694,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (menu.isOpen()) closeMenu(null);
     }
 
+    private boolean leftApp;
+
     @Override
     protected void onStop() {
         super.onStop();
+        leftApp = true;
         started = false;
         // a grown-up's errand in the TV's own settings, or anywhere else, locks a kids' profile behind it
         unlockedUntil = 0;
@@ -3952,6 +3959,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                             String top, long now, Extras x, Set<String> used, Taste.View taste,
                             List<String[]> remotes, long freeBytes) {
         List<SmartStack.Slide> out = new ArrayList<>();
+        Set<String> titles = new HashSet<>();
         Set<String> suggested = new HashSet<>();
         Set<Fresh.Show> claimed = new HashSet<>();
         boolean suggest = Prefs.on(this, Prefs.STACK_APPS);
@@ -3964,6 +3972,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             boolean watching = cw.contains(it) || it.progress > 0f;
             // what you're partway through only goes when you say so; an app's suggestion can also wear out
             if (taste.declined(key) || !watching && taste.tired(key)) continue;
+            if (!titles.add(key)) continue;
             SmartStack.Slide s = new SmartStack.Slide();
             AppRepo.App owner = it.pkg == null ? null : find(it.pkg);
             String app = owner != null ? "  ·  " + owner.label.toUpperCase(Locale.getDefault()) : "";
@@ -4023,6 +4032,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (claimed.contains(f) || owner == null || !HomeKeys.allowed(this, f.pkg) || taste.skip(key)) continue;
             boolean known = Taste.matches(f.name, yourTitles);
             if (!known && (others >= 1 || !used.isEmpty() && !used.contains(f.pkg))) continue;
+            if (!titles.add(key)) continue;
             SmartStack.Slide s = new SmartStack.Slide();
             String label = owner.label.toUpperCase(Locale.getDefault());
             s.kicker = known ? getString(R.string.new_episode_out_on, label) : getString(R.string.new_today_on, label);
@@ -4052,6 +4062,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         List<SmartStack.Slide> picks = new ArrayList<>();
         for (int i = 0; x != null && i < x.picks.size(); i++) {
             Picks.Pick p = x.picks.get(i);
+            String pkey = Continue.key(p.name);
+            if (!titles.add(pkey)) continue;
             SmartStack.Slide s = new SmartStack.Slide();
             s.kicker = (i == 0 ? getString(R.string.tonights_pick_caps) : getString(R.string.also_tonight)) + "  ·  " + Picks.why(this, p.why);
             s.title = p.name;
@@ -4061,7 +4073,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             s.intent = Picks.watch(this, p);
             s.label = p.name;
             s.dwellMs = 6_000;
-            s.key = Continue.key(p.name);
+            s.key = pkey;
             s.note = p.about != null && !p.about.isEmpty()
                     ? (p.line != null && !p.line.isEmpty() ? p.line + "\n" + p.about : p.about) : p.line;
             s.decline = getString(R.string.not_interested);
