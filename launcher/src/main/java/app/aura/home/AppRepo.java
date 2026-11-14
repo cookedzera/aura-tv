@@ -204,11 +204,13 @@ final class AppRepo {
                 category.put(pkg, cat);
             }
         }
-        int threads = Math.max(1, Math.min(3, Runtime.getRuntime().availableProcessors() - 1));
+        boolean quiet = hasSaved(c);
+        int threads = quiet ? 1 : Math.max(1, Math.min(3, Runtime.getRuntime().availableProcessors() - 1));
+        int prio = quiet ? android.os.Process.THREAD_PRIORITY_BACKGROUND : android.os.Process.THREAD_PRIORITY_DEFAULT;
         java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads, r -> new SafeThread(() -> {
-            // the grid waits on this: at background priority Android gave it a sliver of a TV
-            // that's still starting everything else, and the dock stood empty for seconds
-            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT);
+            // Only the cold first read (no saved index yet) elevates to normal priority so the dock fills;
+            // once a saved index is on disk, the background rescan yields CPU to home startup.
+            android.os.Process.setThreadPriority(prio);
             r.run();
         }, "apps"));
         List<java.util.concurrent.Future<App>> made = new ArrayList<>();
@@ -283,6 +285,12 @@ final class AppRepo {
 
     private static final String SAVED = "apps";
     private static final Object SAVE_LOCK = new Object();
+
+    /** True once a saved app index and its signature file exist on disk. */
+    static boolean hasSaved(Context c) {
+        File dir = new File(c.getFilesDir(), SAVED);
+        return new File(dir, "index.json").isFile() && new File(dir, "sig.json").isFile();
+    }
 
     /**
      * The app list as it was last read, with each banner and icon as a picture of its own: read

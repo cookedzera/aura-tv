@@ -21,6 +21,8 @@ final class Cec {
     /** What kind of device each port holds, as CEC has it: {@link #PLAYBACK}, {@link #TUNER}, {@link #RECORDER} or {@link #AUDIO}. */
     private static volatile Map<Integer, Integer> types = new HashMap<>();
     private static volatile long readAt = -60_000;
+    private static volatile long retryMs = 30_000;
+    private static volatile boolean hdmiMissing;
     private static volatile boolean reading;
     private static final Pattern PORT = Pattern.compile("^HDMI (\\d)$");
 
@@ -61,21 +63,48 @@ final class Cec {
         }
     }
 
+    private static void latchIfDenied(Throwable t) {
+        Throwable cause = t instanceof java.lang.reflect.InvocationTargetException ? t.getCause() : t;
+        if (t instanceof SecurityException || cause instanceof SecurityException || cause instanceof NoSuchMethodException) {
+            hdmiMissing = true;
+        }
+    }
+
+    /** Returns the HDMI-CEC TV client if present and accessible, latching permanent absence/denial. */
+    private static Object tvClient(Context c) {
+        if (hdmiMissing) return null;
+        try {
+            Object mgr = c.getSystemService("hdmi_control");
+            if (mgr == null) {
+                hdmiMissing = true;
+                return null;
+            }
+            Object tv = mgr.getClass().getMethod("getTvClient").invoke(mgr);
+            if (tv == null) {
+                hdmiMissing = true;
+                return null;
+            }
+            return tv;
+        } catch (Throwable t) {
+            latchIfDenied(t);
+            return null;
+        }
+    }
+
     /**
      * True when the TV's HDMI-CEC service reports an external HDMI device (physical address > 0) as
      * the active source right now (e.g. a console woke the TV via One Touch Play).
      */
     static boolean externalActiveSource(Context c) {
         try {
-            Object mgr = c.getSystemService("hdmi_control");
-            if (mgr == null) return false;
-            Object tv = mgr.getClass().getMethod("getTvClient").invoke(mgr);
+            Object tv = tvClient(c);
             if (tv == null) return false;
             Object src = tv.getClass().getMethod("getActiveSource").invoke(tv);
             if (src == null) return false;
             int phys = (Integer) src.getClass().getMethod("getPhysicalAddress").invoke(src);
             return phys > 0 && phys != 0xFFFF;
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            latchIfDenied(t);
             return false;
         }
     }
@@ -83,9 +112,7 @@ final class Cec {
     /** The devices CEC knows, by port: each one's name and kind. Null when the CEC service won't talk to Aura. */
     private static Map<Integer, Object[]> tryHdmiManager(Context c) {
         try {
-            Object mgr = c.getSystemService("hdmi_control");
-            if (mgr == null) return null;
-            Object tv = mgr.getClass().getMethod("getTvClient").invoke(mgr);
+            Object tv = tvClient(c);
             if (tv == null) return null;
             Object list = tv.getClass().getMethod("getDeviceList").invoke(tv);
             if (!(list instanceof java.util.List<?>)) return null;
@@ -124,21 +151,28 @@ final class Cec {
     }
 
     private static void refresh(Context c) {
-        if (reading || SystemClock.elapsedRealtime() - readAt < 30_000) return;
+        long now = SystemClock.elapsedRealtime();
+        if (reading || (readAt >= 0 && now - readAt < retryMs)) return;
         // marked read now, whatever comes of it: the CEC service refuses most apps outright, and
-        // a refusal every call (one per input, on every opening) was never given its half minute
-        readAt = SystemClock.elapsedRealtime();
+        // a refusal every call (one per input, on every opening) was never given its backoff window
+        readAt = now;
         Map<Integer, Object[]> direct = tryHdmiManager(c);
         if (direct != null && !direct.isEmpty()) {
+            retryMs = 30_000L;
             keep(direct);
             return;
         }
-        if (!Reports.allowed(c)) return;
+        if (!Reports.allowed(c)) {
+            retryMs = 10 * 60_000L;
+            return;
+        }
         reading = true;
         new SafeThread(() -> {
             Map<Integer, Object[]> found = new HashMap<>();
+            boolean[] sawLine = new boolean[1];
             try {
                 Reports.read("hdmi_control", new String[0], s -> {
+                    if (s.contains("logical_address:")) sawLine[0] = true;
                     Matcher m = DEVICE.matcher(s);
                     // logical address 0 is the TV itself
                     if (m.find() && Integer.parseInt(m.group(1), 16) != 0) {
@@ -148,6 +182,7 @@ final class Cec {
                     }
                     return true;
                 });
+                retryMs = sawLine[0] ? 30_000L : 10 * 60_000L;
                 keep(found);
             } finally {
                 reading = false;

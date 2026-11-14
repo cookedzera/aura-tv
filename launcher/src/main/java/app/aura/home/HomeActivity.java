@@ -2773,7 +2773,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 refreshOverlays();
             });
         };
-        if (cells.isEmpty() && !appsRead) {
+        if (cells.isEmpty() && !appsRead && !AppRepo.hasSaved(app)) {
             // the first read, with the grid waiting on it: its own thread at normal priority, not
             // behind whatever home's background worker has queued
             new SafeThread(() -> {

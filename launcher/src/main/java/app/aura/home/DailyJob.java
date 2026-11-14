@@ -40,6 +40,12 @@ public class DailyJob extends JobService {
             main.postDelayed(heal, 6_500);
             return true;
         }
+        // Wait out the post-boot settling window before downloading photos or checking updates so the
+        // home screen and TV services settle first; Android's JobScheduler retries once ready.
+        if (Compat.justBooted()) {
+            jobFinished(params, true);
+            return true;
+        }
         // on a small TV (light mode) the downloads and photo resizing wait while something is
         // playing: the two cores and the little memory are the video's; Android tries again later
         if (Perf.light(c)) {
