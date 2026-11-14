@@ -21,6 +21,11 @@ final class Perf {
         return java.util.Arrays.asList(MODES).contains(m) ? m : "auto";
     }
 
+    /** Light mode set to {@code mode} (one of {@link #MODES}); the screens apply it themselves. */
+    static void set(Context c, String mode) {
+        Prefs.device(c).edit().putString(KEY, mode).apply();
+    }
+
     static boolean light(Context c) {
         String m = mode(c);
         return m.equals("on") || m.equals("auto") && lowEnd(c);

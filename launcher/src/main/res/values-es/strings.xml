@@ -1134,4 +1134,11 @@
     <string name="news_smoother_line">Más ligero en TV pequeñas.</string>
     <string name="beta">Beta</string>
     <string name="beta_caps">BETA</string>
+    <string name="speed_offer_title">Tu TV está trabajando duro</string>
+    <string name="speed_offer_body">La pantalla de inicio tardó en responder al mando. El modo ligero mantiene el mismo aspecto con menos movimiento y desenfoque, para que cada pulsación responda al instante.</string>
+    <string name="speed_turn_on">Activar el modo ligero</string>
+    <string name="speed_warn_title">Este TV puede ir a tirones sin el modo ligero</string>
+    <string name="speed_warn_body">Tiene poca memoria o un chip modesto. El modo ligero mantiene fluida la pantalla de inicio; sin él, moverse puede ir con retraso.</string>
+    <string name="speed_keep">Mantener el modo ligero</string>
+    <string name="speed_turn_off">Desactivar igualmente</string>
 </resources>

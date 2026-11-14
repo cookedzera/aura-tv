@@ -1134,4 +1134,11 @@
     <string name="news_smoother_line">Lighter on small TVs.</string>
     <string name="beta">Beta</string>
     <string name="beta_caps">BETA</string>
+    <string name="speed_offer_title">Your TV is working hard</string>
+    <string name="speed_offer_body">Home was slow to answer your remote. Light mode keeps the same look with less motion and blur, so every press lands at once.</string>
+    <string name="speed_turn_on">Turn on Light mode</string>
+    <string name="speed_warn_title">This TV may stutter without Light mode</string>
+    <string name="speed_warn_body">It has little memory or a modest chip. Light mode keeps home smooth here; without it, moving around can lag.</string>
+    <string name="speed_keep">Keep Light mode</string>
+    <string name="speed_turn_off">Turn off anyway</string>
 </resources>

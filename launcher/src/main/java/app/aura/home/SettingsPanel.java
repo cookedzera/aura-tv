@@ -38,6 +38,9 @@ final class SettingsPanel {
 
         void applied(String what);
 
+        /** Light mode about to go off on a small TV: a word of warning first; {@code turnOff} if they go ahead. */
+        void warnLightOff(Runnable turnOff);
+
         void open(Intent intent, View from);
 
         boolean type(String text);
@@ -608,10 +611,15 @@ final class SettingsPanel {
             String lm = Perf.mode(act);
             add(act.getString(R.string.light_mode), lm.equals("auto") ? act.getString(R.string.auto_value, Perf.lowEnd(act) ? act.getString(R.string.on_for_this_tv) : act.getString(R.string.off_for_this_tv)) : lm.equals("on") ? act.getString(R.string.on) : act.getString(R.string.off), "light", () -> {
                 String next = Perf.MODES[(java.util.Arrays.asList(Perf.MODES).indexOf(Perf.mode(act)) + 1) % Perf.MODES.length];
-                Prefs.device(act).edit().putString(Perf.KEY, next).apply();
-                host.applied("light");
-                build();
-                focusTag("light");
+                Runnable set = () -> {
+                    Perf.set(act, next);
+                    host.applied("light");
+                    build();
+                    focusTag("light");
+                };
+                // off on a TV that needs it: asked once more, kindly, before the stutter comes back
+                if (next.equals("off") && Perf.lowEnd(act)) host.warnLightOff(set);
+                else set.run();
             });
             section(act.getString(R.string.remote));
             // switched by Aura where setup allowed it; elsewhere, Android's own Accessibility screen does it

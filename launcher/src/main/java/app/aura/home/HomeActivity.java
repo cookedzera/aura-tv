@@ -426,6 +426,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // what was let go behind the app comes back behind the screen: Top Shelf's cards and the
         // tiles on screen at once, the rows and columns past them once the remote rests
         started = true;
+        speedWatch = watchSpeed();
         filledAt = SystemClock.uptimeMillis();
         paintNext();
         watchVpn(true);
@@ -1080,14 +1081,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         gridLabel = Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.26f);
         page.addView(gridLabel, frame(WRAP, WRAP, Gravity.TOP | Gravity.START, Ui.dp(PAGE_X), Ui.dp(GRID_Y - 28), 0, 0));
         // Aura's sticky header scrim & soft bottom horizon feather (tiles scroll beneath the docked categories)
-        stickyTopScrim = new View(this);
-        stickyTopScrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0xCC07090E, 0x8007090E, 0x0007090E}));
+        stickyTopScrim = new Shade(this, new int[]{0xCC07090E, 0x8007090E, 0x0007090E});
         stickyTopScrim.setAlpha(0f);
         home.addView(stickyTopScrim, frame(MATCH, Ui.dp(92), Gravity.TOP, 0, 0, 0, 0));
-        bottomFeather = new View(this);
-        bottomFeather.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x0007090E, 0x8C07090E}));
+        bottomFeather = new Shade(this, new int[]{0x0007090E, 0x8C07090E});
         home.addView(bottomFeather, frame(MATCH, Ui.dp(44), Gravity.BOTTOM, 0, 0, 0, 0));
         // the Aura style's centered categories: inside a stage-wide sticky container that docks to the top on scroll
         homeTabBar = flat(this);
@@ -1146,6 +1143,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             @Override
             public void applied(String what) {
                 applySetting(what);
+            }
+
+            @Override
+            public void warnLightOff(Runnable turnOff) {
+                speedSheet().warn(turnOff);
             }
 
             @Override
@@ -2132,7 +2134,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             stickyTopScrim.setVisibility(aura);
             if (dock) stickyTopScrim.setAlpha(0f);
         }
-        if (bottomFeather != null) bottomFeather.setVisibility(aura);
+        feather();
         if (dock) {
             homeTabs.setVisibility(View.GONE);
             if (homeTabBar != null) homeTabBar.setVisibility(View.GONE);
@@ -4869,7 +4871,14 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         keyAt = SystemClock.uptimeMillis();
         lastKeyAt = keyAt;
         backdrop.keyed(keyAt);
-        if (e.getAction() == KeyEvent.ACTION_DOWN && Pad.isArrow(e.getKeyCode())) Trouble.arrow(keyAt);
+        if (e.getAction() == KeyEvent.ACTION_DOWN && Pad.isArrow(e.getKeyCode())) {
+            Trouble.arrow(keyAt);
+            // Light mode off: once the arrows stop, how their frames went is looked at
+            if (speedWatch && !speedPending) {
+                speedPending = true;
+                handler.postDelayed(speedCheck, Trouble.BURST_DONE_MS);
+            }
+        }
         try {
             return handleKey(e);
         } catch (RuntimeException ex) {
@@ -4881,6 +4890,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private boolean handleKey(KeyEvent e) {
         int code = e.getKeyCode();
         boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+        // the Light mode card is over everything, Settings included: its two buttons have the keys
+        if (speedSheet != null && speedSheet.isOpen() && !isVolumeKey(code)) {
+            return speedSheet.key(e) || super.dispatchKeyEvent(e);
+        }
         // once it's dissolving, home is there and answers at once (it used to wait out the fade)
         if (splash != null && !splash.exiting() && !isVolumeKey(code)) {
             // never more than a moment: a press after 9 s takes it away
@@ -5384,6 +5397,58 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             default:
                 return super.dispatchKeyEvent(e);
         }
+    }
+
+    // ---- Light mode, offered --------------------------------------------------------------------
+
+    private SpeedSheet speedSheet;
+    /** Light mode could be offered in this run (see {@link #watchSpeed}), and a look at the frames is due. */
+    private boolean speedWatch, speedPending;
+    /** When Light mode was last offered (or answered), on the TV's own settings. */
+    static final String SPEED_ASKED = "speed_asked";
+
+    /**
+     * The Light mode card, on top of everything while it's open: added each time it's wanted (so
+     * it's the last of the screen's layers), and it takes itself off again once it has closed.
+     */
+    private SpeedSheet speedSheet() {
+        if (speedSheet == null) speedSheet = new SpeedSheet(this, backdrop);
+        if (speedSheet.getParent() == null) root.addView(speedSheet, match());
+        return speedSheet;
+    }
+
+    /**
+     * Whether home's frames are worth watching for Light mode: it's off, Android times frames
+     * (7 and later), it isn't a kids' profile (the settings are the grown-ups'), and it wasn't
+     * offered in the last month.
+     */
+    private boolean watchSpeed() {
+        return !Ui.light && Build.VERSION.SDK_INT >= 24 && !Profiles.kids(this)
+                && System.currentTimeMillis() - Prefs.device(this).getLong(SPEED_ASKED, 0) >= 30L * 86_400_000L;
+    }
+
+    private final Runnable speedCheck = this::checkSpeed;
+
+    /** The remote at rest after D-pad presses: three slow bursts in this run and Light mode is offered, home at rest. */
+    private void checkSpeed() {
+        speedPending = false;
+        long wait = lastKeyAt + Trouble.BURST_DONE_MS - SystemClock.uptimeMillis();
+        if (wait > 0) {
+            // still pressing: looked at once they stop, not once for every press
+            speedPending = true;
+            handler.postDelayed(speedCheck, wait);
+            return;
+        }
+        if (!speedWatch || Ui.light || Trouble.slowBursts() < 3 || !started || overlayOpen() || ccOpen) return;
+        speedWatch = false;
+        Prefs.device(this).edit().putLong(SPEED_ASKED, System.currentTimeMillis()).apply();
+        speedSheet().offer(() -> {
+            Perf.set(this, "on");
+            applySetting("light");
+            // the grid is made again in Light mode's own sizes: home takes the keys back, on the same tile
+            unblockHome();
+            if (!cells.isEmpty()) focusGrid(Math.min(gridAt, cells.size() - 1));
+        });
     }
 
     private boolean swallow(int code) {
@@ -7380,6 +7445,34 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         Card.parallax = !light && Prefs.on(this, Prefs.PARALLAX);
         Backdrop.calm = light;
         if (bloom != null) bloom.setVisibility(light ? View.GONE : View.VISIBLE);
+        feather();
+        speedWatch = watchSpeed();
+    }
+
+    /**
+     * The soft shade along the foot of the Aura style's page. LOW goes without: a whole screen's
+     * width painted again on every frame for a shade you'd hardly miss; the page runs to the edge.
+     */
+    private void feather() {
+        if (bottomFeather != null) bottomFeather.setVisibility(dock || Ui.light ? View.GONE : View.VISIBLE);
+    }
+
+    /**
+     * A flat colour, or a band shading top to bottom ({@code colors}), that fades by drawing its
+     * alpha straight onto the screen: no layer of its own to paint into first, which is a View's
+     * default for any alpha below one (a screen-wide buffer every frame of the fade).
+     */
+    static final class Shade extends View {
+        Shade(Context c, int... colors) {
+            super(c);
+            if (colors.length == 1) setBackgroundColor(colors[0]);
+            else setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, colors));
+        }
+
+        @Override
+        public boolean hasOverlappingRendering() {
+            return false;
+        }
     }
 
     private void showWeather() {

@@ -1134,4 +1134,11 @@
     <string name="news_smoother_line">Leichter auf kleinen TVs.</string>
     <string name="beta">Beta</string>
     <string name="beta_caps">BETA</string>
+    <string name="speed_offer_title">Dein Fernseher hat viel zu tun</string>
+    <string name="speed_offer_body">Der Startbildschirm hat gerade langsam auf die Fernbedienung reagiert. Der Leicht-Modus behält das Aussehen, mit weniger Bewegung und Unschärfe, damit jeder Tastendruck sofort ankommt.</string>
+    <string name="speed_turn_on">Leicht-Modus einschalten</string>
+    <string name="speed_warn_title">Ohne Leicht-Modus kann dieser Fernseher ruckeln</string>
+    <string name="speed_warn_body">Er hat wenig Speicher oder einen einfachen Chip. Der Leicht-Modus hält den Startbildschirm hier flüssig; ohne ihn kann die Bedienung verzögern.</string>
+    <string name="speed_keep">Leicht-Modus behalten</string>
+    <string name="speed_turn_off">Trotzdem ausschalten</string>
 </resources>

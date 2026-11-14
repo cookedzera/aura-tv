@@ -722,6 +722,45 @@ final class Trouble {
         }
     }
 
+    /** How long after its last press a D-pad burst is over and all its frames are in. */
+    static final long BURST_DONE_MS = BURST_GAP_MS + BURST_TAIL_MS;
+    /** The last burst judged by {@link #slowBursts}, and how many judged slow so far this run. */
+    private static long burstJudged;
+    private static int slow;
+
+    /**
+     * D-pad bursts this run that were slow to draw, the last one judged now if it hasn't been: a
+     * dozen frames timed at least, and the slowest tenth of them past 34 ms (two frames missed and
+     * more). Main thread, once the remote has rested {@link #BURST_DONE_MS}.
+     */
+    static int slowBursts() {
+        int[] t;
+        synchronized (burst) {
+            if (burstTimed == 0 || burstTimed == burstJudged) return slow;
+            burstJudged = burstTimed;
+            t = lastBurst();
+        }
+        if (t.length >= 12 && pct(t, 90) > 34_000) slow++;
+        return slow;
+    }
+
+    /** The last burst's frame times, sorted (under the burst's lock). */
+    private static int[] lastBurst() {
+        int[] t = Arrays.copyOf(burst, Math.min(burstN, burst.length));
+        Arrays.sort(t);
+        return t;
+    }
+
+    /** For tests: a D-pad burst of {@code n} frames of {@code micros} each, as Android would time them; {@code fresh} forgets the count. */
+    static void burstForTest(long at, int n, int micros, boolean fresh) {
+        synchronized (burst) {
+            if (fresh) slow = 0;
+            burstAt = burstTimed = arrowAt = at;
+            burstN = 0;
+            for (int i = 0; i < n; i++) burst[burstN++ % burst.length] = micros;
+        }
+    }
+
     /** Home's frames for the report: how many while left alone, and (Android 7+) how long the last D-pad burst's took. */
     private static void frames(StringBuilder b) {
         long now = SystemClock.uptimeMillis(), rest = lastRest;
@@ -731,11 +770,10 @@ final class Trouble {
         int[] t;
         long end;
         synchronized (burst) {
-            t = Arrays.copyOf(burst, Math.min(burstN, burst.length));
+            t = lastBurst();
             end = burstEnd;
         }
         if (t.length == 0) return;
-        Arrays.sort(t);
         line(b, "D-pad frames", "p50 " + ms(pct(t, 50)) + " ms, p90 " + ms(pct(t, 90)) + " ms over the last burst's "
                 + t.length + " frames, " + minutes(now - end) + " ago");
     }

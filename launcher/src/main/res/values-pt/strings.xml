@@ -1134,4 +1134,11 @@
     <string name="news_smoother_line">Mais leve em TVs pequenas.</string>
     <string name="beta">Beta</string>
     <string name="beta_caps">BETA</string>
+    <string name="speed_offer_title">Sua TV está trabalhando muito</string>
+    <string name="speed_offer_body">A tela inicial demorou para responder ao controle. O modo leve mantém o mesmo visual com menos movimento e desfoque, para que cada toque responda na hora.</string>
+    <string name="speed_turn_on">Ativar o modo leve</string>
+    <string name="speed_warn_title">Esta TV pode travar sem o modo leve</string>
+    <string name="speed_warn_body">Ela tem pouca memória ou um chip modesto. O modo leve mantém a tela inicial fluida; sem ele, navegar pode ficar lento.</string>
+    <string name="speed_keep">Manter o modo leve</string>
+    <string name="speed_turn_off">Desativar mesmo assim</string>
 </resources>
