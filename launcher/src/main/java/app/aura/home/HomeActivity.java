@@ -694,6 +694,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     protected void onStop() {
         super.onStop();
         started = false;
+        // a grown-up's errand in the TV's own settings, or anywhere else, locks a kids' profile behind it
+        unlockedUntil = 0;
         handler.removeCallbacks(paintNext);
         handler.removeCallbacks(tidyTiles);
         if (Perf.light(this)) shed();
@@ -3859,7 +3861,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      */
     private static Extras extras(Context c, int apps) {
         String key = localDay() + "|" + Fresh.stamp(c) + "|" + Picks.stamp(c)
-                + "|" + Prefs.on(c, Prefs.PICKS) + "|" + apps + "|" + Taste.changes + "|" + Profiles.current(c);
+                + "|" + Prefs.picks(c) + "|" + apps + "|" + Taste.changes + "|" + Profiles.current(c);
         synchronized (HomeActivity.class) {
             if (key.equals(extrasKey) && extrasKept != null) return extrasKept;
         }
@@ -3886,7 +3888,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             x.shows.add(s);
             x.art.add(b);
         }
-        if (Prefs.on(c, Prefs.PICKS)) {
+        if (Prefs.picks(c)) {
             List<Picks.Pick> pool = new ArrayList<>();
             Taste.View t = Taste.view(c);
             // what you turned down, or passed over day after day, is left out of the pool
@@ -6972,10 +6974,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private SettingsPanel settings;
     private View beforeSettings;
 
-    /** Until when the PIN just typed keeps a kids' profile unlocked. */
+    /**
+     * Until when the PIN just typed keeps a kids' profile unlocked: ten minutes at most, and locked
+     * again as soon as Settings closes or Aura leaves the screen, so a remote handed back is locked.
+     */
     private long unlockedUntil;
 
-    /** {@code then}, after the parents' PIN when this is a kids' profile (one PIN lasts ten minutes). */
+    /** {@code then}, after the parents' PIN when this is a kids' profile (see {@link #unlockedUntil}). */
     @Override
     public void guarded(Runnable then) {
         if (!Profiles.kids(this) || !Profiles.hasPin(this) || SystemClock.uptimeMillis() < unlockedUntil) {
@@ -7031,6 +7036,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     private void closeSettings() {
         if (!settings.isOpen()) return;
+        unlockedUntil = 0;
         settings.close();
         for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);

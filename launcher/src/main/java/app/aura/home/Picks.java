@@ -286,18 +286,19 @@ final class Picks {
             Uri video = Uri.parse("https://www.youtube.com/watch?v=" + p.yt);
             for (String pkg : ytPkgs) {
                 Intent v = new Intent(Intent.ACTION_VIEW, video).setPackage(pkg);
-                if (v.resolveActivity(pm) != null) return v;
+                // never an app this profile hides (a kids' one can't open what its parents hid)
+                if (HomeKeys.allowed(c, pkg) && v.resolveActivity(pm) != null) return v;
             }
             // no TV YouTube client: whatever app here opens YouTube's links, as long as it isn't only a browser
             Intent any = new Intent(Intent.ACTION_VIEW, video);
             android.content.pm.ResolveInfo ri = pm.resolveActivity(any, PackageManager.MATCH_DEFAULT_ONLY);
             if (ri != null && ri.activityInfo != null && !"android".equals(ri.activityInfo.packageName)
-                    && ri.activityInfo.packageName.contains("youtube")) return any;
+                    && ri.activityInfo.packageName.contains("youtube") && HomeKeys.allowed(c, ri.activityInfo.packageName)) return any;
         }
         for (String pkg : ytPkgs) {
             Intent yt = new Intent(Intent.ACTION_SEARCH).setPackage(pkg)
                     .putExtra(android.app.SearchManager.QUERY, p.query);
-            if (yt.resolveActivity(pm) != null) return yt;
+            if (HomeKeys.allowed(c, pkg) && yt.resolveActivity(pm) != null) return yt;
         }
         Intent global = new Intent("android.search.action.GLOBAL_SEARCH").putExtra(android.app.SearchManager.QUERY, p.query);
         if (global.resolveActivity(pm) != null) return global;

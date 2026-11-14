@@ -114,7 +114,7 @@ final class Find extends FrameLayout {
         field.setOnEditorActionListener((v, id, e) -> {
             // Go: the best match
             if (first != null) host.open(first, ((ViewGroup) results.getChildAt(0)).getChildAt(0));
-            else if (field.length() > 0) host.everywhere(field.getText().toString());
+            else if (field.length() > 0 && !Profiles.kids(getContext())) host.everywhere(field.getText().toString());
             return true;
         });
         bar.addView(field, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
@@ -251,9 +251,11 @@ final class Find extends FrameLayout {
             if (results.getChildCount() > 0) il.leftMargin = Ui.dp(22);
             results.addView(item, il);
         }
-        everywhereRow.setVisibility(query.isEmpty() ? GONE : VISIBLE);
+        // the TV's own search reaches every app, the hidden ones too: not from a kids' profile
+        boolean everywhereToo = !query.isEmpty() && !Profiles.kids(getContext());
+        everywhereRow.setVisibility(everywhereToo ? VISIBLE : GONE);
         everywhere.setText(getContext().getString(R.string.search_the_tv_for, q.trim()));
-        field.setNextFocusDownId(firstCard != null ? firstCard.getId() : !query.isEmpty() ? everywhereRow.getId() : View.NO_ID);
+        field.setNextFocusDownId(firstCard != null ? firstCard.getId() : everywhereToo ? everywhereRow.getId() : View.NO_ID);
     }
 
     /** Lower case, accents folded: "Pokémon" is found by "pokemon". */

@@ -17,7 +17,8 @@ import java.util.Set;
 /**
  * Your setup in one small file, saved to your phone and brought back after a reinstall or onto
  * another TV: profiles, app order, folders, hidden apps, tiles, widgets, remote buttons, the
- * screensaver's scene, Tonight's pick and the weather's city. Android's own backup isn't used (it
+ * screensaver's scene, Tonight's pick, the weather's city and the parents' PIN (as its hash, so a
+ * kids' profile arrives locked). Android's own backup isn't used (it
  * would carry this TV's debugging key too), and photos stay on the phone they came from.
  *
  * Kept as {"aura": 1, "files": {name: {key: [type, value]}}}, each setting with its type.
@@ -30,8 +31,11 @@ final class Backup {
             "update_ver", "update_seen", "update_told", "listings_asked", "tmdb_session", "tmdb_account", "tmdb_user",
             "pick_made_for", "pick_count", "pick_at", "geo_at", "wx_at", "wx", "saver_prev", "sleepAt", "sleepVol", "sleepSet",
             "sleepEnd", "known_pkgs", "new_pkgs", "welcomed", "keys_wanted", "adb_paired", "adb_tls_port", "set_light",
-            "parent_pin", "watched", "wx_json", "wx_temp", "wx_code", "wx_day", "wx_f", "tidied_76",
+            "watched", "wx_json", "wx_temp", "wx_code", "wx_day", "wx_f", "tidied_76",
             "home_choice_ignored", "retired_home", "debloated", "orig_home"));
+
+    /** The parents' PIN: carried with the kids' profiles it guards, and never taken away by a backup made without one. */
+    private static final String PIN = "parent_pin";
 
     private Backup() { }
 
@@ -101,7 +105,7 @@ final class Backup {
                 ed.clear();
             } else {
                 for (String existing : sp.getAll().keySet()) {
-                    if (!LOCAL.contains(existing)) ed.remove(existing);
+                    if (!LOCAL.contains(existing) && !PIN.equals(existing)) ed.remove(existing);
                 }
             }
             for (Iterator<String> ks = o.keys(); ks.hasNext(); ) {

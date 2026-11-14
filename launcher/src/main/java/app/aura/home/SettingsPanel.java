@@ -596,9 +596,9 @@ final class SettingsPanel {
             add(act.getString(R.string.widgets), !wShown ? act.getString(R.string.hidden_clean) : hiddenW == 0 ? act.getString(R.string.all_shown) : act.getString(R.string.n_of_3_shown, 3 - hiddenW), "widgets", () -> go("widgets"));
             // an app's own cards above it when it has focus (JioHotstar's rows, YouTube's videos); off for only apps
             toggle(tvos ? act.getString(R.string.app_cards) : act.getString(R.string.top_shelf), Prefs.TOP_SHELF, act.getString(R.string.on), act.getString(R.string.hidden_clean), "shelf");
-            toggle(act.getString(R.string.tonights_pick), Prefs.PICKS, act.getString(R.string.shown), act.getString(R.string.hidden_clean), "picks");
-            // Watch: a tile among the apps that opens films and series to choose from. Switched off,
-            // nothing of it runs or is kept; not offered in a kids' profile
+            // Tonight's pick and Watch: films and series to choose from, not offered in a kids' profile.
+            // Watch is a tile among the apps; switched off, nothing of it runs or is kept
+            if (!Profiles.kids(act)) toggle(act.getString(R.string.tonights_pick), Prefs.PICKS, act.getString(R.string.shown), act.getString(R.string.hidden_clean), "picks");
             if (!Profiles.kids(act)) toggle(act.getString(R.string.watch), Prefs.WATCH, act.getString(R.string.beta), act.getString(R.string.off), "watch");
             toggle(act.getString(R.string.live_picture_on_input_tiles), Prefs.INPUT_PREVIEW, act.getString(R.string.on), act.getString(R.string.off), "inputs");
             section(act.getString(R.string.speed));
@@ -1111,7 +1111,7 @@ final class SettingsPanel {
             add(act.getString(R.string.home_screen), act.getString(R.string.name_tiles, act.getString(Prefs.TILE_NAMES[Math.max(0, java.util.Arrays.asList(Prefs.TILE_STYLES).indexOf(Prefs.tileStyle(act)))]
                     )), "home", () -> go("home"));
             add(act.getString(R.string.hidden_apps), String.valueOf(Prefs.hidden(act).size()), "hidden", () -> go("apps"));
-            add(act.getString(R.string.tonights_pick), !Prefs.on(act, Prefs.PICKS) ? act.getString(R.string.off) : Picks.tmdb(act) ? picksSummary() : act.getString(R.string.shows_value, Picks.genreSummary(act)),
+            if (!Profiles.kids(act)) add(act.getString(R.string.tonights_pick), !Prefs.on(act, Prefs.PICKS) ? act.getString(R.string.off) : Picks.tmdb(act) ? picksSummary() : act.getString(R.string.shows_value, Picks.genreSummary(act)),
                     "picks", () -> go("picks"));
             toggle(act.getString(R.string.weather), Prefs.WEATHER, act.getString(R.string.on), act.getString(R.string.off), "weather");
             boolean manual = Prefs.device(act).getBoolean("geo_manual", false);

@@ -245,7 +245,7 @@ final class TopShelf extends FrameLayout {
                 out.add(it);
             }
         }
-        if (out.size() < MAX && Prefs.on(c, Prefs.PICKS)) {
+        if (out.size() < MAX && Prefs.picks(c)) {
             List<Picks.Pick> picks = Picks.load(c);
             if (!picks.isEmpty()) {
                 int day = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR);

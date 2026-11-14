@@ -139,7 +139,7 @@ final class ControlCenter {
         if (on) {
             if (pick.hasFocus()) nowCard.requestFocus();
             pick.setVisibility(View.GONE);
-        } else if (shownPick != null && Prefs.on(act, Prefs.PICKS) && !top) {
+        } else if (shownPick != null && Prefs.picks(act) && !top) {
             pick.setVisibility(View.VISIBLE);
         }
     }
@@ -1517,7 +1517,7 @@ final class ControlCenter {
 
     /** A different show each time the board opens. */
     private void showPick() {
-        if (!Prefs.on(act, Prefs.PICKS)) {
+        if (!Prefs.picks(act)) {
             pick.setVisibility(View.GONE);
             return;
         }
@@ -1547,7 +1547,7 @@ final class ControlCenter {
         nextPick = null;
         nextPoster = null;
         shownPick = null;
-        if (!Prefs.on(act, Prefs.PICKS)) pick.setVisibility(View.GONE);
+        if (!Prefs.picks(act)) pick.setVisibility(View.GONE);
     }
 
     private static String compact(long ms) {
@@ -1588,6 +1588,8 @@ final class ControlCenter {
         for (TvInputInfo info : tim.getTvInputList()) {
             // hiding an input in the TV's settings arrived in Android 7
             if (android.os.Build.VERSION.SDK_INT >= 24 && info.isHidden(act)) continue;
+            // one the parents hid from a kids' profile isn't offered here either, as on its home screen
+            if (!HomeKeys.allowed(act, "input:" + info.getId())) continue;
             if (info.isPassthroughInput() || builtInTuner(info)) list.add(info);
         }
         // each input's port and name once: they were looked up again for the sort, the signature and the row

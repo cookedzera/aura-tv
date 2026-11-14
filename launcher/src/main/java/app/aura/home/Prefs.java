@@ -57,6 +57,11 @@ final class Prefs {
         return on(c, WATCH) && !Profiles.kids(c);
     }
 
+    /** Tonight's pick is switched on, and, as with Watch, this isn't a kids' profile. */
+    static boolean picks(Context c) {
+        return on(c, PICKS) && !Profiles.kids(c);
+    }
+
     static boolean on(Context c, String key) {
         if (SRC_WIKIMEDIA.equals(key) || SRC_WALLHAVEN.equals(key) || SRC_UNSPLASH.equals(key)) return of(c).getBoolean(key, false);
         // everything starts on, except always-visible app names, only your own photos and pure black;
