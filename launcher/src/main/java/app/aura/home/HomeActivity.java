@@ -7234,13 +7234,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (bloom != null) bloom.setVisibility(light ? View.GONE : View.VISIBLE);
     }
 
-    private List<AppRepo.App> hiddenApps() {
-        List<AppRepo.App> out = new ArrayList<>();
-        Set<String> hidden = Prefs.hidden(this);
-        for (AppRepo.App a : apps) if (hidden.contains(a.pkg)) out.add(a);
-        return out;
-    }
-
     private void showWeather() {
         Weather.Now w = Prefs.on(this, Prefs.WEATHER) ? Weather.now(this) : null;
         if (w == null) {
