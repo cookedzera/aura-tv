@@ -120,7 +120,7 @@ public class WhatsNewTest {
     }
 
     @Test
-    public void withWatchOffThereIsOnlyContinue() throws Exception {
+    public void withWatchOffTryWatchSwitchesItOnAndOpensIt() throws Exception {
         installed(1_000, 9_000);
         Prefs.set(c, Prefs.WATCH, false);
         HomeActivity a = Robolectric.buildActivity(HomeActivity.class).setup().get();
@@ -128,11 +128,48 @@ public class WhatsNewTest {
         WhatsNew news = field(a, "news");
         Assert.assertNotNull(news);
         Pad open = field(news, "open"), go = field(news, "go");
-        Assert.assertNull("no Open Watch without Watch", open.getParent());
-        Assert.assertTrue("the focus is on " + a.getCurrentFocus(), go.isFocused());
+        Assert.assertNotNull("Watch is offered to try while it's off", open.getParent());
+        Assert.assertTrue("the focus is on " + a.getCurrentFocus(), open.isFocused());
+        Assert.assertEquals(go.getId(), open.getNextFocusRightId());
+        Assert.assertFalse("off until then: no tile", hasWatchTile(a));
+        open.onClick.run();
+        run(600);
+        Assert.assertNull(WhatsNewTest.<Object>field(a, "news"));
+        Assert.assertTrue("Try Watch switches it on", Prefs.watch(c));
+        Assert.assertTrue("its tile is among the apps", hasWatchTile(a));
+        WatchScreen watch = field(a, "watch");
+        Assert.assertNotNull("and Watch opens", watch);
+        Assert.assertTrue(watch.isOpen());
+        // Back from Watch: the focus on its new tile
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK));
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK));
+        run(800);
+        Assert.assertFalse(watch.isOpen());
+        java.util.List<?> cells = field(a, "cells");
+        int at = field(a, "gridAt");
+        Assert.assertEquals(HomeActivity.WATCH_TAG, field(cells.get(at), "tag"));
+    }
+
+    @Test
+    public void continueLeavesWatchOff() throws Exception {
+        installed(1_000, 9_000);
+        Prefs.set(c, Prefs.WATCH, false);
+        HomeActivity a = Robolectric.buildActivity(HomeActivity.class).setup().get();
+        run(4_500);
+        WhatsNew news = field(a, "news");
+        Pad go = field(news, "go");
         go.onClick.run();
         run(400);
         Assert.assertNull(WhatsNewTest.<Object>field(a, "news"));
+        Assert.assertFalse(Prefs.watch(c));
+        Assert.assertNull(WhatsNewTest.<Object>field(a, "watch"));
+    }
+
+    private static boolean hasWatchTile(HomeActivity a) throws Exception {
+        for (Object cell : WhatsNewTest.<java.util.List<?>>field(a, "cells")) {
+            if (HomeActivity.WATCH_TAG.equals(field(cell, "tag"))) return true;
+        }
+        return false;
     }
 
     @Test

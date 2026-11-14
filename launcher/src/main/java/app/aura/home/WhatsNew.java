@@ -37,7 +37,8 @@ import java.util.Locale;
  * What's new, for someone who has just updated: one screen, once. The version at the left with two
  * buttons; at the right Watch as a wide card (a picture and three posters from its own shelf, when
  * it has been opened before) and four small cards, each a miniature of the thing it names. OK on
- * "Open Watch" goes straight there; "Continue" or Back puts it away, and it never comes again.
+ * "Open Watch" goes straight there (with Watch still off, in beta, "Try Watch" switches it on first);
+ * "Continue" or Back puts it away, and it never comes again.
  *
  * A fresh install never sees it: the welcome is its introduction. Everything on it is drawn once
  * and then only moved; on LOW it's there whole on its first frame, HIGH brings it in piece by piece.
@@ -46,7 +47,7 @@ final class WhatsNew extends FrameLayout {
     interface Host {
         Backdrop backdrop();
 
-        /** "Open Watch" was chosen: put this away and open the Watch screen. */
+        /** "Open Watch" or "Try Watch" was chosen: put this away, switch Watch on if it's off, and open it. */
         void openWatch();
 
         /** "Continue" was chosen. */
@@ -100,7 +101,8 @@ final class WhatsNew extends FrameLayout {
         veil.edgeLight = false;
         addView(veil, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        boolean hasWatch = Prefs.watch(a);
+        // Watch is off until asked for (beta): offered to try, unless the profile is a kids' one, which never has it
+        boolean canWatch = !Profiles.kids(a);
         LinearLayout words = new LinearLayout(a);
         words.setOrientation(LinearLayout.VERTICAL);
         words.setClipChildren(false);
@@ -115,7 +117,7 @@ final class WhatsNew extends FrameLayout {
         LinearLayout buttons = new LinearLayout(a);
         buttons.setClipChildren(false);
         buttons.setGravity(Gravity.CENTER_VERTICAL);
-        open = button(h.backdrop(), a.getString(R.string.news_open_watch), true);
+        open = button(h.backdrop(), a.getString(Prefs.watch(a) ? R.string.news_open_watch : R.string.news_try_watch), true);
         go = button(h.backdrop(), a.getString(R.string.continue_word), false);
         open.onClick = h::openWatch;
         go.onClick = h::done;
@@ -128,14 +130,14 @@ final class WhatsNew extends FrameLayout {
             p.setNextFocusLeftId(open.getId());
             p.setNextFocusRightId(go.getId());
         }
-        if (hasWatch) {
+        if (canWatch) {
             buttons.addView(open, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(36)));
         } else {
-            // Watch switched off, or a profile without it: there's only going on
+            // a profile without Watch: there's only going on
             go.setNextFocusLeftId(go.getId());
         }
         LinearLayout.LayoutParams gl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(36));
-        gl.leftMargin = Ui.dp(hasWatch ? 12 : 0);
+        gl.leftMargin = Ui.dp(canWatch ? 12 : 0);
         buttons.addView(go, gl);
         words.addView(part(buttons, 320), below(30));
         addView(words, at(310, ViewGroup.LayoutParams.WRAP_CONTENT, 66, 150));

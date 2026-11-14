@@ -6084,6 +6084,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             @Override
             public void openWatch() {
                 closeNews();
+                // "Try Watch": switched on as Settings would, its tile among the apps, then opened
+                if (!Prefs.watch(HomeActivity.this)) {
+                    Prefs.set(HomeActivity.this, Prefs.WATCH, true);
+                    populate();
+                    // Back from Watch lands on its new tile, as it would after opening it from there
+                    for (int i = 0; i < cells.size(); i++) if (cells.get(i).tag.equals(WATCH_TAG)) gridAt = i;
+                }
                 HomeActivity.this.openWatch();
             }
 

@@ -1124,6 +1124,7 @@
     <string name="whats_new">Novedades</string>
     <string name="news_line">Cinco cosas nuevas.</string>
     <string name="news_open_watch">Abrir Ver</string>
+    <string name="news_try_watch">Probar Ver</string>
     <string name="news_once">Lo verás solo una vez.</string>
     <string name="news_watch_line">Algo para esta noche.</string>
     <string name="news_all_apps_line">Cada app, por categoría.</string>
