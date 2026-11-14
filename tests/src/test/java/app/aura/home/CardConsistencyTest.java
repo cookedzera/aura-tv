@@ -498,14 +498,14 @@ public class CardConsistencyTest {
         w.setAccessible(true);
         w.setBoolean(null, true);
         ac = Robolectric.buildActivity(HomeActivity.class).create().start().resume();
-        shadowOf(Looper.getMainLooper()).idleFor(100, TimeUnit.MILLISECONDS);
+        settleHome(ac.get());
         Continue.all(c, 4);
         int wnBeforeHomePress = TvStub.watchNextQueries.get();
         int pvBeforeHomePress = TvStub.previewQueries.get();
 
         // Pause -> Resume WITHOUT stop (Home key while already on Aura / overlay dismissal): keep caches!
         ac.pause().resume();
-        shadowOf(Looper.getMainLooper()).idleFor(100, TimeUnit.MILLISECONDS);
+        settleHome(ac.get());
         Continue.all(c, 4);
         Continue.previews(c, APP_A, 4);
         Assert.assertEquals("pause->resume without stop must not re-read Watch Next", wnBeforeHomePress, TvStub.watchNextQueries.get());
@@ -516,7 +516,29 @@ public class CardConsistencyTest {
         TvStub.watchNext.add(wnRow(APP_A, "After App Title", 700_000L, 1_000_000L, null, null, null, artUri, now + 5000));
         ac.pause().stop();
         ac.restart().start().resume();
-        shadowOf(Looper.getMainLooper()).idleFor(100, TimeUnit.MILLISECONDS);
+        settleHome(ac.get());
         Assert.assertEquals("return from stopped app refreshes Watch Next", "After App Title", Continue.all(c, 4).get(0).title);
+    }
+
+    private static void settleHome(HomeActivity ha) throws Exception {
+        Field appsReadF = HomeActivity.class.getDeclaredField("appsRead");
+        appsReadF.setAccessible(true);
+        Field workerF = HomeActivity.class.getDeclaredField("worker");
+        workerF.setAccessible(true);
+        Field shelfWorkerF = HomeActivity.class.getDeclaredField("shelfWorker");
+        shelfWorkerF.setAccessible(true);
+        java.util.concurrent.ExecutorService worker = (java.util.concurrent.ExecutorService) workerF.get(ha);
+        java.util.concurrent.ExecutorService shelfWorker = (java.util.concurrent.ExecutorService) shelfWorkerF.get(ha);
+        long deadline = System.currentTimeMillis() + 5_000L;
+        while (!(Boolean) appsReadF.get(ha) && System.currentTimeMillis() < deadline) {
+            shadowOf(Looper.getMainLooper()).idleFor(50, TimeUnit.MILLISECONDS);
+            Thread.sleep(10);
+        }
+        for (int i = 0; i < 12; i++) shadowOf(Looper.getMainLooper()).idleFor(50, TimeUnit.MILLISECONDS);
+        worker.submit(() -> { }).get(5, TimeUnit.SECONDS);
+        shelfWorker.submit(() -> { }).get(5, TimeUnit.SECONDS);
+        for (int i = 0; i < 4; i++) shadowOf(Looper.getMainLooper()).idleFor(50, TimeUnit.MILLISECONDS);
+        worker.submit(() -> { }).get(5, TimeUnit.SECONDS);
+        shelfWorker.submit(() -> { }).get(5, TimeUnit.SECONDS);
     }
 }
