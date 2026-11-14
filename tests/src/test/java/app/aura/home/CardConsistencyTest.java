@@ -321,7 +321,8 @@ public class CardConsistencyTest {
         Assert.assertEquals("TopShelf keeps picture-less Watched item", 1, shelf.size());
         Assert.assertEquals("Watched No Art", shelf.get(0).title);
 
-        // 3. tvOS Up Next keeps picture-less Watch Next items AND falls back to Watched.recent when Watch Next is empty
+        // 3. tvOS, widgets off: the app's own picture-less Watch Next item comes first, and an app
+        //    with nothing of its own shows none of another app's cards
         Prefs.of(c).edit()
                 .putString(Prefs.LAYOUT, "tvos")
                 .putBoolean(Prefs.DOCK_WIDGETS, false)
@@ -330,18 +331,10 @@ public class CardConsistencyTest {
         TvStub.watchNext.add(wnRow(APP_A, "WN No Art", 900_000L, 1_800_000L, null, null, null, null, now));
         Continue.clearCache();
         TopShelf.clearCache();
-        List<Continue.Item> tvosWn = TopShelf.items(c, YT_TV);
-        List<String> tvosTitles = new ArrayList<>();
-        for (Continue.Item it : tvosWn) tvosTitles.add(it.title);
-        Assert.assertEquals("tvOS Up Next keeps picture-less Watch Next item + Watched fallback",
-                Arrays.asList("WN No Art", "Watched No Art"), tvosTitles);
-
-        TvStub.watchNext.clear();
-        Continue.clearCache();
-        TopShelf.clearCache();
-        List<Continue.Item> tvosWatched = TopShelf.items(c, YT_TV);
-        Assert.assertEquals("tvOS Up Next falls back to Watched.recent", 1, tvosWatched.size());
-        Assert.assertEquals("Watched No Art", tvosWatched.get(0).title);
+        List<String> own = new ArrayList<>();
+        for (Continue.Item it : TopShelf.items(c, APP_A)) own.add(it.title);
+        Assert.assertEquals("tvOS keeps the app's own picture-less items", Arrays.asList("WN No Art", "Watched No Art"), own);
+        Assert.assertTrue("another app's cards aren't borrowed", TopShelf.items(c, YT_TV).isEmpty());
     }
 
     @Test
@@ -429,7 +422,7 @@ public class CardConsistencyTest {
         for (Continue.Item it : shelf) if ("duneparttwo".equals(Continue.key(it.title))) matches++;
         Assert.assertEquals("TopShelf collapses duplicate title across MediaWatch/WN/Fresh", 1, matches);
 
-        // 2. tvOS Up Next: Watch Next + Tonight's Pick duplicate -> Pick is not duplicated
+        // 2. tvOS, widgets off: an app with nothing of its own shows none of another app's cards
         Prefs.device(c).edit().remove("media_pkg").remove("media_title").commit();
         Prefs.of(c).edit()
                 .putString(Prefs.LAYOUT, "tvos")
@@ -442,7 +435,7 @@ public class CardConsistencyTest {
         List<Continue.Item> upNext = TopShelf.items(c, APP_B);
         int upNextMatches = 0;
         for (Continue.Item it : upNext) if ("duneparttwo".equals(Continue.key(it.title))) upNextMatches++;
-        Assert.assertEquals("tvOS Up Next does not duplicate Watch Next title with Tonight's Pick", 1, upNextMatches);
+        Assert.assertEquals("APP_B doesn't wear APP_A's Watch Next or Tonight's Pick", 0, upNextMatches);
 
         // 3. HomeActivity.applyStack: Watch Next + Fresh + Pick duplicate -> single SmartStack slide
         Field w = HomeActivity.class.getDeclaredField("warm");

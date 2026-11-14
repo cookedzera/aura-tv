@@ -210,7 +210,7 @@ public class WidgetTextTest {
         all.drawColor(0xFF000000);
         for (int i = 0; i < 4; i++) {
             Bitmap one = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-            TopShelf.paint(items[i], 0xFF3366CC).paint(new Canvas(one), w, h);
+            TopShelf.paint(items[i], 0xFF3366CC, null).paint(new Canvas(one), w, h);
             all.drawBitmap(one, (i % 2) * (w + 20), (i / 2) * (h + 20), null);
         }
         try (FileOutputStream f = new FileOutputStream("target/shelf-cards.png")) {

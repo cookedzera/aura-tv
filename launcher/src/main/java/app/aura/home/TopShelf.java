@@ -164,24 +164,27 @@ final class TopShelf extends FrameLayout {
                     if (it.art != null) base.add(it);
                 }
             }
-            synchronized (CACHE) {
-                CACHE.put(pkg, new Object[]{now, base, who});
+            // nothing found isn't kept for two minutes: a resting app looks again on its next turn
+            // (its rows and pictures, read a moment ago, are still at hand in Continue)
+            if (!base.isEmpty()) {
+                synchronized (CACHE) {
+                    CACHE.put(pkg, new Object[]{now, base, who});
+                }
             }
         }
-        boolean hasWidgets = (!Prefs.tvos(c) || Prefs.dockWidgets(c)) && Prefs.hiddenWidgets(c).size() < 3;
-        boolean tvosFallback = Prefs.tvos(c) && !hasWidgets && base.isEmpty();
+        // an app's cards are its own: one with nothing of its own shows none, rather than what
+        // another app last played (Prime Video wore JioHotstar's episode, the same cards under each)
         MediaWatch.Playing mp = MediaWatch.forApp(c, pkg);
-        if (mp == null && tvosFallback) {
-            MediaWatch.Playing last = MediaWatch.nowOrLast(c);
-            if (last != null && (last.pkg == null || HomeKeys.allowed(c, last.pkg))) mp = last;
-        }
         if (mp != null) {
             List<Continue.Item> out = new ArrayList<>();
             Continue.Item live = new Continue.Item();
             // the label already says playing or paused: under the song, only who it's by
             live.title = Ui.songTitle(mp.title);
             live.sub = mp.by != null && !mp.by.isEmpty() ? mp.by : Words.get(mp.playing ? R.string.playing_now : R.string.paused_2);
-            live.kicker = mp.playing ? "●  " + Words.get(R.string.now_playing_caps) : "▶  " + Words.get(R.string.continue_playing);
+            // a paused show is one to go on watching; a paused song, one to go on playing
+            boolean song = Watched.listening(c, mp.pkg) || Watched.listening(c, pkg);
+            live.kicker = mp.playing ? "●  " + Words.get(R.string.now_playing_caps)
+                    : "▶  " + Words.get(song ? R.string.continue_playing : R.string.continue_watching_caps);
             live.pkg = pkg;
             live.art = MediaWatch.resolveArt(c, mp);
             live.progress = mp.progress;
@@ -193,7 +196,6 @@ final class TopShelf extends FrameLayout {
                 if (out.size() >= MAX) break;
                 if (!liveRawKey.equals(Continue.key(it.title)) && !containsTitle(out, it.title)) out.add(it);
             }
-            if (tvosFallback && out.size() < MAX) fillTvosUpNext(c, out);
             return out;
         }
         if ("com.google.android.youtube.tvmusic".equals(pkg) && base.isEmpty()) {
@@ -206,12 +208,6 @@ final class TopShelf extends FrameLayout {
             ym.nowPlaying = true;
             ym.intent = c.getPackageManager().getLaunchIntentForPackage(pkg);
             out.add(ym);
-            if (tvosFallback) fillTvosUpNext(c, out);
-            return out;
-        }
-        if (tvosFallback) {
-            List<Continue.Item> out = new ArrayList<>();
-            fillTvosUpNext(c, out);
             return out;
         }
         return base;
@@ -242,45 +238,6 @@ final class TopShelf extends FrameLayout {
         return launch;
     }
 
-    /** In tvOS mode, dock apps without their own TV channel still show Up Next (Continue Watching) and Tonight's Pick. */
-    private static void fillTvosUpNext(Context c, List<Continue.Item> out) {
-        Taste.View taste = Taste.view(c);
-        for (Continue.Item it : Continue.all(c, MAX)) {
-            if (out.size() >= MAX) return;
-            // a kids' profile isn't offered what it hides, as the Smart Stack already does
-            if (it.pkg != null && !HomeKeys.allowed(c, it.pkg) || taste.declined(Continue.key(it.title))) continue;
-            if ((it.art != null || it.progress > 0f) && !containsTitle(out, it.title)) {
-                it.kicker = "▶  " + Words.get(R.string.continue_watching_caps);
-                out.add(it);
-            }
-        }
-        if (out.size() < MAX) {
-            java.util.Set<String> have = new java.util.HashSet<>();
-            for (Continue.Item it : out) have.add(Continue.key(it.title));
-            for (Continue.Item it : Watched.recent(c, have, MAX - out.size())) {
-                if (out.size() >= MAX) return;
-                if (taste.declined(Continue.key(it.title)) || containsTitle(out, it.title)) continue;
-                it.kicker = "▶  " + Words.get(R.string.continue_watching_caps);
-                out.add(it);
-            }
-        }
-        if (out.size() < MAX && Prefs.picks(c)) {
-            List<Picks.Pick> picks = Picks.load(c);
-            if (!picks.isEmpty()) {
-                int day = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR);
-                for (int i = 0; i < picks.size() && out.size() < MAX; i++) {
-                    Picks.Pick p = picks.get((day + i) % picks.size());
-                    if (taste.skip(Continue.key(p.name)) || containsTitle(out, p.name)) continue;
-                    Bitmap b = Picks.poster(p);
-                    if (b == null) continue;
-                    Continue.Item it = posterCard(p, b, "★  " + Words.get(R.string.tonights_pick_caps));
-                    it.intent = Picks.watch(c, p);
-                    out.add(it);
-                }
-            }
-        }
-    }
-
     /** A film or series as a poster card: its poster, its name and line, under {@code kicker}. */
     static Continue.Item posterCard(Picks.Pick p, Bitmap poster, String kicker) {
         Continue.Item it = new Continue.Item();
@@ -299,13 +256,17 @@ final class TopShelf extends FrameLayout {
         final Bitmap[] art;
         final int[] widths;
         final int color;
+        /** The app's icon: a card with no picture of its own shows it (see {@link #paint}). */
+        final android.graphics.drawable.Drawable icon;
         final String sig;
 
-        private Ready(List<Continue.Item> items, Bitmap[] art, int[] widths, int color, String sig) {
+        private Ready(List<Continue.Item> items, Bitmap[] art, int[] widths, int color,
+                      android.graphics.drawable.Drawable icon, String sig) {
             this.items = items;
             this.art = art;
             this.widths = widths;
             this.color = color;
+            this.icon = icon;
             this.sig = sig;
         }
     }
@@ -319,7 +280,7 @@ final class TopShelf extends FrameLayout {
      * and again on each app passed over on the dock. The cards already on show, found again, aren't
      * painted at all.
      */
-    Ready paintAll(List<Continue.Item> items, int color, int h) {
+    Ready paintAll(List<Continue.Item> items, int color, android.graphics.drawable.Drawable icon, int h) {
         int[] widths = widths(getLayoutParams().width, items.size());
         Bitmap[] art = new Bitmap[items.size()];
         StringBuilder b = new StringBuilder().append(color);
@@ -329,19 +290,19 @@ final class TopShelf extends FrameLayout {
                     .append('|').append(it.posterCard).append('|').append(it.nowPlaying);
         }
         String made = b.toString();
-        if (made.equals(sig)) return new Ready(items, art, widths, color, made);
+        if (made.equals(sig)) return new Ready(items, art, widths, color, icon, made);
         for (int i = 0; i < art.length; i++) {
             if (widths[i] <= 0 || h <= 0) continue;
             try {
                 // every card starts from near-black, nothing transparent: 16 bits on LOW, dithered as it's painted
                 art[i] = Bitmap.createBitmap(widths[i], h, Ui.light ? Bitmap.Config.RGB_565 : Bitmap.Config.ARGB_8888);
-                paint(items.get(i), color).paint(new Canvas(art[i]), widths[i], h);
+                paint(items.get(i), color, icon).paint(new Canvas(art[i]), widths[i], h);
             } catch (OutOfMemoryError e) {
                 // the card paints itself as it's laid out, as before
                 art[i] = null;
             }
         }
-        return new Ready(items, art, widths, color, made);
+        return new Ready(items, art, widths, color, icon, made);
     }
 
     /**
@@ -397,7 +358,7 @@ final class TopShelf extends FrameLayout {
             boolean tvos = Prefs.tvos(getContext());
             for (int i = 0; i < n; i++) {
                 final Continue.Item it = r.items.get(i);
-                final Card card = new Card(getContext(), paint(it, r.color), r.color, 22).asContent();
+                final Card card = new Card(getContext(), paint(it, r.color, r.icon), r.color, 22).asContent();
                 // the shelf's gaps are 18 dp: a poster grows into its half and never onto the next
                 card.setGrowRoom(9);
                 card.setContentDescription(Continue.spoken(it));
@@ -454,14 +415,30 @@ final class TopShelf extends FrameLayout {
     }
 
     /** A card's picture: wide show/film art or a tvOS Music/Play Now card with album cover and progress. */
-    static Tiles.Painter paint(Continue.Item it, int color) {
+    /** {@code icon} drawn at {@code w} by {@code h} (a copy of it: the grid's own may be drawing too), or null. */
+    private static Bitmap iconPicture(android.graphics.drawable.Drawable icon, int w, int h) {
+        if (icon == null || w <= 0 || h <= 0) return null;
+        try {
+            android.graphics.drawable.Drawable.ConstantState cs = icon.getConstantState();
+            android.graphics.drawable.Drawable d = cs != null ? cs.newDrawable().mutate() : icon;
+            Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            d.setBounds(0, 0, w, h);
+            d.draw(new Canvas(out));
+            return out;
+        } catch (RuntimeException | OutOfMemoryError e) {
+            return null;
+        }
+    }
+
+    static Tiles.Painter paint(Continue.Item it, int color, android.graphics.drawable.Drawable icon) {
         return (c, w, h) -> {
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
             c.drawColor(0xFF101216);
             Bitmap b = it.art;
             boolean musicCard = it.posterCard || it.nowPlaying;
             if (musicCard) {
-                if (b != null && b.getWidth() > 0 && b.getHeight() > 0) {
+                boolean hasArt = b != null && b.getWidth() > 0 && b.getHeight() > 0;
+                if (hasArt) {
                     // subtle atmospheric wash from the artwork itself behind the dark glass
                     float bgScale = Math.max(w / (float) b.getWidth(), h / (float) b.getHeight()) * 1.15f;
                     Matrix bm = new Matrix();
@@ -471,43 +448,53 @@ final class TopShelf extends FrameLayout {
                     c.drawBitmap(b, bm, p);
                     p.setAlpha(255);
                 }
+                // without a picture the card is the other cards' dark glass, the app's colour only a
+                // breath of light behind its icon (a whole card of it read as a poster gone wrong)
                 p.setShader(new LinearGradient(0, 0, w, h,
-                        Ui.withAlpha(Ui.mix(0xFF161922, color, 0.36f), b != null ? 0xD8 : 0xFF),
+                        Ui.withAlpha(Ui.mix(0xFF161922, color, !hasArt ? 0.12f : 0.36f), !hasArt ? 0xFF : 0xD8),
                         0xF20A0C10, Shader.TileMode.CLAMP));
                 c.drawRect(0, 0, w, h, p);
                 p.setShader(new android.graphics.RadialGradient(w * 0.20f, h * 0.5f, w * 0.72f,
-                        Ui.withAlpha(color, 0x58), 0x00000000, Shader.TileMode.CLAMP));
+                        Ui.withAlpha(color, !hasArt ? 0x26 : 0x58), 0x00000000, Shader.TileMode.CLAMP));
                 c.drawRect(0, 0, w, h, p);
                 p.setShader(null);
                 // a song's square cover a little smaller than a poster is tall, leaving the words room
                 float ah = h * (it.posterCard ? 0.72f : 0.62f), aw = it.posterCard ? ah * 0.68f : ah, ax = w * 0.052f, ay = (h - ah) / 2f, rad = aw * 0.18f;
                 RectF cover = new RectF(ax, ay, ax + aw, ay + ah);
-                if (b != null && b.getWidth() > 0 && b.getHeight() > 0) {
-                    android.graphics.BitmapShader bs = new android.graphics.BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
-                    float s = Math.max(aw / b.getWidth(), ah / b.getHeight());
+                // the picture, or else the app's own icon (JioHotstar and most video apps give none),
+                // edge to edge in the cover's rounded square as on the home grid
+                Bitmap pic = hasArt ? b : iconPicture(icon, Math.round(aw), Math.round(ah));
+                if (pic != null) {
+                    if (!hasArt) {
+                        p.setColor(0xFF1A1D24);
+                        c.drawRoundRect(cover, rad, rad, p);
+                    }
+                    android.graphics.BitmapShader bs = new android.graphics.BitmapShader(pic, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                    float s = Math.max(aw / pic.getWidth(), ah / pic.getHeight());
                     Matrix m = new Matrix();
                     m.setScale(s, s);
-                    m.postTranslate(ax + (aw - b.getWidth() * s) * 0.5f, ay + (ah - b.getHeight() * s) * 0.5f);
+                    m.postTranslate(ax + (aw - pic.getWidth() * s) * 0.5f, ay + (ah - pic.getHeight() * s) * 0.5f);
                     bs.setLocalMatrix(m);
                     p.setShader(bs);
                     c.drawRoundRect(cover, rad, rad, p);
                     p.setShader(null);
+                    if (pic != b) pic.recycle();
                 } else {
                     p.setShader(new LinearGradient(ax, ay, ax + aw, ay + ah,
-                            Ui.mix(0xFF232834, color, 0.48f), Ui.mix(0xFF12151C, color, 0.22f), Shader.TileMode.CLAMP));
+                            Ui.mix(0xFF262A33, color, 0.16f), 0xFF14171D, Shader.TileMode.CLAMP));
                     c.drawRoundRect(cover, rad, rad, p);
                     p.setShader(null);
                     // subtle play triangle inside the album tile when no artwork bitmap is present
-                    Paint icon = new Paint(Paint.ANTI_ALIAS_FLAG);
-                    icon.setColor(0xCCFFFFFF);
-                    icon.setStyle(Paint.Style.FILL);
+                    Paint play = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    play.setColor(0xCCFFFFFF);
+                    play.setStyle(Paint.Style.FILL);
                     float cx = ax + aw * 0.5f, cy = ay + ah * 0.5f, r = aw * 0.16f;
                     Path tri = new Path();
                     tri.moveTo(cx - r * 0.45f, cy - r * 0.65f);
                     tri.lineTo(cx + r * 0.75f, cy);
                     tri.lineTo(cx - r * 0.45f, cy + r * 0.65f);
                     tri.close();
-                    c.drawPath(tri, icon);
+                    c.drawPath(tri, play);
                 }
                 // hairline glass rim around the album cover
                 Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -523,7 +510,7 @@ final class TopShelf extends FrameLayout {
                 k.setTypeface(Ui.bold);
                 k.setTextSize(h * 0.066f);
                 k.setLetterSpacing(0.14f);
-                k.setColor(Ui.mix(0xE6FFFFFF, color, 0.32f));
+                k.setColor(Ui.mix(0xE6FFFFFF, color, !hasArt ? 0.12f : 0.32f));
                 android.text.TextPaint t = new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
                 t.setTypeface(Ui.heavy);
                 t.setColor(0xFFFFFFFF);

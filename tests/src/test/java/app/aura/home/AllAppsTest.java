@@ -907,7 +907,7 @@ public class AllAppsTest {
         it.sub = "S1 · E2";
         List<Continue.Item> items = new ArrayList<>();
         items.add(it);
-        shelf.show(cells.get(0).tag, shelf.paintAll(items, 0xFF336699, shelf.getLayoutParams().height), x -> { });
+        shelf.show(cells.get(0).tag, shelf.paintAll(items, 0xFF336699, null, shelf.getLayoutParams().height), x -> { });
         run(500);
         Assert.assertEquals(cells.get(0).tag, shelf.shownFor());
         Assert.assertEquals(1, shelf.cards.size());

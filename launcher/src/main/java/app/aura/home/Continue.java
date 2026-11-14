@@ -10,6 +10,7 @@ import android.media.tv.TvContract;
 import android.net.Uri;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -356,10 +357,16 @@ final class Continue {
         }
         loadAll(c, candidates, candidateUris);
         List<Item> kept = new ArrayList<>();
-        for (Item it : candidates) if ((it.art != null || it.progress > 0f) && kept.size() < Math.max(READ, max)) kept.add(it);
+        boolean missed = false;
+        for (Item it : candidates) {
+            if (it.art == null && it.progress <= 0f) missed = true;
+            else if (kept.size() < Math.max(READ, max)) kept.add(it);
+        }
         synchronized (PREVIEWS_LOCK) {
             previewsCached.put(cacheKey, kept);
-            previewsAt.put(cacheKey, now);
+            // a picture that didn't come (a slow network, a TV short of memory) is asked for again
+            // in ten seconds, not a minute: Prime Video's cards stayed away while its posters were late
+            previewsAt.put(cacheKey, missed ? now - 50_000 : now);
             java.util.Iterator<String> old = previewsCached.keySet().iterator();
             while (previewsCached.size() > PREVIEWS_KEPT && old.hasNext()) {
                 previewsAt.remove(old.next());
@@ -640,9 +647,10 @@ final class Continue {
     private static void keep(String uri, Bitmap b) {
         synchronized (ART) {
             if (artBudget == 0) {
-                // a tenth of the heap Android gives Aura
+                // a tenth of the heap Android gives Aura; on a small TV, while home is on screen, no
+                // more than a couple of screens' worth: the rest wait on disk (artOnDisk), read back in a moment
                 int mb = (int) (Runtime.getRuntime().maxMemory() >> 20);
-                artBudget = Math.max(6, Math.min(24, mb / 10)) * 1024L * 1024L;
+                artBudget = Math.max(6, Math.min(Ui.light ? 8 : 24, mb / 10)) * 1024L * 1024L;
             }
             Bitmap was = ART.put(uri, b);
             if (was != null) artBytes -= was.getByteCount();
@@ -741,41 +749,53 @@ final class Continue {
 
     private static Bitmap fetch(Context c, String uri, int maxPx) {
         try {
-            byte[] data;
             if (uri.startsWith("http")) {
+                // decoded straight from the file when it waits on the TV, no copy of its bytes in between
+                File saved = artOnDisk(c, uri);
+                Bitmap b = savedFresh(saved) ? decode(c, saved, null, maxPx) : null;
+                if (b != null) return b;
                 // plain http is refused to Aura (Android's rule since 9): the same address asked
                 // securely, as nearly every picture server answers there too (Stremio's add-ons hand out http)
                 HttpURLConnection con = (HttpURLConnection) new URL(secure(uri)).openConnection();
                 con.setConnectTimeout(8000);
                 con.setReadTimeout(10_000);
+                byte[] data;
                 try (InputStream in = con.getInputStream()) {
                     data = readAll(in);
                 } finally {
                     con.disconnect();
                 }
-            } else {
-                try (InputStream in = c.getContentResolver().openInputStream(Uri.parse(uri))) {
-                    data = readAll(in);
-                }
+                if (data == null) return null;
+                saveArt(saved, data);
+                return decode(c, null, data, maxPx);
             }
-            if (data == null) return null;
-            BitmapFactory.Options o = new BitmapFactory.Options();
-            o.inJustDecodeBounds = true;
-            BitmapFactory.decodeByteArray(data, 0, data.length, o);
-            if (o.outWidth <= 0) return null;
-            o.inJustDecodeBounds = false;
-            o.inSampleSize = 1;
-            // half the screen's width is the most a card ever shows of a picture
-            int want = maxPx > 0 ? maxPx : Math.max(480, Math.max(c.getResources().getDisplayMetrics().widthPixels,
-                    c.getResources().getDisplayMetrics().heightPixels) / 2);
-            while (o.outWidth / (o.inSampleSize * 2) >= want) o.inSampleSize *= 2;
-            // 16-bit colour is half the memory, and on a card it looks the same; a picture with
-            // transparent parts keeps its full depth, as Android ignores the preference for those
-            o.inPreferredConfig = Bitmap.Config.RGB_565;
-            return BitmapFactory.decodeByteArray(data, 0, data.length, o);
+            byte[] data;
+            try (InputStream in = c.getContentResolver().openInputStream(Uri.parse(uri))) {
+                data = readAll(in);
+            }
+            return data == null ? null : decode(c, null, data, maxPx);
         } catch (Exception | OutOfMemoryError e) {
             return null;
         }
+    }
+
+    /** The picture in {@code file}, else in {@code data}, sharp enough for the widest card (or {@code maxPx}) and no larger. */
+    private static Bitmap decode(Context c, File file, byte[] data, int maxPx) {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        if (file != null) BitmapFactory.decodeFile(file.getPath(), o);
+        else BitmapFactory.decodeByteArray(data, 0, data.length, o);
+        if (o.outWidth <= 0) return null;
+        o.inJustDecodeBounds = false;
+        o.inSampleSize = 1;
+        // half the screen's width is the most a card ever shows of a picture
+        int want = maxPx > 0 ? maxPx : Math.max(480, Math.max(c.getResources().getDisplayMetrics().widthPixels,
+                c.getResources().getDisplayMetrics().heightPixels) / 2);
+        while (o.outWidth / (o.inSampleSize * 2) >= want) o.inSampleSize *= 2;
+        // 16-bit colour is half the memory, and on a card it looks the same; a picture with
+        // transparent parts keeps its full depth, as Android ignores the preference for those
+        o.inPreferredConfig = Bitmap.Config.RGB_565;
+        return file != null ? BitmapFactory.decodeFile(file.getPath(), o) : BitmapFactory.decodeByteArray(data, 0, data.length, o);
     }
 
     /**
@@ -801,6 +821,63 @@ final class Continue {
     /** {@code uri} asked over https when it says http; anything else as it is. */
     static String secure(String uri) {
         return uri.regionMatches(true, 0, "http://", 0, 7) ? "https://" + uri.substring(7) : uri;
+    }
+
+    /**
+     * The pictures fetched from the web, as they came (a few dozen KB each), in Aura's cache: a
+     * small TV lets the decoded ones go each time an app opens (onTrimMemory), and home coming back
+     * reads them here in a moment instead of over the network. Two days unused, and a few MB at most.
+     */
+    private static final int ART_DAYS = 2, ART_FILES = 160;
+
+    /** How many pictures wait on disk, counted once and then kept count of (-1 before). */
+    private static int artFiles = -1;
+
+    /** Where {@code uri}'s picture waits, named as Aura's other saved pictures are. */
+    static File artOnDisk(Context c, String uri) {
+        return new File(new File(c.getCacheDir(), "art"), Integer.toHexString(uri.hashCode()) + "_" + uri.length());
+    }
+
+    /**
+     * There and under two days old. One still being shown is marked used once a day, so what's
+     * on screen every day stays and what's no longer shown is what goes.
+     */
+    private static boolean savedFresh(File f) {
+        long age = System.currentTimeMillis() - f.lastModified();
+        if (!f.isFile() || age >= ART_DAYS * 86_400_000L) return false;
+        //noinspection ResultOfMethodCallIgnored
+        if (age > 86_400_000L) f.setLastModified(System.currentTimeMillis());
+        return true;
+    }
+
+    private static void saveArt(File f, byte[] data) {
+        File dir = f.getParentFile();
+        if (dir == null || !dir.isDirectory() && !dir.mkdirs()) return;
+        boolean had = f.isFile();
+        if (!Watch.keep(f, data) || had) return;
+        synchronized (ART) {
+            if (artFiles < 0) {
+                String[] names = dir.list();
+                artFiles = names != null ? names.length : 0;
+            } else {
+                artFiles++;
+            }
+            if (artFiles <= ART_FILES) return;
+            // the least recently used go first, down to three quarters, so this isn't done for every picture
+            File[] all = dir.listFiles();
+            if (all == null) return;
+            long[] used = new long[all.length];
+            Integer[] order = new Integer[all.length];
+            for (int i = 0; i < all.length; i++) {
+                used[i] = all[i].lastModified();
+                order[i] = i;
+            }
+            java.util.Arrays.sort(order, (x, y) -> Long.compare(used[x], used[y]));
+            int keep = ART_FILES * 3 / 4, gone = 0;
+            //noinspection ResultOfMethodCallIgnored
+            for (int i = 0; i < all.length - keep; i++, gone++) all[order[i]].delete();
+            artFiles = all.length - gone;
+        }
     }
 
     private static byte[] readAll(InputStream in) throws IOException {

@@ -42,6 +42,11 @@ final class Watched {
             "com.bsbportal.music", "com.pandora.android", "com.deezer.android.tv", "com.aspiro.tidal",
             "com.soundcloud.android", "com.audible.application", "com.amazon.kindle", "tunein.player",
             "com.google.android.apps.podcasts", "com.pocketcasts.android"));
+    /** A music or spoken-word app (by this list, or as the app files itself): what it plays is listened to, not watched. */
+    static boolean listening(Context c, String pkg) {
+        return pkg != null && (LISTENING.contains(pkg) || "music".equals(Categories.kind(c, pkg)));
+    }
+
     private static final ExecutorService IO = Compat.background("watched", android.os.Process.THREAD_PRIORITY_BACKGROUND);
     /** The last write, so a session reporting every few seconds doesn't rewrite the list each time. */
     private static String lastKey;
@@ -56,7 +61,7 @@ final class Watched {
      */
     static synchronized void note(Context ctx, MediaWatch.Playing p, long length, long position) {
         if (ctx == null || p == null || p.title == null || p.title.trim().isEmpty() || p.pkg == null) return;
-        if (length < MIN_LENGTH || position <= 0 || LISTENING.contains(p.pkg) || p.pkg.equals(ctx.getPackageName())) return;
+        if (length < MIN_LENGTH || position <= 0 || listening(ctx, p.pkg) || p.pkg.equals(ctx.getPackageName())) return;
         String key = p.pkg + "|" + Continue.key(p.title);
         long now = System.currentTimeMillis();
         boolean partway = Continue.progressOf(position, length) > 0f;

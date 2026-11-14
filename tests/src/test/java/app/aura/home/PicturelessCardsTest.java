@@ -73,7 +73,7 @@ public class PicturelessCardsTest {
         // painted in the app's own colour, not left black
         int violet = 0xFF8A5CF6;
         Bitmap b = Bitmap.createBitmap(400, 225, Bitmap.Config.ARGB_8888);
-        TopShelf.paint(it, violet).paint(new Canvas(b), 400, 225);
+        TopShelf.paint(it, violet, null).paint(new Canvas(b), 400, 225);
         int top = b.getPixel(340, 30);
         Assert.assertTrue("a light of the app's colour at the top: " + Integer.toHexString(top),
                 Color.blue(top) > Color.green(top) + 12 && Color.red(top) > Color.green(top));

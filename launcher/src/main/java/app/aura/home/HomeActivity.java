@@ -71,7 +71,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     /** The app grid: columns, then the tile and row measures that follow from them (see {@link #sizeGrid}). */
     private int COLS = 5, TILE_W = 148, TILE_H = 84, ROW_H = 122;
     private static final int PAGE_X = 104, WIDGET_Y = 98, WIDGET_H = 142, GRID_Y = 310, FOCUS_LINE = 210;
-    private static final int SIDE_REST_W = 58, SIDE_FULL_W = 166;
     /** Each widget's natural width; the ones you keep share the row in these proportions. */
     private static final int[] WIDGET_W = {260, 320, 200};
     private static final int WIDGET_ROW = 816, WIDGET_GAP = 18;
@@ -106,15 +105,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private GlassFrame sidebar, status, hud;
     private View stickyTopScrim, bottomFeather;
     private FrameLayout homeTabBar;
-    private TextView homeTabMeta;
-    private LinearLayout shelfPill;
-    private View shelfDot;
-    private TextView shelfText;
-    private final List<TextView> sideLabels = new ArrayList<>();
-    private View sideRule;
-    private Spring.Mover sideOpenMover;
-    private float sideOpen;
-    private boolean sideExpanded;
     private TextView stProfile;
     private GradientDrawable stProfileBg;
     private View stProfileRule;
@@ -602,13 +592,18 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // home resumes while the app it replaces is still pausing (resumeWhilePausing): the list waits for a quiet moment
         if (appsDirty) Looper.myQueue().addIdleHandler(reloadWhenIdle);
         wake();
+        // back from an app: what apps put in the TV's listings is read afresh, so "jump back in" knows
+        // what you just watched. On a small TV the widgets look a moment later: the app just left
+        // is still letting go of its memory then, and home's first frames are worth more than a
+        // card a second sooner
+        handler.removeCallbacks(afterApp);
         if (leftApp) {
-            leftApp = false;
             TopShelf.clearCache();
             Continue.clearCache();
         }
-        // back from an app: "jump back in" now knows what you just watched
-        refreshWidgets(true);
+        if (leftApp && Perf.light(this)) handler.postDelayed(afterApp, 1200);
+        else refreshWidgets(true);
+        leftApp = false;
         refreshStatus();
         handler.removeCallbacks(glintTick);
         glints = 0;
@@ -710,6 +705,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     private boolean leftApp;
+
+    /** The widgets looked at again, a moment after coming back from an app on a small TV (see onResume). */
+    private final Runnable afterApp = this::widgetsAfterApp;
+
+    private void widgetsAfterApp() {
+        if (started && !isDestroyed()) refreshWidgets(true);
+    }
 
     @Override
     protected void onStop() {
@@ -1075,29 +1077,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // Top Shelf sits exactly where the widgets are, and takes their place while it shows
         shelf = new TopShelf(this);
         page.addView(shelf, frame(Ui.dp(WIDGET_ROW), Ui.dp(WIDGET_H), Gravity.TOP | Gravity.START, Ui.dp(PAGE_X), Ui.dp(WIDGET_Y), 0, 0));
-        shelfPill = new LinearLayout(this);
-        shelfPill.setGravity(Gravity.CENTER_VERTICAL);
-        shelfPill.setPadding(Ui.dp(8), 0, Ui.dp(10), 0);
-        GradientDrawable spBg = new GradientDrawable();
-        spBg.setCornerRadius(Ui.dpf(999));
-        spBg.setColor(0xAD121620);
-        spBg.setStroke(Math.max(1, Ui.dp(0.75f)), 0x3DFFFFFF);
-        shelfPill.setBackground(spBg);
-        shelfDot = new View(this);
-        GradientDrawable sdBg = new GradientDrawable();
-        sdBg.setShape(GradientDrawable.OVAL);
-        sdBg.setColor(DAY_GLOW);
-        shelfDot.setBackground(sdBg);
-        LinearLayout.LayoutParams sdl = new LinearLayout.LayoutParams(Ui.dp(5), Ui.dp(5));
-        sdl.rightMargin = Ui.dp(6);
-        shelfPill.addView(shelfDot, sdl);
-        shelfText = Ui.caps(this, 7f, 0xE6FFFFFF, 0.16f);
-        shelfText.setSingleLine(true);
-        shelfPill.addView(shelfText);
-        shelfPill.setVisibility(View.GONE);
-        shelfPill.setAlpha(0f);
-        shelfPill.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> placeShelfPill());
-        page.addView(shelfPill, frame(WRAP, Ui.dp(18), Gravity.TOP | Gravity.START, 0, Ui.dp(WIDGET_Y - 22), 0, 0));
         gridLabel = Ui.caps(this, 7.5f, 0xB3FFFFFF, 0.26f);
         page.addView(gridLabel, frame(WRAP, WRAP, Gravity.TOP | Gravity.START, Ui.dp(PAGE_X), Ui.dp(GRID_Y - 28), 0, 0));
         // Aura's sticky header scrim & soft bottom horizon feather (tiles scroll beneath the docked categories)
@@ -1127,19 +1106,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             }
         });
         homeTabs.setVisibility(View.GONE);
-        homeTabs.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> updateTabMetaVisibility());
         homeTabBar.addView(homeTabs, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER_HORIZONTAL | Gravity.TOP));
-        homeTabMeta = Ui.text(this, 8.5f, Ui.semibold, 0xA8FFFFFF);
-        homeTabMeta.setLetterSpacing(0.06f);
-        homeTabMeta.setPadding(Ui.dp(9), Ui.dp(4), Ui.dp(9), Ui.dp(4));
-        GradientDrawable tmBg = new GradientDrawable();
-        tmBg.setCornerRadius(Ui.dpf(999));
-        tmBg.setColor(0x16FFFFFF);
-        tmBg.setStroke(Math.max(1, Ui.dp(0.75f)), 0x24FFFFFF);
-        homeTabMeta.setBackground(tmBg);
-        homeTabMeta.setVisibility(View.GONE);
-        homeTabMeta.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> updateTabMetaVisibility());
-        homeTabBar.addView(homeTabMeta, frame(WRAP, WRAP, Gravity.END | Gravity.TOP, 0, Ui.dp(5), 0, 0));
         homeTabBar.setVisibility(View.GONE);
         homeTabBar.setTranslationY(Ui.dpf(TABS_REST_Y));
         home.addView(homeTabBar, frame(Ui.dp(WIDGET_ROW), WRAP, Gravity.TOP | Gravity.START, Ui.dp(PAGE_X), 0, 0, 0));
@@ -1721,7 +1688,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tdmKicker.setSingleLine(true);
         tdmKicker.setEllipsize(android.text.TextUtils.TruncateAt.END);
         words.addView(tdmKicker, lp(MATCH, WRAP, 0, 0));
-        tdmTitle = Ui.text(this, 13.5f, Ui.semibold, 0xFFF7F4EE);
+        tdmTitle = Ui.text(this, 13.5f, Ui.medium, 0xFFF7F4EE);
         tdmTitle.setSingleLine(false);
         tdmTitle.setMaxLines(2);
         tdmTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -1760,8 +1727,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         cl.leftMargin = Ui.dp(6);
         tdChip.addView(tdChipText, cl);
         foot.addView(tdChip, new LinearLayout.LayoutParams(WRAP, Ui.dp(24)));
-        LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(0, Ui.dp(3), 1f);
+        LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(0, Ui.dp(4), 1f);
         pl.leftMargin = Ui.dp(12);
+        pl.rightMargin = Ui.dp(2);
         foot.addView(tdProgress, pl);
         tdMusic.addView(foot, lp(MATCH, Ui.dp(24), 0, 0));
         tdMusic.setVisibility(View.GONE);
@@ -1791,9 +1759,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             tdArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
             tdArt.setPadding(0, 0, 0, 0);
         } else if (owner != null && owner.icon() != null) {
+            // the app's icon whole, edge to edge like an icon on iOS (small in a grey box, it looked lost)
             tdArt.setImageDrawable(owner.icon());
-            tdArt.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            tdArt.setPadding(Ui.dp(8), Ui.dp(8), Ui.dp(8), Ui.dp(8));
+            tdArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            tdArt.setPadding(0, 0, 0, 0);
         } else {
             tdArt.setImageResource(R.drawable.ic_play);
             tdArt.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
@@ -2181,7 +2150,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         sl.rightMargin = Ui.dp(dock ? 40 + tops.size() * (40 + 10) : 40);
         status.setLayoutParams(sl);
         sidebar.setVisibility(sideHidden ? View.GONE : View.VISIBLE);
-        sideExpand(false, false);
         sideShown(!dock, false);
         topShown(!dock, false);
         refreshProfileIdentity();
@@ -2201,28 +2169,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         l.width = Ui.dp(WIDGET_ROW + 36);
         l.height = Ui.dp(TILE_H + ("focus".equals(nm) || "always".equals(nm) ? 58 : 36));
         dockGlass.setLayoutParams(l);
-        int sy = dock ? y - 18 - 22 - WIDGET_H : WIDGET_Y;
         FrameLayout.LayoutParams s = (FrameLayout.LayoutParams) shelf.getLayoutParams();
         s.leftMargin = Ui.dp(px);
-        s.topMargin = Ui.dp(sy);
+        s.topMargin = Ui.dp(dock ? y - 18 - 22 - WIDGET_H : WIDGET_Y);
         shelf.setLayoutParams(s);
-        if (shelfPill != null) {
-            FrameLayout.LayoutParams sp = (FrameLayout.LayoutParams) shelfPill.getLayoutParams();
-            sp.topMargin = Ui.dp(sy - 22);
-            shelfPill.setLayoutParams(sp);
-            placeShelfPill();
-        }
         if (pageDots != null) {
             FrameLayout.LayoutParams dl = (FrameLayout.LayoutParams) pageDots.getLayoutParams();
             dl.leftMargin = Ui.dp(px);
             pageDots.setLayoutParams(dl);
         }
 
-    }
-
-    private void placeShelfPill() {
-        if (shelfPill == null || shelfPill.getWidth() <= 0) return;
-        shelfPill.setTranslationX(Ui.dpf(pageX() + WIDGET_ROW) - shelfPill.getWidth());
     }
 
     /** The tvOS style's sidebar: out of sight to the left until it has focus. */
@@ -2382,35 +2338,31 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return DAY_GLOW;
     }
 
-    /** A floating glass rail, visionOS style; unfurls smoothly to show action labels when focused. */
+    /** A floating glass rail, visionOS style; the page you're on keeps a soft disc behind its icon. */
     private void buildSidebar() {
         sidebar = new GlassFrame(this, backdrop, 29, 0.3f);
         sidebar.frost = 0.06f;
         sidebar.setClipContent(false);
-        sidebar.clipToDisplayWidth = true;
-        sidebar.setDisplayWidth(Ui.dpf(SIDE_REST_W));
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setGravity(Gravity.START);
-        col.setPadding(Ui.dp(8), Ui.dp(8), Ui.dp(8), Ui.dp(8));
+        col.setGravity(Gravity.CENTER_HORIZONTAL);
+        col.setPadding(0, Ui.dp(8), 0, Ui.dp(8));
         col.setClipChildren(false);
         col.setClipToPadding(false);
-        // four actions anchored to the left 58dp spine; labels spring open cleanly beside them on focus
+        // four things, each said by its icon alone: the apps are a press to the right, the photograph
+        // has the screen with Up past the top of the page, and Watch is a tile among the apps
         addSide(col, R.drawable.ic_search, getString(R.string.find_an_app), () -> openFind(""));
         addSide(col, R.drawable.ic_hdmi, getString(R.string.inputs_2), () -> openCc(true));
-        sideRule = Ui.rule(this, 0x33FFFFFF);
-        sideRule.setPivotX(0f);
         LinearLayout.LayoutParams rl = lp(Ui.dp(22), Ui.hair(), 0, 10);
-        rl.leftMargin = Ui.dp(10);
         rl.bottomMargin = Ui.dp(4);
-        col.addView(sideRule, rl);
+        col.addView(Ui.rule(this, 0x33FFFFFF), rl);
         addSide(col, R.drawable.ic_tune, getString(R.string.control_center_2), () -> openCc(false));
         addSide(col, R.drawable.ic_settings, getString(R.string.settings), this::openSettings);
-        // a small red dot anchored to the Settings icon corner while an update waits, as on iOS
+        // a small red dot on Settings while a new version of Aura waits, as on iOS
         updateDot = redDot(this);
-        ((FrameLayout) side.get(side.size() - 1)).addView(updateDot, frame(Ui.dp(8), Ui.dp(8), Gravity.TOP | Gravity.START, Ui.dp(28), Ui.dp(6), 0, 0));
+        ((FrameLayout) side.get(side.size() - 1)).addView(updateDot, frame(Ui.dp(8), Ui.dp(8), Gravity.TOP | Gravity.END, 0, Ui.dp(6), Ui.dp(6), 0));
         sidebar.addView(col, new FrameLayout.LayoutParams(MATCH, WRAP));
-        home.addView(sidebar, frame(Ui.dp(SIDE_FULL_W), WRAP, Gravity.START | Gravity.CENTER_VERTICAL, Ui.dp(22), 0, 0, 0));
+        home.addView(sidebar, frame(Ui.dp(58), WRAP, Gravity.START | Gravity.CENTER_VERTICAL, Ui.dp(22), 0, 0, 0));
     }
 
     private View updateDot;
@@ -2453,58 +2405,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
     };
 
-    /** One of the rail's actions; its icon stays locked at the rail center while its label unveils on focus. */
+    /** One of the rail's icons; {@code label} is what TalkBack says for it. */
     private void addSide(LinearLayout col, int iconRes, String label, Runnable action) {
         Pad p = new Pad(this, null, 21, 0f);
         p.plainColor = 0x00FFFFFF;
         p.edgeLight = false;
-        p.focusScale = 1.05f;
-        p.setDisplayWidth(Ui.dpf(42));
+        p.focusScale = Ui.FOCUS_SCALE_CONTROL;
         p.setContentDescription(label);
-        p.addView(p.tint(ControlCenter.icon(this, iconRes), 1f),
-                frame(Ui.dp(19), Ui.dp(19), Gravity.START | Gravity.CENTER_VERTICAL, Math.round(Ui.dpf(11.5f)), 0, 0, 0));
-        TextView lbl = p.tint(Ui.text(this, 12f, Ui.semibold, 0xF2FFFFFF), 1f);
-        lbl.setText(label);
-        lbl.setSingleLine(true);
-        lbl.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        lbl.setAlpha(0f);
-        lbl.setTranslationX(-Ui.dpf(6));
-        p.addView(lbl, frame(MATCH, WRAP, Gravity.START | Gravity.CENTER_VERTICAL, Ui.dp(40), 0, Ui.dp(12), 0));
+        p.addView(p.tint(ControlCenter.icon(this, iconRes), 1f), frame(Ui.dp(19), Ui.dp(19), Gravity.CENTER, 0, 0, 0, 0));
         p.onClick = action;
-        col.addView(p, lp(Ui.dp(SIDE_FULL_W - 16), Ui.dp(42), 0, side.isEmpty() ? 0 : 6));
+        col.addView(p, lp(Ui.dp(42), Ui.dp(42), 0, side.isEmpty() ? 0 : 6));
         side.add(p);
-        sideLabels.add(lbl);
-    }
-
-    /** Springs the sidebar glass horizontally between icon rail and labelled visionOS capsule. */
-    private void sideExpand(boolean open, boolean animate) {
-        if (open == sideExpanded && animate) return;
-        sideExpanded = open;
-        float to = open ? 1f : 0f;
-        if (sideOpenMover == null) {
-            sideOpenMover = new Spring.Mover(Ui.light ? new Spring(0.18, 0) : new Spring(0.28, 0.16), 0.005f, sideOpen, this::applySidebarOpen);
-        }
-        if (!animate) sideOpenMover.jump(to);
-        else sideOpenMover.to(to);
-    }
-
-    private void applySidebarOpen(float f) {
-        sideOpen = f;
-        if (sidebar == null) return;
-        float clamped = Ui.clamp(f, 0f, 1f);
-        float sw = Ui.dpf(SIDE_REST_W) + Ui.dpf(SIDE_FULL_W - SIDE_REST_W) * clamped;
-        sidebar.darkness = 0.30f + 0.34f * clamped;
-        sidebar.setDisplayWidth(sw);
-        float pw = Ui.dpf(42) + Ui.dpf(SIDE_FULL_W - 16 - 42) * clamped;
-        for (int i = 0; i < side.size(); i++) side.get(i).setDisplayWidth(pw);
-        float la = Ui.clamp((clamped - 0.16f) / 0.62f, 0f, 1f);
-        float dx = -Ui.dpf(6) * (1f - clamped);
-        for (int i = 0; i < sideLabels.size(); i++) {
-            TextView t = sideLabels.get(i);
-            t.setAlpha(la);
-            t.setTranslationX(dx);
-        }
-        if (sideRule != null) sideRule.setScaleX(1f + 4.9f * clamped);
     }
 
     /** Updates the status-pill profile avatar badge and personalized greeting. */
@@ -2991,7 +2902,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             progressSplash();
         }
         refreshWidgets(true);
-        updateTabMeta();
         windowMoved();
     }
 
@@ -4475,7 +4385,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             // Even without category tabs, a soft top scrim cushions scrolling tiles below the edge.
             stickyTopScrim.setAlpha(dockFrac * 0.72f);
         }
-        updateTabMetaAlpha(dockFrac);
     }
 
     /**
@@ -4711,9 +4620,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // the card you're looking at stays put; in light mode, so does the stack of a home left alone
         stack.hold(n == fyW || racked && Perf.light(this));
         int i = side.indexOf(n);
-        // the tvOS style's sidebar slides in only while it has focus; both styles unfurl their labels on focus
+        // the tvOS style's sidebar slides in only while it has focus
         if (dock && !sideHidden) sideShown(i >= 0, true);
-        sideExpand(i >= 0, true);
         if (dock) topShown(tops.contains(n), true);
         if (tops.contains(n)) {
             zone = TOP;
@@ -5554,7 +5462,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (!pkg.equals(shelfWanted)) return;
             final List<Continue.Item> items = ofWatch ? Watch.cards(app, 3) : TopShelf.items(app, pkg);
             if (!pkg.equals(shelfWanted)) return;
-            final TopShelf.Ready ready = shelf.paintAll(items, color, rowH);
+            final TopShelf.Ready ready = shelf.paintAll(items, color, a != null ? a.icon() : null, rowH);
             runOnUiThread(() -> {
                 if (isDestroyed() || !pkg.equals(shelfWanted) || zone != GRID || rowOf(gridAt) > 0) return;
                 if (items.isEmpty()) {
@@ -5582,7 +5490,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     if (!Ui.light) wa.scaleX(0.95f).scaleY(0.95f);
                     wa.start();
                 }
-                showShelfPill(ofWatch ? getString(R.string.watch) : a != null ? a.label : "", color);
             });
         });
     };
@@ -5613,11 +5520,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void hideShelf() {
         handler.removeCallbacks(shelfLoad);
         shelfWanted = null;
-        if (shelfPill != null && shelfPill.getVisibility() == View.VISIBLE) {
-            shelfPill.animate().cancel();
-            shelfPill.animate().alpha(0f).translationY(Ui.dpf(4)).setDuration(200).setStartDelay(0)
-                    .setInterpolator(Ui.SOFT).withEndAction(() -> shelfPill.setVisibility(View.GONE)).start();
-        }
         if (!shelf.up()) return;
         shelf.hide();
         if (dashboard) {
@@ -5627,20 +5529,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 wa.start();
             }
         }
-    }
-
-    private void showShelfPill(String ownerName, int color) {
-        if (shelfPill == null || ownerName == null || ownerName.isEmpty()) return;
-        if (shelfDot != null && shelfDot.getBackground() instanceof GradientDrawable) {
-            ((GradientDrawable) shelfDot.getBackground()).setColor(color);
-        }
-        shelfText.setText(getString(R.string.top_shelf) + " · " + ownerName.toUpperCase(Locale.getDefault()));
-        shelfPill.animate().cancel();
-        shelfPill.setVisibility(View.VISIBLE);
-        shelfPill.setAlpha(0f);
-        shelfPill.setTranslationY(Ui.dpf(6));
-        placeShelfPill();
-        shelfPill.animate().alpha(1f).translationY(0f).setStartDelay(60).setDuration(320).setInterpolator(Ui.EMPHASIZED).start();
     }
 
     // ---- now playing -------------------------------------------------------------------------
@@ -6610,7 +6498,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     }
 
     /** dp: the Aura home's centered category capsule height, its rest row above the grid, and its sticky scrolled dock Y. */
-    private static final int TABS_H = 34, TABS_REST_Y = 254, TABS_DOCK_Y = 26;
+    private static final int TABS_REST_Y = 254, TABS_DOCK_Y = 26;
     private TabStrip homeTabs;
     /** The Aura home's tabs (category ids, in order), and the one whose apps the grid shows: null with no tabs up. */
     private final List<String> homeTabIds = new ArrayList<>();
@@ -6626,7 +6514,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (list.size() < 2) {
             homeTabs.setVisibility(View.GONE);
             if (homeTabBar != null) homeTabBar.setVisibility(View.GONE);
-            if (homeTabMeta != null) homeTabMeta.setVisibility(View.GONE);
             homeTabIds.clear();
             homeTab = null;
             return null;
@@ -6654,32 +6541,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         homeTabs.setVisibility(View.VISIBLE);
         if (homeTabBar != null) homeTabBar.setVisibility(View.VISIBLE);
-        updateTabMeta();
         positionHomeTabs(scrollY + giveY);
         return homeTab.equals(Categories.ALL) ? null : list.get(at);
-    }
-
-    /** Refreshes the subtle right-side category counter and L1/R1 hint pill beside the centered capsule. */
-    private void updateTabMeta() {
-        if (homeTabMeta == null || dock || homeTab == null || homeTabs.getVisibility() != View.VISIBLE) return;
-        int count = cells.size();
-        homeTabMeta.setText(count + "  ·  L1 / R1");
-        updateTabMetaVisibility();
-    }
-
-    private void updateTabMetaVisibility() {
-        if (homeTabMeta == null || homeTabBar == null) return;
-        boolean show = !dock && homeTab != null && homeTabs.getVisibility() == View.VISIBLE;
-        if (show && homeTabBar.getWidth() > 0 && homeTabs.getWidth() > 0) {
-            int metaW = homeTabMeta.getWidth() > 0 ? homeTabMeta.getWidth() : Ui.dp(72);
-            show = homeTabs.getRight() + Ui.dp(14) <= homeTabBar.getWidth() - metaW;
-        }
-        homeTabMeta.setVisibility(show ? View.VISIBLE : View.GONE);
-    }
-
-    private void updateTabMetaAlpha(float dockFrac) {
-        if (homeTabMeta == null) return;
-        homeTabMeta.setAlpha(Ui.clamp(1f - dockFrac * 3.2f, 0f, 1f));
     }
 
     /**
@@ -7692,8 +7555,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 wallAt > 0 ? wallAt - createdAt : -1);
         // the landing never played (no frames came): the home screen its intro would fade in, shown now
         if ((dock ? dockGlass : status).getAlpha() == 0f) {
-            for (View v : new View[]{sidebar, status, greeting, skyW, fyW, tdW, gridLabel, homeTabs, homeTabMeta, topCc, topFind, topSettings, dockGlass, tvosHint}) if (v != null) v.setAlpha(1f);
-            updateTabMetaAlpha(dock ? 0f : Ui.clamp((Ui.dpf(TABS_REST_Y) - (Ui.dpf(TABS_REST_Y) + scrollY + giveY)) / Math.max(1f, Ui.dpf(TABS_REST_Y - TABS_DOCK_Y)), 0f, 1f));
+            for (View v : new View[]{sidebar, status, greeting, skyW, fyW, tdW, gridLabel, homeTabs, topCc, topFind, topSettings, dockGlass, tvosHint}) if (v != null) v.setAlpha(1f);
             if (dock) {
                 sideShown(false, false);
                 topShown(false, false);
@@ -7776,7 +7638,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     /** Keeps the interface invisible under the boot screen so nothing pops as it dissolves. */
     private void hideForIntro() {
-        for (View v : new View[]{sidebar, status, greeting, skyW, fyW, tdW, gridLabel, homeTabs, homeTabMeta, topCc, topFind, topSettings, dockGlass, tvosHint, listenW}) if (v != null) v.setAlpha(0f);
+        for (View v : new View[]{sidebar, status, greeting, skyW, fyW, tdW, gridLabel, homeTabs, topCc, topFind, topSettings, dockGlass, tvosHint, listenW}) if (v != null) v.setAlpha(0f);
         bloom.setStrength(0f, 0);
     }
 
@@ -7804,7 +7666,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             if (zone == GRID && !cells.isEmpty()) shelfFor(gridAt);
         }
         if (quietIntro()) {
-            for (View v : new View[]{greeting, gridLabel, homeTabs, homeTabMeta, dockGlass, tvosHint}) if (v != null) enter(v, 0, 0, 500, 600);
+            for (View v : new View[]{greeting, gridLabel, homeTabs, dockGlass, tvosHint}) if (v != null) enter(v, 0, 0, 500, 600);
             if (!dock) {
                 enter(sidebar, 0, 0, 500, 600);
                 enter(status, 0, 0, 500, 600);
@@ -7826,7 +7688,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         enter(gridLabel, 0, 0, 1450, 800);
         // the categories stand centered over the grid: they rise smoothly into place
         enter(homeTabs, 0, Ui.dp(10), 1450, 800);
-        if (homeTabMeta != null) enter(homeTabMeta, 0, Ui.dp(10), 1500, 800);
         handler.postDelayed(() -> {
             backdrop.setDefocus(homeDefocus(), 1500);
             bloom.setStrength(glow(), 1500);

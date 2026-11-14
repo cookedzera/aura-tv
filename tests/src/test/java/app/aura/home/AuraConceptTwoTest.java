@@ -37,7 +37,7 @@ import static org.robolectric.Shadows.shadowOf;
 /**
  * Verifies the Concept 2 Aura style upgrades: centered category capsule & corridor clearance,
  * sticky docking on scroll with status fade & top scrim, L1/R1 direct category switching,
- * visionOS-style expanding sidebar labels, and active profile identity on home.
+ * the sidebar as a small icon rail whose focused icon lifts, and active profile identity on home.
  */
 @RunWith(RobolectricTestRunner.class)
 @LooperMode(LooperMode.Mode.PAUSED)
@@ -222,13 +222,11 @@ public class AuraConceptTwoTest {
     }
 
     @Test
-    public void sidebarUnfurlsGlassAndLabelsOnFocusWithoutReflow() throws Exception {
+    public void sidebarStaysASmallIconRailAndLiftsTheFocusedIcon() throws Exception {
         HomeActivity a = auraHome(3, 8);
         GlassFrame sidebar = field(a, "sidebar");
         List<Pad> side = field(a, "side");
-        List<TextView> labels = field(a, "sideLabels");
-        Assert.assertEquals("collapsed rest glass width", Ui.dpf(58), sidebar.displayWidth, Ui.dpf(1));
-        Assert.assertEquals(0f, labels.get(0).getAlpha(), 0.01f);
+        Assert.assertEquals("an icon rail, never widening over the page", Ui.dp(58), sidebar.getLayoutParams().width);
 
         List<Cell> cells = field(a, "cells");
         cells.get(0).card.requestFocusFromTouch();
@@ -240,15 +238,17 @@ public class AuraConceptTwoTest {
         a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_LEFT));
         run(900);
         Assert.assertEquals(0, (int) field(a, "zone")); // SIDE = 0
-        Assert.assertEquals("expanded visionOS glass width", Ui.dpf(166), sidebar.displayWidth, Ui.dpf(2));
-        Assert.assertEquals("labels unveiled cleanly", 1f, labels.get(0).getAlpha(), 0.05f);
-        shot(a, "target/aura-sidebar-open.png");
+        Pad lit = null;
+        for (Pad p : side) if (p.isFocused()) lit = p;
+        Assert.assertNotNull("an icon of the rail has the focus", lit);
+        Assert.assertTrue("the focused icon lifts a little: " + lit.getScaleX(), lit.getScaleX() > 1.03f);
+        Assert.assertEquals("the rail itself stays put", Ui.dp(58), sidebar.getWidth());
+        shot(a, "target/aura-sidebar-focus.png");
 
         a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT));
         a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_RIGHT));
         run(900);
-        Assert.assertEquals("collapsed cleanly back to rail", Ui.dpf(58), sidebar.displayWidth, Ui.dpf(2));
-        Assert.assertEquals(0f, labels.get(0).getAlpha(), 0.05f);
+        Assert.assertEquals("the icon settles back", 1f, lit.getScaleX(), 0.01f);
     }
 
     @Test
