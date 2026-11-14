@@ -3575,8 +3575,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             pageShift = v;
             for (int i = 0; i < cells.size(); i++) cells.get(i).setTranslationX(placeX(i, cells.get(i)));
             if (pageDots != null) pageDots.setPosition(v / pageW());
-            // like the vertical scroll: panes on screen repaint every 6dp and where they stop
-            if (pageGlide.moving() && Math.abs(v - pageGlassAt) < 6) return;
+            // like the vertical scroll: panes on screen repaint every 6dp and where they stop (LOW: settle only)
+            if (Ui.light ? pageGlide.moving() : pageGlide.moving() && Math.abs(v - pageGlassAt) < 6) return;
             pageGlassAt = v;
             float w = root.getWidth();
             for (int i = 0; i < cells.size(); i++) {
@@ -4395,7 +4395,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      * panes on screen.
      */
     private void repaintScrollGlass(float ty, boolean done) {
-        if (!done && Math.abs(ty - scrollBlurY) < Ui.dpf(6)) return;
+        if (!done && (Ui.light || Math.abs(ty - scrollBlurY) < Ui.dpf(6))) return;
         scrollBlurY = ty;
         int h = root.getHeight() > 0 ? root.getHeight() : Ui.dp(540);
         for (int i = 0; i < widgets.size(); i++) if (widgets.get(i).getAlpha() > 0f) widgets.get(i).invalidate();
@@ -6626,8 +6626,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         populate();
         float dx = Ui.dpf(28) * Integer.signum(k - was);
         boolean rich = AllApps.rich(this);
+        boolean light = Ui.light;
         // the rows on screen (the first few: the page sits at its top on a tab); those below are simply there
-        for (int i = 0; i < cells.size() && rowOf(i) < AllApps.STAGGERED_ROWS; i++) {
+        int animRows = light ? Math.min(2, AllApps.STAGGERED_ROWS) : AllApps.STAGGERED_ROWS;
+        for (int i = 0; i < cells.size() && rowOf(i) < animRows; i++) {
             Cell c = cells.get(i);
             float x = cellX(i), y = cellY(i);
             int row = rowOf(i), col = i % Math.max(1, COLS);
@@ -6635,7 +6637,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             c.setTranslationX(x + dx);
             c.setTranslationY(y + (rich ? Ui.dpf(5) : 0f));
             long delay = rich ? col * 14L + row * 28L : 0L;
-            long dur = (rich ? 240L : AllApps.IN_MS) + (long) AllApps.ROW_TRAIL_MS * row;
+            long dur = light ? 160L : (rich ? 240L : AllApps.IN_MS) + (long) AllApps.ROW_TRAIL_MS * row;
             android.view.ViewPropertyAnimator in = c.animate().translationX(x).translationY(y)
                     .setStartDelay(delay).setDuration(dur).setInterpolator(rich ? Ui.EMPHASIZED : Ui.EASE_DECEL);
             if (rich) {

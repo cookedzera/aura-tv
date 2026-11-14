@@ -93,6 +93,7 @@ final class TabStrip extends LinearLayout {
     /** Deepens the capsule glass as it docks over scrolling rows ({@code 0} at rest, {@code 1} docked). */
     void setDocked(float f) {
         float c = Ui.clamp(f, 0f, 1f);
+        if (Ui.light && c > 0f && c < 1f) c = Math.round(c * 4f) / 4f;
         if (Math.abs(c - dockFrac) < 0.004f) return;
         dockFrac = c;
         capsule.setColor(Ui.mix(0x1FFFFFFF, 0xCF0D1017, c));
@@ -228,7 +229,7 @@ final class TabStrip extends LinearLayout {
             litAnim.cancel();
             litFrom = litFrac;
             litTo = onTabs ? 1f : 0f;
-            if (!live) {
+            if (!live || Ui.light) {
                 litFrac = litTo;
             } else {
                 litAnim.setDuration(onTabs ? Ui.CTRL_HILITE_IN : Ui.CTRL_HILITE_OUT);

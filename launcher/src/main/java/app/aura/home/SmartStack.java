@@ -635,6 +635,12 @@ final class SmartStack extends FrameLayout {
         void setLit(boolean on) {
             if (lit == on) return;
             lit = on;
+            if (Ui.light) {
+                if (litAnim != null) litAnim.cancel();
+                litFrac = on ? 1f : 0f;
+                invalidate();
+                return;
+            }
             if (litAnim == null) {
                 litAnim = ValueAnimator.ofFloat(0f, 1f);
                 litAnim.addUpdateListener(a -> {
@@ -660,13 +666,16 @@ final class SmartStack extends FrameLayout {
             // the pill always glides forward, wrapping from the last card to the first
             float from = pos, to = i;
             if (to < from) from = -1;
-            glide = ValueAnimator.ofFloat(from, to);
-            glide.setDuration(560);
-            glide.setInterpolator(Ui.EMPHASIZED);
-            glide.addUpdateListener(a -> {
-                pos = (float) a.getAnimatedValue();
-                invalidate();
-            });
+            if (glide == null) {
+                glide = new ValueAnimator();
+                glide.addUpdateListener(a -> {
+                    pos = (float) a.getAnimatedValue();
+                    invalidate();
+                });
+            }
+            glide.setFloatValues(from, to);
+            glide.setDuration(Ui.light ? 200 : 560);
+            glide.setInterpolator(Ui.light ? Ui.EASE_DECEL : Ui.EMPHASIZED);
             glide.start();
         }
 
