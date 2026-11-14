@@ -886,6 +886,54 @@ public class AllAppsTest {
     }
 
     @Test
+    public void anAppsCardsStayWhileTheFocusPassesTheAuraTabsAndUpAgainReachesThem() throws Exception {
+        Prefs.of(c).edit().putString(Prefs.LAYOUT, "aura").commit();
+        HomeActivity a = home(2, 3);
+        List<Cell> cells = field(a, "cells");
+        TopShelf shelf = field(a, "shelf");
+        TabStrip tabs = homeTabs(a);
+        for (int i = 0; i < tabs.size(); i++) tabs.tab(i).setFocusableInTouchMode(true);
+        Card app = cells.get(0).card;
+        app.setFocusableInTouchMode(true);
+        Assert.assertTrue(app.requestFocus());
+        // its own look for cards finds none here and settles
+        for (int i = 0; i < 40; i++) {
+            Thread.sleep(20);
+            run(64);
+        }
+        // the first app's cards are up, as its Top Shelf puts them
+        Continue.Item it = new Continue.Item();
+        it.title = "An episode";
+        it.sub = "S1 · E2";
+        List<Continue.Item> items = new ArrayList<>();
+        items.add(it);
+        shelf.show(cells.get(0).tag, shelf.paintAll(items, 0xFF336699, shelf.getLayoutParams().height), x -> { });
+        run(500);
+        Assert.assertEquals(cells.get(0).tag, shelf.shownFor());
+        Assert.assertEquals(1, shelf.cards.size());
+        shelf.cards.get(0).setFocusableInTouchMode(true);
+
+        // Up: onto the categories, and the cards stay where they are
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP));
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_UP));
+        run(300);
+        Assert.assertTrue("Up from the top row is on the categories", tabs.focused() >= 0);
+        Assert.assertEquals("the app's cards stay up while the focus passes the categories", cells.get(0).tag, shelf.shownFor());
+
+        // Up again: onto its card
+        HomeActivity.lastKeyAt = 0;
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP));
+        a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_UP));
+        run(300);
+        Assert.assertTrue("Up again reaches the card", shelf.cards.get(0).isFocused());
+
+        // another category picked: other apps are coming, and the cards go
+        call(a, "pickHomeTab", new Class<?>[]{int.class}, 1);
+        run(400);
+        Assert.assertNull(shelf.shownFor());
+    }
+
+    @Test
     public void theTvosHomeHasNoTabs() throws Exception {
         HomeActivity a = home(2, 3);
         Assert.assertEquals(View.GONE, ((View) field(a, "homeTabs")).getVisibility());

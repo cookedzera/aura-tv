@@ -1118,7 +1118,6 @@
     <string name="watch_deciding">Decidiendo…</string>
     <string name="watch_credit">Títulos e imágenes de %1$s</string>
     <string name="watch_credit_where">Dónde verlo: JustWatch</string>
-    <string name="watch_on_home">Una casilla en la pantalla de inicio</string>
     <string name="help_watch">Películas y series para elegir, por género, como una casilla entre tus apps. Usa la red solo mientras está abierto. Apagado, desaparece de la pantalla de inicio y no ocupa memoria.</string>
     <string name="watch_is_off">"Ver está apagado  ·  Ajustes, Pantalla de inicio lo recupera"</string>
     <string name="watch_turn_off">Desactivar Ver</string>
@@ -1132,4 +1131,6 @@
     <string name="news_settings_line">Más claro, en tarjetas.</string>
     <string name="news_smoother">Más fluido</string>
     <string name="news_smoother_line">Más ligero en TV pequeñas.</string>
+    <string name="beta">Beta</string>
+    <string name="beta_caps">BETA</string>
 </resources>

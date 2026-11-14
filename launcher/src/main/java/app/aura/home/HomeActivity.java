@@ -2884,10 +2884,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     /** Watch's tile: Aura's own, painted in its own light; OK opens the Watch screen, hold OK offers to turn Watch off. */
     private Cell watchCell(Map<String, Cell> old, boolean tvosTiles, String nameMode, boolean calm) {
-        String label = getString(R.string.watch), sig = "watch|" + tvosTiles + "|" + label;
+        String label = getString(R.string.watch), beta = getString(R.string.beta_caps);
+        String sig = "watch|" + tvosTiles + "|" + label + "|" + beta;
         Cell cell = reuse(old, WATCH_TAG, sig);
         if (cell == null) {
-            cell = new Cell(this, Tiles.watch(label), Tiles.WATCH, label, WATCH_TAG, TILE_W, TILE_H);
+            cell = new Cell(this, Tiles.watch(label, beta), Tiles.WATCH, label, WATCH_TAG, TILE_W, TILE_H);
             cell.card.setGrowRoom(GAP / 2f);
             cell.sig = sig;
             cell.card.opaque = true;
@@ -3374,7 +3375,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                 break;
             case KeyEvent.KEYCODE_DPAD_UP:
                 if (r > 0) focusGrid(rowTarget(r - 1, slot));
-                else if (!held && shelf.shownFor() != null && shelf.shownFor().equals(cells.get(gridAt).tag) && !shelf.cards.isEmpty()) {
+                else if (!held && shelfOfFocusedApp()) {
                     shelf.cards.get(Math.min(shelf.cards.size() - 1, Math.max(0, slot) * shelf.cards.size() / COLS)).requestFocus();
                 } else if (!held && !widgets.isEmpty()) {
                     lastCol = Math.max(0, Math.min(COLS - 1, slot));
@@ -4520,7 +4521,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         if (n.getParent() == homeTabs) {
             zone = TABS;
-            hideShelf();
+            // the cards of the app the focus came up from stay while it passes through the categories:
+            // Up again reaches them. Taking them down here put the widgets back, and the cards out of reach
+            if (!shelfOfFocusedApp()) hideShelf();
             scrollTo(0);
             n.getLocationInWindow(loc);
             glide(loc[0] + n.getWidth() / 2f, loc[1] + n.getHeight() / 2f, SIDE_GLOW);
@@ -5087,7 +5090,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                     if (cells.isEmpty()) landEmpty();
                     else focusGrid(Math.min(Math.max(0, lastCol), cells.size() - 1));
                 } else if (code == KeyEvent.KEYCODE_DPAD_UP && !held) {
-                    if (!widgets.isEmpty()) focusWidget(widgetForCol(Math.max(0, lastCol)));
+                    // the app's cards kept above the categories, onto the one nearest above; else the widgets
+                    if (shelfOfFocusedApp()) shelf.cards.get(Math.min(shelf.cards.size() - 1, Math.max(0, lastCol) * shelf.cards.size() / COLS)).requestFocus();
+                    else if (!widgets.isEmpty()) focusWidget(widgetForCol(Math.max(0, lastCol)));
                     else setPhoto(true);
                 }
                 return;
@@ -5164,8 +5169,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
                             // up into the categories, onto the one on show
                             lastCol = col;
                             homeTabs.tab(Math.max(0, homeTabIds.indexOf(homeTab))).requestFocus();
-                        } else if (!held && shelf.shownFor() != null && shelf.shownFor().equals(cells.get(gridAt).tag)
-                                && !shelf.cards.isEmpty()) {
+                        } else if (!held && shelfOfFocusedApp()) {
                             // up into this app's Top Shelf, onto the card nearest above
                             shelf.cards.get(Math.min(shelf.cards.size() - 1, col * shelf.cards.size() / COLS)).requestFocus();
                         } else if (!held && !widgets.isEmpty()) {
@@ -5369,6 +5373,11 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         shelfWanted = on;
         handler.removeCallbacks(shelfLoad);
         handler.postDelayed(shelfLoad, 1200);
+    }
+
+    /** The Top Shelf on show is the one of the app the grid's focus is (or was last) on, with cards to go to. */
+    private boolean shelfOfFocusedApp() {
+        return gridAt < cells.size() && cells.get(gridAt).tag.equals(shelf.shownFor()) && !shelf.cards.isEmpty();
     }
 
     private void hideShelf() {
@@ -6393,6 +6402,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (k == was) return;
         homeTab = homeTabIds.get(k);
         homeTabs.choose(k, true);
+        // other apps are coming: the cards kept for the one the focus left go
+        hideShelf();
         populate();
         float dx = Ui.dpf(28) * Integer.signum(k - was);
         boolean rich = AllApps.rich(this);

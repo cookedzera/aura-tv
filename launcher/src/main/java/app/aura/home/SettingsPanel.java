@@ -599,7 +599,7 @@ final class SettingsPanel {
             toggle(act.getString(R.string.tonights_pick), Prefs.PICKS, act.getString(R.string.shown), act.getString(R.string.hidden_clean), "picks");
             // Watch: a tile among the apps that opens films and series to choose from. Switched off,
             // nothing of it runs or is kept; not offered in a kids' profile
-            if (!Profiles.kids(act)) toggle(act.getString(R.string.watch), Prefs.WATCH, act.getString(R.string.watch_on_home), act.getString(R.string.off), "watch");
+            if (!Profiles.kids(act)) toggle(act.getString(R.string.watch), Prefs.WATCH, act.getString(R.string.beta), act.getString(R.string.off), "watch");
             toggle(act.getString(R.string.live_picture_on_input_tiles), Prefs.INPUT_PREVIEW, act.getString(R.string.on), act.getString(R.string.off), "inputs");
             section(act.getString(R.string.speed));
             // stillness for slow TVs; Auto decides from the TV's memory and chip

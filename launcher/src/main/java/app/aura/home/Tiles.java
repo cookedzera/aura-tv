@@ -694,9 +694,9 @@ final class Tiles {
 
     /**
      * Watch's tile, Aura's own: an ember's light out of the dark at one corner, a play mark in a
-     * ring, and its name. Opaque, so it costs a frame no more than an app's banner does.
+     * ring, its name, and {@code tag} (BETA) at the top right. Opaque, so it costs a frame no more than an app's banner does.
      */
-    static Painter watch(String label) {
+    static Painter watch(String label, String tag) {
         return (c, w, h) -> {
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
             p.setShader(new LinearGradient(0, 0, w, h, 0xFF2B1410, 0xFF0B0A0E, Shader.TileMode.CLAMP));
@@ -714,7 +714,22 @@ final class Tiles {
             t.setColor(0xFFFFFFFF);
             t.setLetterSpacing(-0.02f);
             c.drawText(label, w * 0.09f, h * 0.80f, t);
+            // what it still is (BETA), top right where a live input says LIVE: clear glass, not a colour
+            tag(c, tag, w, h, 0x33FFFFFF);
         };
+    }
+
+    /** A tile's tag at its top right (LIVE, BETA): white capitals on a capsule of {@code fill}. */
+    private static void tag(Canvas c, String word, int w, int h, int fill) {
+        Paint t = new Paint(Paint.ANTI_ALIAS_FLAG);
+        t.setTypeface(Ui.bold);
+        t.setTextSize(h * 0.085f);
+        t.setLetterSpacing(0.18f);
+        float tw = t.measureText(word), ph = h * 0.15f, pw = tw + h * 0.16f, px = w - pw - w * 0.06f, py = h * 0.1f;
+        t.setColor(fill);
+        c.drawRoundRect(px, py, px + pw, py + ph, ph / 2f, ph / 2f, t);
+        t.setColor(0xFFFFFFFF);
+        c.drawText(word, px + h * 0.08f, py + ph * 0.72f, t);
     }
 
     /** Watch's mark: a white play triangle in a ring {@code r} across its radius, centred on ({@code cx}, {@code cy}). Leaves {@code p} filling. */
@@ -750,16 +765,7 @@ final class Tiles {
             t.setLetterSpacing(-0.02f);
             c.drawText(label, x, h * 0.80f, t);
             // LIVE tag, top right
-            Paint tag = new Paint(Paint.ANTI_ALIAS_FLAG);
-            tag.setTypeface(Ui.bold);
-            tag.setTextSize(h * 0.085f);
-            tag.setLetterSpacing(0.18f);
-            float tw = tag.measureText(Words.get(R.string.live)), ph = h * 0.15f, pw = tw + h * 0.16f;
-            float px = w - pw - w * 0.06f, py = h * 0.1f;
-            p.setColor(0xFFE5304A);
-            c.drawRoundRect(px, py, px + pw, py + ph, ph / 2f, ph / 2f, p);
-            tag.setColor(0xFFFFFFFF);
-            c.drawText(Words.get(R.string.live), px + h * 0.08f, py + ph * 0.72f, tag);
+            tag(c, Words.get(R.string.live), w, h, 0xFFE5304A);
         };
     }
 

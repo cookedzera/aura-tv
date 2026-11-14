@@ -74,6 +74,8 @@ final class WatchScreen extends FrameLayout {
     /** dp: the poster of an open title. */
     private static final int BIG_W = 186, BIG_H = 279, BIG_TOP = 126;
     private static final float GROW = 1.15f, LIFT = 3f, PIVOT_Y = 0.7f;
+    /** HIGH: how far a poster not in focus turns away, in degrees, and how much of each poster its reflection shows. */
+    private static final float LEAN = 20f, MIRROR = 0.3f;
     /** How faint a poster waiting its turn is, and one already passed. */
     private static final float AHEAD = 0.62f, PASSED = 0.28f;
     /** How long the title in focus rests before its wide picture is read: sweeping along the row reads none on the way. */
@@ -90,6 +92,16 @@ final class WatchScreen extends FrameLayout {
 
     private final Activity act;
     private final Host host;
+    /**
+     * HIGH's richer screen, decided as the screen is made (it's made again each time it's opened):
+     * the title's colour as a light in the picture, the genres on frosted glass, the posters with
+     * depth (those not in focus turned away, each mirrored on the floor), the one in focus larger
+     * under a stronger light with a pass of light that returns. LOW has none of it.
+     */
+    private final boolean rich = !Ui.light;
+    /** dp: where the row stands (HIGH a little higher, for the reflections under it), and a poster's size and lift in focus. */
+    private final int rowTop = ROW_TOP - (rich ? 26 : 0);
+    private final float grow = rich ? 1.2f : GROW, lifted = rich ? 7f : LIFT;
     private final Hero hero;
     private final Glow glow;
     private final TabStrip strip;
@@ -166,7 +178,9 @@ final class WatchScreen extends FrameLayout {
         addView(hero, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         // the light the poster in focus casts, under where it stands
         glow = new Glow(a);
-        addView(glow, at(300, 210, LEFT + W / 2 - 150, ROW_TOP + 24));
+        glow.strong = rich;
+        if (rich) addView(glow, at(430, 280, LEFT + W / 2 - 215, rowTop - 8));
+        else addView(glow, at(300, 210, LEFT + W / 2 - 150, rowTop + 24));
 
         ids.add(Watch.MINE);
         titles.add(a.getString(R.string.watch_my_list));
@@ -183,6 +197,9 @@ final class WatchScreen extends FrameLayout {
             @Override
             public void pick(int k) {
                 show(k);
+                // the strip is told which genre is on show: it asks for one only when the focus rests on
+                // another, and left believing the first was still up it never asked for that one again
+                strip.choose(k, true);
             }
 
             @Override
@@ -196,6 +213,15 @@ final class WatchScreen extends FrameLayout {
         for (int i = 0; i < strip.size(); i++) {
             strip.tab(i).setOnFocusChangeListener(chain(strip.tab(i).getOnFocusChangeListener()));
         }
+        // Watch is in beta: said quietly at the end of the row's heading, and gone with the row
+        TextView beta = Ui.caps(a, 8.5f, 0xD9FFFFFF, 0.22f);
+        beta.setText(a.getString(R.string.beta_caps));
+        beta.setPadding(Ui.dp(10), Ui.dp(4), Ui.dp(10), Ui.dp(4));
+        GradientDrawable chip = new GradientDrawable();
+        chip.setColor(0x24FFFFFF);
+        chip.setStroke(Math.max(1, Ui.dp(0.75f)), 0x40FFFFFF);
+        chip.setCornerRadius(Ui.dpf(999));
+        beta.setBackground(chip);
 
         words = new Words(46, 3);
         // what OK and a held OK do, said only once the screen rests
@@ -220,13 +246,15 @@ final class WatchScreen extends FrameLayout {
         hl.leftMargin = hl.rightMargin = Ui.dp(12);
         head.addView(hair, hl);
         head.addView(headCount);
-        addView(head, at(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, LEFT, ROW_TOP - 36));
+        head.addView(beta, gap(16));
+        addView(head, at(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, LEFT, rowTop - (rich ? 46 : 36)));
 
         // the row's window: the whole width, so the poster just passed stays in view at the left edge
         window = new Lane(a);
-        addView(window, at(ViewGroup.LayoutParams.MATCH_PARENT, H + 2 * ROOM, 0, ROW_TOP - ROOM));
+        // HIGH: taller, for the posters' reflections under them
+        addView(window, at(ViewGroup.LayoutParams.MATCH_PARENT, H + 2 * ROOM + (rich ? 34 : 0), 0, rowTop - ROOM));
         note = Ui.text(a, 14, Ui.medium, 0xB3FFFFFF);
-        addView(note, at(520, ViewGroup.LayoutParams.WRAP_CONTENT, LEFT, ROW_TOP + 40));
+        addView(note, at(520, ViewGroup.LayoutParams.WRAP_CONTENT, LEFT, rowTop + 40));
 
         page = new Page();
         addView(page, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -449,6 +477,7 @@ final class WatchScreen extends FrameLayout {
     /** The screen turns to {@code to}: at once on LOW, over half a second on HIGH. */
     private void lightIn(int to) {
         if (auraMove != null) auraMove.cancel();
+        if (rich) words.name.setShadowLayer(Ui.dpf(18), 0, Ui.dpf(3), Ui.withAlpha(to, 0x80));
         if (to == aura) return;
         if (Ui.light) {
             tint(to);
@@ -532,8 +561,9 @@ final class WatchScreen extends FrameLayout {
         final Poster at = inFocus;
         if (at == null || heroShown != at.pick || !hero.has()) return;
         final int mine = heroAsked, w = getWidth(), h = getHeight();
+        final RectF glass = glass();
         heroReader.execute(() -> {
-            final Bitmap b = picture(at, w, h, Ui.dpf(104));
+            final Bitmap b = picture(at, w, h, Ui.dpf(104), glass);
             if (b != null) post(() -> {
                 if (mine == heroAsked && pose == REST) hero.open(b);
             });
@@ -642,12 +672,18 @@ final class WatchScreen extends FrameLayout {
         }
     }
 
+    /** HIGH: how a poster as faint as {@code want} stands: those waiting turned one way, those passed the other, the one in focus square on. */
+    private float leanOf(float want) {
+        return !rich ? 0f : want == AHEAD ? LEAN : want == PASSED ? -LEAN : 0f;
+    }
+
     /** The shelf's posters dealt in from the right, one after another, {@code wait} ms from now; those past the screen's edge are simply there. */
     private void deal(Shelf s, long wait) {
         Poster on = focused();
         for (int i = 0; i < s.posters.length; i++) {
             Poster p = s.posters[i];
             p.want = on == null ? AHEAD : i == on.index ? 1f : i < on.index ? PASSED : AHEAD;
+            p.setRotationY(leanOf(p.want));
             if (i >= DEALT || on != null && on.index > 0) {
                 p.setTranslationX(0f);
                 p.setAlpha(p.want);
@@ -713,7 +749,7 @@ final class WatchScreen extends FrameLayout {
             float to = spinning ? 0.8f : p.index == on ? 1f : p.index < on ? PASSED : AHEAD;
             if (p.want == to) continue;
             p.want = to;
-            p.animate().alpha(to).setStartDelay(0).setDuration(240).setInterpolator(Ui.EASE_DECEL).start();
+            p.animate().alpha(to).rotationY(leanOf(to)).setStartDelay(0).setDuration(rich ? 420 : 240).setInterpolator(Ui.EASE_DECEL).start();
         }
     }
 
@@ -735,7 +771,7 @@ final class WatchScreen extends FrameLayout {
      * (and the first time fetched), or its poster standing in its own light when it has none.
      * {@code drop}: how far down the foot's shade sits. On the hero's thread.
      */
-    private Bitmap picture(Poster at, int w, int h, float drop) {
+    private Bitmap picture(Poster at, int w, int h, float drop, RectF glass) {
         if (w == 0 || h == 0) return null;
         File f = Watch.hero(act, at.pick);
         boolean standIn = f == null;
@@ -743,10 +779,16 @@ final class WatchScreen extends FrameLayout {
         Bitmap b = Continue.picture(standIn ? at.pick.poster : f.getPath(), standIn ? Ui.dp(W) : Math.max(960, w));
         if (b == null) return null;
         try {
-            return Hero.bake(b, w, h, standIn, standIn && at.picture == null ? Watch.aura(b) : at.aura, drop);
+            return Hero.bake(b, w, h, standIn, standIn && at.picture == null ? Watch.aura(b) : at.aura, drop, rich, glass);
         } catch (OutOfMemoryError e) {
             return null;
         }
+    }
+
+    /** HIGH: where the genres' strip stands, for the picture to be frosted under it; null on LOW or before it's laid out. */
+    private RectF glass() {
+        if (!rich || strip.getWidth() == 0) return null;
+        return new RectF(strip.getLeft(), strip.getTop(), strip.getRight(), strip.getBottom());
     }
 
     /** The wide picture of the title in focus sweeps in, and the app here that streams it is asked for. */
@@ -757,9 +799,10 @@ final class WatchScreen extends FrameLayout {
         // back on the title whose picture is already there: nothing to sweep
         if (heroShown == at.pick) return;
         final int mine = ++heroAsked, dir = heroDir, w = getWidth(), h = getHeight();
+        final RectF glass = glass();
         heroReader.execute(() -> {
             if (mine != heroAsked) return;
-            final Bitmap baked = picture(at, w, h, 0f);
+            final Bitmap baked = picture(at, w, h, 0f, glass);
             if (baked != null) post(() -> {
                 if (mine != heroAsked) return;
                 heroShown = at.pick;
@@ -860,8 +903,8 @@ final class WatchScreen extends FrameLayout {
                 if (!land.requestFocus()) return;
                 // it lands: larger than it will stand, settling to its size
                 land.animate().cancel();
-                land.setScaleX(GROW * 1.16f);
-                land.setScaleY(GROW * 1.16f);
+                land.setScaleX(grow * 1.16f);
+                land.setScaleY(grow * 1.16f);
                 land.lift(true);
                 light();
             }
@@ -971,7 +1014,7 @@ final class WatchScreen extends FrameLayout {
          * left shade carries a little of {@code aura}; the foot's sits {@code drop} px lower when
          * the screen is at rest. Off the main thread.
          */
-        static Bitmap bake(Bitmap picture, int w, int h, boolean standIn, int aura, float drop) {
+        static Bitmap bake(Bitmap picture, int w, int h, boolean standIn, int aura, float drop, boolean rich, RectF glass) {
             Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(out);
             c.drawColor(DARK);
@@ -994,8 +1037,44 @@ final class WatchScreen extends FrameLayout {
             shade.setShader(new LinearGradient(0, h + drop, 0, h * 0.42f + drop, new int[]{0xFA08090C, 0xD108090C, 0x0008090C},
                     new float[]{0f, 0.46f, 1f}, Shader.TileMode.CLAMP));
             c.drawRect(0, h * 0.42f + drop, w, h, shade);
+            if (rich) {
+                // HIGH: the title's colour as a light of its own, low at the left where the words and the posters
+                // meet, and the corners drawn in. Painted into the picture, they cost a frame nothing
+                shade.setShader(new RadialGradient(w * 0.12f, h * 0.82f, w * 0.5f, new int[]{Ui.withAlpha(aura, 0x66), Ui.withAlpha(aura, 0)}, null, Shader.TileMode.CLAMP));
+                c.drawRect(0, 0, w, h, shade);
+                shade.setShader(new RadialGradient(w * 0.5f, h * 0.5f, w * 0.78f, new int[]{0x00000000, 0x00000000, 0x7A000000},
+                        new float[]{0f, 0.6f, 1f}, Shader.TileMode.CLAMP));
+                c.drawRect(0, 0, w, h, shade);
+                if (glass != null) frost(out, c, glass, p);
+            }
             out.setHasAlpha(false);
             return out;
+        }
+
+        /**
+         * Frosted glass for what stands at {@code at}: that part of the picture out of focus (read
+         * small and drawn large, with no blur to compute) under a breath of white, cut to a capsule.
+         */
+        private static void frost(Bitmap out, Canvas c, RectF at, Paint p) {
+            int l = Math.max(0, Math.round(at.left)), t = Math.max(0, Math.round(at.top));
+            int fw = Math.min(out.getWidth() - l, Math.round(at.width())), fh = Math.min(out.getHeight() - t, Math.round(at.height()));
+            if (fw < 8 || fh < 8) return;
+            Bitmap crop = Bitmap.createBitmap(out, l, t, fw, fh);
+            Bitmap tiny = Bitmap.createScaledBitmap(crop, Math.max(2, fw / 18), Math.max(2, fh / 9), true);
+            BitmapShader sh = new BitmapShader(tiny, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            Matrix m = new Matrix();
+            m.setScale(fw / (float) tiny.getWidth(), fh / (float) tiny.getHeight());
+            m.postTranslate(l, t);
+            sh.setLocalMatrix(m);
+            float r = fh / 2f;
+            p.setShader(sh);
+            c.drawRoundRect(l, t, l + fw, t + fh, r, r, p);
+            p.setShader(null);
+            p.setColor(0x1FFFFFFF);
+            c.drawRoundRect(l, t, l + fw, t + fh, r, r, p);
+            p.setColor(0xFFFFFFFF);
+            if (crop != out) crop.recycle();
+            tiny.recycle();
         }
 
         /** A title with no wide picture: its poster sharp at the right, its own colour as a light behind it, and the poster again far out of focus over that side of the screen. */
@@ -1210,13 +1289,15 @@ final class WatchScreen extends FrameLayout {
     private static final class Glow extends View {
         private final Paint p = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
         private final RectF box = new RectF();
+        /** HIGH: a wider, brighter pool of it. */
+        boolean strong;
 
         Glow(android.content.Context c) {
             super(c);
         }
 
         void tint(int color) {
-            p.setColor(Ui.withAlpha(color, 128));
+            p.setColor(Ui.withAlpha(color, strong ? 215 : 128));
             invalidate();
         }
 
@@ -1384,7 +1465,17 @@ final class WatchScreen extends FrameLayout {
             top.addView(dot, dl);
             kicker = Ui.caps(act, 10, FAINT, 0.22f);
             top.addView(kicker);
-            name = Ui.text(act, nameSp, Ui.heavy, 0xFFFFFFFF);
+            // HIGH gives it a glow: faded with the words as it is, not through a layer of its own
+            name = new TextView(act) {
+                @Override
+                public boolean hasOverlappingRendering() {
+                    return false;
+                }
+            };
+            name.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, nameSp);
+            name.setTypeface(Ui.heavy);
+            name.setTextColor(0xFFFFFFFF);
+            name.setIncludeFontPadding(false);
             name.setLetterSpacing(-0.035f);
             name.setSingleLine(false);
             name.setMaxLines(2);
@@ -1534,9 +1625,9 @@ final class WatchScreen extends FrameLayout {
 
         /** Where the big poster is when it's the one in the row: grown and lifted as the focus has it, at the focus's place. */
         private void slot(float[] xyScale) {
-            float w = Ui.dpf(W) * GROW, h = Ui.dpf(H) * GROW;
+            float w = Ui.dpf(W) * grow, h = Ui.dpf(H) * grow;
             xyScale[0] = Ui.dpf(LEFT) + Ui.dpf(W) / 2f - w / 2f - Ui.dpf(LEFT);
-            xyScale[1] = Ui.dpf(ROW_TOP) + Ui.dpf(H) * PIVOT_Y - h * PIVOT_Y - Ui.dpf(LIFT) * GROW - Ui.dpf(BIG_TOP);
+            xyScale[1] = Ui.dpf(rowTop) + Ui.dpf(H) * PIVOT_Y - h * PIVOT_Y - Ui.dpf(lifted) * grow - Ui.dpf(BIG_TOP);
             xyScale[2] = w / Ui.dpf(BIG_W);
         }
 
@@ -1978,7 +2069,7 @@ final class WatchScreen extends FrameLayout {
         private float lit = -1f;
         private ValueAnimator pass;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG), sheen = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG), sheen = new Paint(Paint.ANTI_ALIAS_FLAG), floor = new Paint(Paint.DITHER_FLAG);
         private final RectF box = new RectF();
         private final Matrix fit = new Matrix(), across = new Matrix();
         private Shader shine;
@@ -1993,6 +2084,8 @@ final class WatchScreen extends FrameLayout {
             setContentDescription(p.name);
             setAlpha(AHEAD);
             paint.setColor(0x33FFFFFF);
+            // turned away, it keeps its shape: seen from far enough that the near edge doesn't loom
+            if (rich) setCameraDistance(Ui.dpf(2600));
             ring.setStyle(Paint.Style.STROKE);
             ring.setStrokeWidth(Ui.dpf(2.4f));
             ring.setColor(0xFFFFFFFF);
@@ -2029,30 +2122,57 @@ final class WatchScreen extends FrameLayout {
             setPivotY(h * PIVOT_Y);
             shine = new LinearGradient(w * 0.3f, 0, w * 0.7f, h * 0.1f, new int[]{0x00FFFFFF, 0x5CFFFFFF, 0x00FFFFFF}, null, Shader.TileMode.CLAMP);
             sheen.setShader(shine);
+            // the reflection fades into the floor's own dark
+            floor.setShader(new LinearGradient(0, 0, 0, h * MIRROR, 0x0008090C, 0xFF08090C, Shader.TileMode.CLAMP));
             place();
         }
 
         /** Up to its size in focus, or back down. */
         void lift(boolean up) {
-            animate().scaleX(up ? GROW : 1f).scaleY(up ? GROW : 1f).translationY(up ? -Ui.dpf(LIFT) : 0f).setStartDelay(0)
+            animate().scaleX(up ? grow : 1f).scaleY(up ? grow : 1f).translationY(up ? -Ui.dpf(lifted) : 0f).setStartDelay(0)
                     .setDuration(up ? Ui.light ? Ui.LOW_FOCUS_IN : 240 : 140).setInterpolator(Ui.EASE_DECEL).start();
+            sweep(up && rich);
+        }
+
+        /**
+         * HIGH: the light crosses the poster in focus, rests, and comes again for as long as it has
+         * the focus and the screen is the one in front; between passes nothing is drawn.
+         */
+        private void sweep(boolean on) {
             if (pass != null) pass.cancel();
-            if (!up || Ui.light) return;
+            pass = null;
+            if (!on) return;
             pass = ValueAnimator.ofFloat(0f, 1f);
             pass.setStartDelay(120);
-            pass.setDuration(820);
+            pass.setDuration(3600);
+            pass.setInterpolator(null);
+            pass.setRepeatCount(ValueAnimator.INFINITE);
             pass.addUpdateListener(a -> {
-                lit = (Float) a.getAnimatedValue();
-                invalidate();
+                float f = a.getAnimatedFraction() / 0.23f, was = lit;
+                lit = f <= 1f ? f : -1f;
+                if (lit >= 0f || was >= 0f) invalidate();
             });
             pass.addListener(new AnimatorListenerAdapter() {
                 @Override
-                public void onAnimationEnd(Animator animation) {
+                public void onAnimationCancel(Animator animation) {
                     lit = -1f;
                     invalidate();
                 }
             });
             pass.start();
+        }
+
+        /** Something plays over the screen (a trailer, an app): the light waits until it's back. */
+        @Override
+        public void onWindowFocusChanged(boolean has) {
+            super.onWindowFocusChanged(has);
+            if (isFocused()) sweep(has && rich);
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            sweep(false);
+            super.onDetachedFromWindow();
         }
 
         @Override
@@ -2090,6 +2210,22 @@ final class WatchScreen extends FrameLayout {
             if (isFocused() && !spinning) {
                 float i = ring.getStrokeWidth() / 2f;
                 c.drawRoundRect(i, i, getWidth() - i, getHeight() - i, r, r, ring);
+            }
+            if (rich && picture != null) {
+                // HIGH: the poster again, upside down on the floor under it and fading into it
+                float gap = Ui.dpf(7), reach = getHeight() * MIRROR, foot = getHeight() + gap;
+                c.save();
+                c.clipRect(0, foot, getWidth(), foot + reach);
+                c.translate(0f, getHeight() + foot);
+                c.scale(1f, -1f);
+                paint.setAlpha(84);
+                c.drawRoundRect(box, r, r, paint);
+                paint.setAlpha(255);
+                c.restore();
+                c.save();
+                c.translate(0f, foot);
+                c.drawRect(0, 0, getWidth(), reach + 1f, floor);
+                c.restore();
             }
         }
     }

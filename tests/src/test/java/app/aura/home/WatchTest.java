@@ -71,7 +71,8 @@ public class WatchTest {
         c = RuntimeEnvironment.getApplication();
         Profiles.forget();
         Profiles.use(c, Profiles.MAIN);
-        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "tvos").commit();
+        // Watch is off until asked for: these are of a TV that has asked
+        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "tvos").putBoolean(Prefs.WATCH, true).commit();
         Prefs.device(c).edit().putBoolean("welcomed", true).putString("set_light", "on").commit();
         wipe(new File(c.getFilesDir(), "watch"));
         Field w = HomeActivity.class.getDeclaredField("warm");
@@ -297,6 +298,49 @@ public class WatchTest {
         pane.close();
         Assert.assertFalse(pane.isOpen());
         pane.release();
+    }
+
+    @Test
+    public void aGenreComeBackToIsShownAgainWithoutOk() throws Exception {
+        keep("any", 3);
+        keep("action", 3);
+        HomeActivity a = Robolectric.buildActivity(HomeActivity.class).setup().get();
+        run(1500);
+        WatchScreen pane = new WatchScreen(a, (intent, from) -> { });
+        a.addContentView(pane, new FrameLayout.LayoutParams(1920, 1080));
+        pane.open();
+        TabStrip strip = field(pane, "strip");
+        List<String> ids = field(pane, "ids");
+        int action = ids.indexOf("action");
+        Assert.assertTrue(action > 1);
+        for (int i = 0; i < strip.size(); i++) strip.tab(i).setFocusableInTouchMode(true);
+        Assert.assertEquals("it opens on Anything", 1, (int) WatchTest.<Integer>field(pane, "current"));
+        // its shelf is read behind the screen and takes the focus as it lands: the genres are gone to after that
+        for (int i = 0; i < 150 && field(pane, "installed") == null; i++) {
+            Thread.sleep(20);
+            run(32);
+        }
+        Assert.assertNotNull(WatchTest.<Object>field(pane, "installed"));
+
+        // the focus rests on Action: it's shown, with no OK
+        Assert.assertTrue(strip.tab(action).requestFocus());
+        run(TabStrip.PICK_MS + 120);
+        Assert.assertEquals(action, (int) WatchTest.<Integer>field(pane, "current"));
+        // and back on Anything: that one again, as readily (it used to wait for OK, the strip still thinking it was on show)
+        Assert.assertTrue(strip.tab(1).requestFocus());
+        run(TabStrip.PICK_MS + 120);
+        Assert.assertEquals("back on Anything, it's shown again by itself", 1, (int) WatchTest.<Integer>field(pane, "current"));
+        pane.close();
+        pane.release();
+    }
+
+    @Test
+    public void inBetaItIsOffUntilAskedFor() throws Exception {
+        Prefs.of(c).edit().remove(Prefs.WATCH).commit();
+        Assert.assertFalse(Prefs.watch(c));
+        HomeActivity a = Robolectric.buildActivity(HomeActivity.class).setup().get();
+        run(1500);
+        Assert.assertEquals("no tile on a TV that hasn't switched it on", -1, tileAt(a));
     }
 
     /** Where Watch's tile is among home's tiles, or -1. */

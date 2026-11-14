@@ -147,7 +147,7 @@ final class WhatsNew extends FrameLayout {
         ol.bottomMargin = Ui.dp(40);
         addView(part(once, 700), ol);
 
-        watch = new WatchCard(a, a.getString(R.string.new_badge), a.getString(R.string.watch), a.getString(R.string.news_watch_line));
+        watch = new WatchCard(a, a.getString(R.string.new_badge) + "  ·  " + a.getString(R.string.beta_caps), a.getString(R.string.watch), a.getString(R.string.news_watch_line));
         addView(part(watch, 160), at(510, 230, 390, 58));
         LinearLayout four = new LinearLayout(a);
         four.setClipChildren(false);

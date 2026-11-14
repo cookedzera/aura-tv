@@ -1118,7 +1118,6 @@
     <string name="watch_deciding">Entscheide…</string>
     <string name="watch_credit">Titel und Bilder von %1$s</string>
     <string name="watch_credit_where">Wo es läuft: JustWatch</string>
-    <string name="watch_on_home">Eine Kachel auf dem Startbildschirm</string>
     <string name="help_watch">Filme und Serien zur Auswahl, nach Genre, als Kachel zwischen deinen Apps. Nutzt das Netzwerk nur, solange es geöffnet ist. Ausgeschaltet verschwindet es vom Startbildschirm und braucht keinen Speicher.</string>
     <string name="watch_is_off">"Ansehen ist aus  ·  Einstellungen, Startbildschirm bringt es zurück"</string>
     <string name="watch_turn_off">Ansehen ausschalten</string>
@@ -1132,4 +1131,6 @@
     <string name="news_settings_line">Klarer, auf Karten.</string>
     <string name="news_smoother">Flüssiger</string>
     <string name="news_smoother_line">Leichter auf kleinen TVs.</string>
+    <string name="beta">Beta</string>
+    <string name="beta_caps">BETA</string>
 </resources>

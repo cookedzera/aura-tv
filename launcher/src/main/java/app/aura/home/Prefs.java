@@ -46,9 +46,9 @@ final class Prefs {
 
     /**
      * Watch ({@link WatchScreen}): a tile on the home screen that opens films and series to choose
-     * from. On from the start, as a tile is all it is until it's opened: its screen is made and the
-     * network asked only then. Switched off (Settings, or its tile's own menu) nothing of it is
-     * made, read or kept.
+     * from. In beta, so off until it's asked for (Settings, Home screen). Switched on, a tile is all
+     * it is until it's opened: its screen is made and the network asked only then. Switched off
+     * (Settings, or its tile's own menu) nothing of it is made, read or kept.
      */
     static final String WATCH = "set_watch";
 
@@ -61,10 +61,10 @@ final class Prefs {
         if (SRC_WIKIMEDIA.equals(key) || SRC_WALLHAVEN.equals(key) || SRC_UNSPLASH.equals(key)) return of(c).getBoolean(key, false);
         // everything starts on, except always-visible app names, only your own photos and pure black;
         // flyovers download video, so they wait until asked for; and live pictures of inputs, which
-        // some TVs draw over the whole screen (a soundbar on HDMI: black, with sound)
+        // some TVs draw over the whole screen (a soundbar on HDMI: black, with sound); and Watch, in beta
         return of(c).getBoolean(key, !NAMES_ALWAYS.equals(key) && !MINE_ONLY.equals(key) && !BLACK.equals(key)
                 && !FLYOVERS.equals(key) && !INPUT_PREVIEW.equals(key) && !SCENES.equals(key) && !BEAT.equals(key)
-                && !AERIALS_AUTO.equals(key) && !AERIALS_METERED.equals(key) && !PHOTO_SHARP.equals(key));
+                && !AERIALS_AUTO.equals(key) && !AERIALS_METERED.equals(key) && !PHOTO_SHARP.equals(key) && !WATCH.equals(key));
     }
 
     /** Whether the aerials may stream over a connection Android calls metered (a phone's hotspot, a capped plan). */

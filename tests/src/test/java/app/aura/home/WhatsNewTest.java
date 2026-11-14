@@ -54,7 +54,7 @@ public class WhatsNewTest {
         c = RuntimeEnvironment.getApplication();
         Profiles.forget();
         Profiles.use(c, Profiles.MAIN);
-        Prefs.of(c).edit().clear().commit();
+        Prefs.of(c).edit().clear().putBoolean(Prefs.WATCH, true).commit();
         Prefs.device(c).edit().putBoolean("welcomed", true).putString("set_light", "on").commit();
         Field w = HomeActivity.class.getDeclaredField("warm");
         w.setAccessible(true);
