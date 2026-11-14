@@ -118,6 +118,8 @@ public class CardConsistencyTest {
     @Before
     public void setUp() throws Exception {
         c = RuntimeEnvironment.getApplication();
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(java.time.Duration.ofMillis(16));
         resetStatics();
         Prefs.device(c).edit().clear().putBoolean("welcomed", true).putString("set_light", "on").commit();
         Prefs.of(c).edit().clear().commit();
