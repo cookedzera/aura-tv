@@ -375,4 +375,103 @@ public class LightModePerfTest {
             org.robolectric.shadows.ShadowChoreographer.setPaused(false);
         }
     }
+
+    @Test
+    public void controlCenterSliderSkipsClipPathAndPadAlignsFocusInLightMode() throws Exception {
+        install("demo.a1", "Alpha", ApplicationInfo.CATEGORY_VIDEO);
+        Profiles.forget();
+        Profiles.use(c, Profiles.MAIN);
+        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "aura").commit();
+        Prefs.device(c).edit()
+                .putBoolean("welcomed", true)
+                .putString("set_light", "on")
+                .commit();
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(java.time.Duration.ofMillis(16));
+        try {
+            Field w = HomeActivity.class.getDeclaredField("warm");
+            w.setAccessible(true);
+            w.setBoolean(null, true);
+
+            org.robolectric.android.controller.ActivityController<HomeActivity> ac = Robolectric.buildActivity(HomeActivity.class).setup();
+            controllers.add(ac);
+            HomeActivity home = ac.get();
+            for (int t = 0; t < 300; t += 16) org.robolectric.shadows.ShadowLooper.idleMainLooper(16, java.util.concurrent.TimeUnit.MILLISECONDS);
+
+            ControlCenter cc = field(home, "cc");
+            ControlCenter.Slider slider = findViewByType(cc.panel, ControlCenter.Slider.class);
+            Pad pad = findViewByType(cc.panel, Pad.class);
+            Assert.assertNotNull(slider);
+            Assert.assertNotNull(pad);
+
+            slider.measure(View.MeasureSpec.makeMeasureSpec(84, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(180, View.MeasureSpec.EXACTLY));
+            slider.layout(0, 0, 84, 180);
+
+            final int[] counts = new int[2]; // [0]=clipPath, [1]=clipRect
+            android.graphics.Canvas rec = new android.graphics.Canvas() {
+                @Override
+                public boolean clipPath(android.graphics.Path path) {
+                    counts[0]++;
+                    return true;
+                }
+
+                @Override
+                public boolean clipRect(float left, float top, float right, float bottom) {
+                    counts[1]++;
+                    return true;
+                }
+            };
+
+            // Light mode: Slider avoids clipPath in favor of scissor clipRect + rounded rects, shorter anim
+            Ui.light = true;
+            set(slider, "shown", 0.5f);
+            slider.onDraw(rec);
+            Assert.assertEquals("Light mode skips Canvas.clipPath on Slider", 0, counts[0]);
+            Assert.assertTrue("Light mode clips Slider fill via clipRect", counts[1] > 0);
+            set(slider, "shown", 0.99f);
+            call(slider, "sync", new Class<?>[0]);
+            ValueAnimator sAnim = field(slider, "anim");
+            Assert.assertNotNull(sAnim);
+            Assert.assertEquals(Ui.CTRL_SCALE_IN, sAnim.getDuration());
+            sAnim.cancel();
+
+            // Light mode: Pad.Lift skips no-op animations and aligns unfocus fill duration with scale
+            Pad.Lift lift = field(pad, "lift");
+            ValueAnimator filler = field(lift, "filler");
+            ValueAnimator scaler = field(lift, "scaler");
+            lift.focus(false);
+            Assert.assertFalse("Light mode skips no-op unfocus fill animator when already 0", filler.isStarted());
+            Assert.assertFalse("Light mode skips no-op unfocus scale animator when already 1", scaler.isStarted());
+            lift.focus(true);
+            Assert.assertTrue(filler.isStarted());
+            Assert.assertEquals(Ui.CTRL_SCALE_IN, filler.getDuration());
+            Assert.assertEquals(Ui.CTRL_SCALE_IN, scaler.getDuration());
+            for (int t = 0; t < 200; t += 16) org.robolectric.shadows.ShadowLooper.idleMainLooper(16, java.util.concurrent.TimeUnit.MILLISECONDS);
+            lift.focus(false);
+            Assert.assertEquals(Ui.CTRL_SCALE_OUT, filler.getDuration());
+            Assert.assertEquals(Ui.CTRL_SCALE_OUT, scaler.getDuration());
+            for (int t = 0; t < 200; t += 16) org.robolectric.shadows.ShadowLooper.idleMainLooper(16, java.util.concurrent.TimeUnit.MILLISECONDS);
+
+            // HIGH mode: unchanged behavior (Slider uses clipPath + 200ms sync; Pad uses CTRL_HILITE_OUT)
+            Ui.light = false;
+            counts[0] = 0;
+            counts[1] = 0;
+            set(slider, "shown", 0.5f);
+            slider.onDraw(rec);
+            Assert.assertTrue("HIGH mode still uses clipPath on Slider", counts[0] > 0);
+            set(slider, "shown", 0.99f);
+            call(slider, "sync", new Class<?>[0]);
+            sAnim = field(slider, "anim");
+            Assert.assertNotNull(sAnim);
+            Assert.assertEquals(200L, sAnim.getDuration());
+            sAnim.cancel();
+            lift.focus(false);
+            Assert.assertEquals(Ui.CTRL_HILITE_OUT, filler.getDuration());
+            filler.cancel();
+            scaler.cancel();
+        } finally {
+            org.robolectric.shadows.ShadowChoreographer.setPaused(false);
+        }
+    }
 }

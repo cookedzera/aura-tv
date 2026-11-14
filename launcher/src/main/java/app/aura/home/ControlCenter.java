@@ -1928,6 +1928,7 @@ final class ControlCenter {
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG), rim = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG), hair = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path clip = new Path();
+        private final RectF box = new RectF();
         private final Drawable on, off;
         private float shown = -1f, focus;
         private int value;
@@ -1982,7 +1983,7 @@ final class ControlCenter {
             }
             if (anim != null) anim.cancel();
             anim = ValueAnimator.ofFloat(shown, level);
-            anim.setDuration(200);
+            anim.setDuration(Ui.light ? Ui.CTRL_SCALE_IN : 200);
             anim.setInterpolator(Ui.DECEL);
             anim.addUpdateListener(a -> {
                 shown = (float) a.getAnimatedValue();
@@ -1994,20 +1995,34 @@ final class ControlCenter {
         @Override
         protected void onSizeChanged(int w, int h, int ow, int oh) {
             clip.reset();
-            clip.addRoundRect(new RectF(0, 0, w, h), Ui.dpf(26), Ui.dpf(26), Path.Direction.CW);
+            box.set(0, 0, w, h);
+            clip.addRoundRect(box, Ui.dpf(26), Ui.dpf(26), Path.Direction.CW);
         }
 
         @Override
         protected void onDraw(Canvas c) {
             int w = getWidth(), h = getHeight();
             float fillTop = h * (1f - Math.max(0f, shown));
-            c.save();
-            c.clipPath(clip);
-            p.setColor(Ui.mix(MODULE, 0x33FFFFFF, focus));
-            c.drawRect(0, 0, w, h, p);
-            p.setColor(0xF2FFFFFF);
-            c.drawRect(0, fillTop, w, h, p);
-            c.restore();
+            if (Ui.light) {
+                float r = Ui.dpf(26);
+                p.setColor(Ui.mix(MODULE, 0x33FFFFFF, focus));
+                c.drawRoundRect(0, 0, w, h, r, r, p);
+                if (fillTop < h) {
+                    c.save();
+                    c.clipRect(0, fillTop, w, h);
+                    p.setColor(0xF2FFFFFF);
+                    c.drawRoundRect(0, 0, w, h, r, r, p);
+                    c.restore();
+                }
+            } else {
+                c.save();
+                c.clipPath(clip);
+                p.setColor(Ui.mix(MODULE, 0x33FFFFFF, focus));
+                c.drawRect(0, 0, w, h, p);
+                p.setColor(0xF2FFFFFF);
+                c.drawRect(0, fillTop, w, h, p);
+                c.restore();
+            }
             Drawable d = muted || value == 0 ? off : on;
             int s = Ui.dp(24), cx = w / 2, iy = h - Ui.dp(22) - s / 2;
             d.setTint(fillTop < iy ? Pad.DARK : 0xFFFFFFFF);

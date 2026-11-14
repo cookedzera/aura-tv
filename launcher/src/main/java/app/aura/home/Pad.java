@@ -203,7 +203,7 @@ class Pad extends GlassFrame {
 
         void focus(boolean gained) {
             if (!gained) {
-                fillTo(0f, Ui.CTRL_HILITE_OUT, Ui.EASE_STANDARD);
+                fillTo(0f, Ui.light ? Ui.CTRL_SCALE_OUT : Ui.CTRL_HILITE_OUT, Ui.EASE_STANDARD);
                 scaleTo(REST, Ui.CTRL_SCALE_OUT, Ui.EASE_STANDARD);
                 return;
             }
@@ -229,6 +229,13 @@ class Pad extends GlassFrame {
 
         private void fillTo(float to, long ms, TimeInterpolator curve) {
             filler.cancel();
+            if (Ui.light && Math.abs(lit - to) < 1e-4f) {
+                if (lit != to) {
+                    lit = to;
+                    host.fill(lit);
+                }
+                return;
+            }
             litFrom = lit;
             litTo = to;
             filler.setDuration(ms);
@@ -239,6 +246,14 @@ class Pad extends GlassFrame {
         private void scaleTo(int to, long ms, TimeInterpolator curve) {
             scaler.cancel();
             goal = to;
+            float dst = target();
+            if (Ui.light && Math.abs(view.getScaleX() - dst) < 1e-4f) {
+                if (view.getScaleX() != dst) {
+                    view.setScaleX(dst);
+                    view.setScaleY(dst);
+                }
+                return;
+            }
             scaleFrom = view.getScaleX();
             scaler.setDuration(ms);
             scaler.setInterpolator(curve);
