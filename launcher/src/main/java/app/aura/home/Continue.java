@@ -700,7 +700,9 @@ final class Continue {
         try {
             byte[] data;
             if (uri.startsWith("http")) {
-                HttpURLConnection con = (HttpURLConnection) new URL(uri).openConnection();
+                // plain http is refused to Aura (Android's rule since 9): the same address asked
+                // securely, as nearly every picture server answers there too (Stremio's add-ons hand out http)
+                HttpURLConnection con = (HttpURLConnection) new URL(secure(uri)).openConnection();
                 con.setConnectTimeout(8000);
                 con.setReadTimeout(10_000);
                 try (InputStream in = con.getInputStream()) {
@@ -731,6 +733,11 @@ final class Continue {
         } catch (Exception | OutOfMemoryError e) {
             return null;
         }
+    }
+
+    /** {@code uri} asked over https when it says http; anything else as it is. */
+    static String secure(String uri) {
+        return uri.regionMatches(true, 0, "http://", 0, 7) ? "https://" + uri.substring(7) : uri;
     }
 
     private static byte[] readAll(InputStream in) throws IOException {

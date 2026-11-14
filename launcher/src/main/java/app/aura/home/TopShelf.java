@@ -115,7 +115,9 @@ final class TopShelf extends FrameLayout {
             for (Continue.Item it : Continue.all(c, 8)) {
                 if (taste.declined(Continue.key(it.title))) continue;
                 boolean match = pkg.equals(it.pkg) || (ytClient && "com.google.android.youtube.tv".equals(it.pkg));
-                if (match && it.art != null && base.size() < MAX) {
+                // kept without a picture too: it's what you're partway through, and the Smart Stack
+                // shows it all the same (Stremio's posters can't always be read); it's painted in the app's colour
+                if (match && base.size() < MAX) {
                     if (ytClient && !pkg.equals(it.pkg) && it.intent != null) {
                         it.intent = new Intent(it.intent);
                         it.intent.setComponent(null);
@@ -551,6 +553,13 @@ final class TopShelf extends FrameLayout {
                 m.setScale(s, s);
                 m.postTranslate((w - b.getWidth() * s) / 2f, (h - b.getHeight() * s) / 2f);
                 c.drawBitmap(b, m, p);
+            } else {
+                // no picture to be had: the app's own colour as the light, deepening to the corner
+                p.setShader(new LinearGradient(0, 0, w, h, Ui.mix(0xFF161922, color, 0.42f), 0xFF0A0C10, Shader.TileMode.CLAMP));
+                c.drawRect(0, 0, w, h, p);
+                p.setShader(new android.graphics.RadialGradient(w * 0.85f, h * 0.15f, w * 0.7f,
+                        Ui.withAlpha(color, 0x50), 0x00000000, Shader.TileMode.CLAMP));
+                c.drawRect(0, 0, w, h, p);
             }
             p.setShader(new LinearGradient(0, h * 0.28f, 0, h, 0x00000000, 0xE0000000, Shader.TileMode.CLAMP));
             c.drawRect(0, 0, w, h, p);
