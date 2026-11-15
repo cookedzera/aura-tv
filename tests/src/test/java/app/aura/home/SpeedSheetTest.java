@@ -39,6 +39,7 @@ import static org.robolectric.Shadows.shadowOf;
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 public class SpeedSheetTest {
     private Context c;
+    private boolean wasLight;
     private org.robolectric.android.controller.ActivityController<HomeActivity> controller;
 
     private static void run(long ms) {
@@ -76,6 +77,7 @@ public class SpeedSheetTest {
     @Before
     public void setUp() throws Exception {
         c = RuntimeEnvironment.getApplication();
+        wasLight = Ui.light;
         Profiles.forget();
         Profiles.use(c, Profiles.MAIN);
         Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "aura").putBoolean(Prefs.WATCH, false).commit();
@@ -98,6 +100,7 @@ public class SpeedSheetTest {
             }
         }
         ShadowLooper.idleMainLooper();
+        Ui.light = wasLight;
     }
 
     private HomeActivity home() throws Exception {
