@@ -235,7 +235,7 @@ final class AllApps extends FrameLayout {
         // the rows' stagger moves things inside the layer the rising panel is on (HIGH), so that
         // layer is drawn again every frame: only a TV with the GPU for it; LOW has no layer to spoil
         if (Ui.light || rich()) rowsIn(installed);
-        way.in(LOW_OPEN, null);
+        way.in(Ui.light ? Ui.LOW_SHEET_IN : LOW_OPEN, null);
         hold.start();
         String title = act.getString(R.string.cat_all_apps);
         setContentDescription(title);
@@ -452,10 +452,13 @@ final class AllApps extends FrameLayout {
      * carries them, so no layer is drawn inside the one the rising panel is on.
      */
     private static void rowsIn(Grid g) {
+        long step = Ui.light ? 16L : ROW_STAGGER;
+        long base = Ui.light ? 0L : 50L;
+        long dur = Ui.light ? Ui.LOW_FOCUS_IN : 320L;
         for (int r = 0; r < Math.min(STAGGERED_ROWS, g.view.getChildCount()); r++) {
             View row = g.view.getChildAt(r);
             row.setTranslationY(Ui.dpf(28));
-            row.animate().translationY(0f).setStartDelay(50L + r * (long) ROW_STAGGER).setDuration(320).setInterpolator(Ui.EASE_DECEL).start();
+            row.animate().translationY(0f).setStartDelay(base + r * step).setDuration(dur).setInterpolator(Ui.EASE_DECEL).start();
         }
     }
 

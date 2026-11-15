@@ -99,11 +99,16 @@ final class AppMenu extends FrameLayout {
             panel.setTranslationX(Ui.light ? slideX * (1f - p) : 0f);
             panel.setTranslationY(Ui.light ? slideY * (1f - p) : 0f);
             dim = Ui.light ? 0f : a;
-            invalidate();
+            if (!Ui.light) invalidate();
         });
         hold = new GlassFrame.Hold(this, () -> {
             if (list.getChildCount() > 0) list.getChildAt(0).requestFocus();
         });
+    }
+
+    @Override
+    public boolean hasOverlappingRendering() {
+        return !Ui.light && super.hasOverlappingRendering();
     }
 
     boolean isOpen() {

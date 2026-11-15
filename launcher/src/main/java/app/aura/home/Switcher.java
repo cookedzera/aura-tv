@@ -347,7 +347,7 @@ final class Switcher extends FrameLayout {
         c.setVisibility(INVISIBLE);
         dress(apps.get(i), host.shot(apps.get(i).pkg));
         zoom.setVisibility(VISIBLE);
-        runZoom(1f, 0f, 520, () -> {
+        runZoom(1f, 0f, Ui.light ? Ui.LOW_SHEET_IN : 520, () -> {
             c.setVisibility(VISIBLE);
             zoom.setVisibility(GONE);
         });
@@ -379,11 +379,11 @@ final class Switcher extends FrameLayout {
         // the card already covers most of the screen: the rest of the deck simply goes, so the
         // zoom is all the GPU draws while the app starts beside it
         deck.setVisibility(INVISIBLE);
-        away(200);
+        away(Ui.light ? Ui.CLOSE : 200);
         shadow.setVisibility(INVISIBLE);
         dress(a, from);
         zoom.setVisibility(VISIBLE);
-        runZoom(0f, 1f, 420, () -> {
+        runZoom(0f, 1f, Ui.light ? Ui.CLOSE : 420, () -> {
             // fully covered, and from here on perfectly still: the app's picture (or its icon and
             // name) waits without a single further frame, leaving the GPU to the app that's loading
             veil.setVisibility(INVISIBLE);
@@ -492,16 +492,18 @@ final class Switcher extends FrameLayout {
         }
         at = Math.min(start, apps.size() - 1);
         layoutDeck(false);
+        long riseDur = Ui.light ? Ui.LOW_SHEET_IN : 560;
+        long riseStagger = Ui.light ? 0L : 35L;
         for (int k = 0; k < items.size(); k++) {
             LinearLayout v = items.get(k);
             // they rise from below the screen, nearest first: a slide, which this GPU draws for free
             v.setTranslationY(Ui.dp(RISE));
-            v.animate().translationY(0f).setStartDelay(35L * Math.abs(k - at)).setDuration(560).setInterpolator(Ui.EMPHASIZED).start();
+            v.animate().translationY(0f).setStartDelay(riseStagger * Math.abs(k - at)).setDuration(riseDur).setInterpolator(Ui.EMPHASIZED).start();
         }
         shadow.setTranslationY(Ui.dp(RISE));
-        shadow.animate().translationY(0f).setStartDelay(0).setDuration(560).setInterpolator(Ui.EMPHASIZED).start();
+        shadow.animate().translationY(0f).setStartDelay(0).setDuration(riseDur).setInterpolator(Ui.EMPHASIZED).start();
         closeAll.setTranslationX(Ui.dp(140));
-        closeAll.animate().translationX(0f).setStartDelay(120).setDuration(560).setInterpolator(Ui.EMPHASIZED).start();
+        closeAll.animate().translationX(0f).setStartDelay(Ui.light ? 0L : 120L).setDuration(riseDur).setInterpolator(Ui.EMPHASIZED).start();
         // the app you were in (when it's in the list) folds from full screen into its card
         final int from = cur;
         if (from >= 0 && from < items.size()) {
@@ -539,7 +541,8 @@ final class Switcher extends FrameLayout {
             v.setPivotY(Ui.dp(HEAD + HEAD_GAP) + Ui.dp(CARD_H) / 2f);
             if (show) v.setVisibility(VISIBLE);
             if (animate) {
-                v.animate().translationX(x).scaleX(s).scaleY(s).setStartDelay(0).setDuration(440).setInterpolator(Ui.EMPHASIZED)
+                v.animate().translationX(x).scaleX(s).scaleY(s).setStartDelay(0)
+                        .setDuration(Ui.light ? Ui.LOW_FOCUS_IN : 440).setInterpolator(Ui.EMPHASIZED)
                         .withEndAction(show ? null : () -> v.setVisibility(INVISIBLE)).start();
             } else {
                 v.setTranslationX(x);
@@ -582,13 +585,16 @@ final class Switcher extends FrameLayout {
             return;
         }
         closing = true;
+        int dur = Ui.light ? Ui.CLOSE : 200;
         for (View v : items) {
             // cards already flown off the top (Close all) stay gone
-            if (v.getTranslationY() > -Ui.dp(100)) v.animate().translationY(Ui.dp(RISE)).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT).start();
+            if (v.getTranslationY() > -Ui.dp(100)) v.animate().translationY(Ui.dp(RISE)).setStartDelay(0).setDuration(dur).setInterpolator(Ui.SOFT).start();
         }
-        shadow.animate().translationY(Ui.dp(RISE)).setStartDelay(0).setDuration(200).setInterpolator(Ui.SOFT).start();
-        away(200);
+        shadow.animate().translationY(Ui.dp(RISE)).setStartDelay(0).setDuration(dur).setInterpolator(Ui.SOFT).start();
+        away(dur);
         removeCallbacks(closeDone);
+        removeCallbacks(clearedLater);
+        clearedLater = null;
         closeDone = () -> {
             closeDone = null;
             if (after != null) after.run();
@@ -598,7 +604,7 @@ final class Switcher extends FrameLayout {
             items.clear();
             apps.clear();
         };
-        postDelayed(closeDone, 210);
+        postDelayed(closeDone, Ui.light ? Ui.CLOSE : 210);
     }
 
     /** The end of a close, and Close all's word that it's done: dropped should the deck open again first. */
@@ -659,7 +665,8 @@ final class Switcher extends FrameLayout {
         AppRepo.App a = apps.get(i);
         LinearLayout v = items.get(i);
         host.close(a);
-        v.animate().translationY(-Ui.dp(swipe ? 380 : 320)).setStartDelay(0).setDuration(320).setInterpolator(Ui.SOFT).withEndAction(() -> {
+        v.animate().translationY(-Ui.dp(swipe ? 380 : 320)).setStartDelay(0)
+                .setDuration(Ui.light ? Ui.CLOSE : 320).setInterpolator(Ui.SOFT).withEndAction(() -> {
             deck.removeView(v);
             items.remove(i);
             apps.remove(i);
@@ -683,15 +690,17 @@ final class Switcher extends FrameLayout {
         busy = true;
         int n = apps.size();
         host.closeAll(new ArrayList<>(apps));
+        long stagger = Ui.light ? 0L : 40L;
+        long dur = Ui.light ? Ui.CLOSE : 340L;
         for (int k = 0; k < items.size(); k++) {
-            items.get(k).animate().translationY(-Ui.dp(420)).setStartDelay(40L * Math.abs(k - at)).setDuration(340).setInterpolator(Ui.SOFT).start();
+            items.get(k).animate().translationY(-Ui.dp(420)).setStartDelay(stagger * Math.abs(k - at)).setDuration(dur).setInterpolator(Ui.SOFT).start();
         }
-        shadow.animate().translationY(-Ui.dp(420)).setStartDelay(0).setDuration(340).setInterpolator(Ui.SOFT).start();
+        shadow.animate().translationY(-Ui.dp(420)).setStartDelay(0).setDuration(dur).setInterpolator(Ui.SOFT).start();
         clearedLater = () -> {
             clearedLater = null;
             host.cleared(n);
         };
-        postDelayed(clearedLater, 380 + 40L * items.size());
+        postDelayed(clearedLater, (Ui.light ? Ui.CLOSE : 380L) + stagger * items.size());
     }
 
     private Card card(int i) {
@@ -709,8 +718,9 @@ final class Switcher extends FrameLayout {
         float chip = d == 0 ? 1f : d > 0 ? 0.7f : 0f, words = d == 0 ? 1f : 0f;
         View icon = head.getChildAt(0), names = head.getChildAt(1);
         if (animate) {
-            icon.animate().alpha(chip).setDuration(300).setStartDelay(0).start();
-            names.animate().alpha(words).setDuration(d == 0 ? 360 : 160).setStartDelay(d == 0 ? 120 : 0).start();
+            icon.animate().alpha(chip).setDuration(Ui.light ? Ui.LOW_FOCUS_IN : 300).setStartDelay(0).start();
+            names.animate().alpha(words).setDuration(Ui.light ? Ui.LOW_FOCUS_IN : (d == 0 ? 360 : 160))
+                    .setStartDelay(Ui.light || d != 0 ? 0 : 120).start();
         } else {
             icon.setAlpha(chip);
             names.setAlpha(words);
@@ -724,7 +734,7 @@ final class Switcher extends FrameLayout {
     private final Map<String, LinearLayout> made = new java.util.LinkedHashMap<String, LinearLayout>(16, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<String, LinearLayout> eldest) {
-            return size() > 8;
+            return size() > (Ui.light ? 4 : 8);
         }
     };
     private final java.util.ArrayDeque<AppRepo.App> toPaint = new java.util.ArrayDeque<>();
@@ -807,13 +817,23 @@ final class Switcher extends FrameLayout {
             kept.getChildAt(1).setVisibility(VISIBLE);
             return kept;
         }
-        LinearLayout col = new LinearLayout(act);
+        LinearLayout col = new LinearLayout(act) {
+            @Override
+            public boolean hasOverlappingRendering() {
+                return !Ui.light && super.hasOverlappingRendering();
+            }
+        };
         col.setOrientation(LinearLayout.VERTICAL);
         col.setClipChildren(false);
 
         LinearLayout head = new LinearLayout(act);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        FrameLayout chip = new FrameLayout(act);
+        FrameLayout chip = new FrameLayout(act) {
+            @Override
+            public boolean hasOverlappingRendering() {
+                return !Ui.light && super.hasOverlappingRendering();
+            }
+        };
         GradientDrawable cg = new GradientDrawable();
         cg.setColor(0xE6121419);
         cg.setStroke(Ui.dp(1), 0x1FFFFFFF);
@@ -827,7 +847,12 @@ final class Switcher extends FrameLayout {
         icon.setBackground(clip);
         chip.addView(icon, new FrameLayout.LayoutParams(Ui.dp(24), Ui.dp(24), Gravity.CENTER));
         head.addView(chip, new LinearLayout.LayoutParams(Ui.dp(HEAD), Ui.dp(HEAD)));
-        LinearLayout names = new LinearLayout(act);
+        LinearLayout names = new LinearLayout(act) {
+            @Override
+            public boolean hasOverlappingRendering() {
+                return !Ui.light && super.hasOverlappingRendering();
+            }
+        };
         names.setGravity(Gravity.BOTTOM);
         TextView name = Ui.text(act, 19, Ui.semibold, 0xFFFFFFFF);
         name.setText(a.label);

@@ -529,4 +529,130 @@ public class LightModePerfTest {
             org.robolectric.shadows.ShadowChoreographer.setPaused(false);
         }
     }
+
+    @Test
+    public void overlaysUseFastPathsAndNonOverlappingLayersInLightMode() throws Exception {
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(java.time.Duration.ofMillis(16));
+        try {
+            Prefs.device(c).edit().putString("set_light", "on").commit();
+            org.robolectric.android.controller.ActivityController<HomeActivity> ac = Robolectric.buildActivity(HomeActivity.class).setup();
+            controllers.add(ac);
+            HomeActivity home = ac.get();
+            Assert.assertTrue(Ui.light);
+
+            Find find = field(home, "findPanel");
+            AppMenu menu = field(home, "menu");
+            Widget skyW = field(home, "skyW");
+            View homeView = field(home, "home");
+            Backdrop backdrop = field(home, "backdrop");
+            Assert.assertFalse("Find must avoid offscreen layer in Light mode", find.hasOverlappingRendering());
+            Assert.assertFalse("AppMenu must avoid offscreen layer in Light mode", menu.hasOverlappingRendering());
+            Assert.assertFalse("Widget must avoid offscreen layer in Light mode", skyW.hasOverlappingRendering());
+
+            // Find opens over Ui.LOW_FOCUS_IN and hides home + stops backdrop at 150ms (not 300ms)
+            Method openFind = HomeActivity.class.getDeclaredMethod("openFind", String.class);
+            openFind.setAccessible(true);
+            openFind.invoke(home, "");
+            run(180);
+            Assert.assertEquals(1f, find.getAlpha(), 1e-4f);
+            Assert.assertEquals(View.INVISIBLE, homeView.getVisibility());
+            Assert.assertFalse("Light mode stops backdrop under opaque Find veil", (Boolean) field(backdrop, "running"));
+
+            Method closeFind = HomeActivity.class.getDeclaredMethod("closeFind");
+            closeFind.setAccessible(true);
+            closeFind.invoke(home);
+            Assert.assertEquals(View.VISIBLE, homeView.getVisibility());
+            run(180);
+            Assert.assertEquals(View.GONE, find.getVisibility());
+
+            // AppMenu skips full-screen parent invalidate() when Light mode forces dim=0
+            boolean[] invalidated = {false};
+            FrameLayout holder = new FrameLayout(home) {
+                @Override
+                public void onDescendantInvalidated(View child, View target) {
+                    invalidated[0] = true;
+                    super.onDescendantInvalidated(child, target);
+                }
+
+                @Override
+                public android.view.ViewParent invalidateChildInParent(int[] location, android.graphics.Rect dirty) {
+                    invalidated[0] = true;
+                    return super.invalidateChildInParent(location, dirty);
+                }
+            };
+            AppMenu spyMenu = new AppMenu(home, backdrop);
+            spyMenu.removeAllViews();
+            spyMenu.setVisibility(View.VISIBLE);
+            holder.addView(spyMenu, new FrameLayout.LayoutParams(1280, 720));
+            ((android.view.ViewGroup) home.findViewById(android.R.id.content)).addView(holder, new FrameLayout.LayoutParams(1280, 720));
+            holder.measure(View.MeasureSpec.makeMeasureSpec(1280, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(720, View.MeasureSpec.EXACTLY));
+            holder.layout(0, 0, 1280, 720);
+            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888);
+            holder.draw(new android.graphics.Canvas(bmp));
+            Spring.Sink sink = field(field(spyMenu, "way"), "sink");
+            invalidated[0] = false;
+            sink.at(0.5f);
+            Assert.assertFalse("Light mode skips full-screen AppMenu invalidate when dim=0", invalidated[0]);
+            Assert.assertEquals(0f, (Float) field(spyMenu, "dim"), 1e-4f);
+
+            // Switcher in Light mode: caches at most 4 cards, disables overlapping layers on item containers, closes in Ui.CLOSE
+            final java.util.Map<String, AppRepo.App> map = new java.util.LinkedHashMap<>();
+            java.util.LinkedHashMap<String, Long> recent = new java.util.LinkedHashMap<>();
+            long now = System.currentTimeMillis();
+            for (int k = 0; k < 6; k++) {
+                String p = "com.test.p" + k;
+                AppRepo.App app = new AppRepo.App();
+                app.pkg = p;
+                app.label = "App " + k;
+                app.icon = new ColorDrawable(0xFF336699);
+                app.color = 0xFF336699;
+                map.put(p, app);
+                recent.put(p, now - k * 1000L);
+            }
+            Switcher sw = new Switcher(home, backdrop, new Switcher.Host() {
+                @Override public AppRepo.App find(String pkg) { return map.get(pkg); }
+                @Override public Card card(AppRepo.App a) { return new Card(home, Tiles.launch(a), a.color, 22); }
+                @Override public void launch(AppRepo.App a, View from) {}
+                @Override public void close(AppRepo.App a) {}
+                @Override public void closeAll(List<AppRepo.App> all) {}
+                @Override public void cleared(int count) {}
+                @Override public android.graphics.Bitmap shot(String pkg) { return null; }
+            });
+            ((android.view.ViewGroup) home.findViewById(android.R.id.content)).addView(sw, new FrameLayout.LayoutParams(1280, 720));
+            sw.open(recent, null);
+            java.util.Map<?, ?> made = field(sw, "made");
+            Assert.assertTrue("Light mode Switcher caps cached cards at 4, was " + made.size(), made.size() <= 4);
+            List<View> items = field(sw, "items");
+            android.view.ViewGroup itemCol = (android.view.ViewGroup) items.get(0);
+            android.view.ViewGroup itemHead = (android.view.ViewGroup) itemCol.getChildAt(0);
+            Assert.assertFalse(itemCol.hasOverlappingRendering());
+            Assert.assertFalse(itemHead.getChildAt(0).hasOverlappingRendering());
+            Assert.assertFalse(itemHead.getChildAt(1).hasOverlappingRendering());
+            run(250);
+            sw.close(null);
+            run(160);
+            Assert.assertEquals("Light mode Switcher finishes closing within Ui.CLOSE", View.GONE, sw.getVisibility());
+
+            // HIGH mode unchanged
+            Ui.light = false;
+            sink.at(0.5f);
+            Assert.assertTrue("HIGH mode still invalidates AppMenu for dim backdrop", invalidated[0]);
+            Assert.assertEquals(0.5f, (Float) field(spyMenu, "dim"), 1e-4f);
+            Assert.assertTrue(find.hasOverlappingRendering());
+            Assert.assertTrue(menu.hasOverlappingRendering());
+            Assert.assertFalse("Widget inherits GlassFrame non-overlapping rendering", skyW.hasOverlappingRendering());
+            Assert.assertTrue(itemCol.hasOverlappingRendering());
+            sw.open(recent, null);
+            Assert.assertEquals("HIGH mode Switcher retains all 6 items (up to 8)", 6, made.size());
+            sw.close(null);
+            run(160);
+            Assert.assertEquals("HIGH mode Switcher stays open past 160ms (closes at 210ms)", View.VISIBLE, sw.getVisibility());
+            run(100);
+            Assert.assertEquals(View.GONE, sw.getVisibility());
+        } finally {
+            org.robolectric.shadows.ShadowChoreographer.setPaused(false);
+        }
+    }
 }

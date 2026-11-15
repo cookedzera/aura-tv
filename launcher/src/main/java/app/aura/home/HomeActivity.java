@@ -2196,7 +2196,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             sidebar.setTranslationX(x);
             return;
         }
-        sidebar.animate().alpha(a).translationX(x).setStartDelay(0).setDuration(in ? 340 : 260).setInterpolator(Ui.EMPHASIZED).start();
+        sidebar.animate().alpha(a).translationX(x).setStartDelay(0)
+                .setDuration(Perf.light(this) ? (in ? Ui.LOW_FOCUS_IN : Ui.CLOSE) : (in ? 340 : 260))
+                .setInterpolator(Ui.EMPHASIZED).start();
     }
 
     /** Find and Control Center as round glass buttons, top right beside the clock, as on Apple TV. */
@@ -2245,7 +2247,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         for (View v : new View[]{status, topFind, topSettings, topCc}) {
             v.animate().cancel();
             if (!animate) v.setAlpha(a);
-            else v.animate().alpha(a).setStartDelay(0).setDuration(in ? 280 : 220).setInterpolator(Ui.SOFT).start();
+            else v.animate().alpha(a).setStartDelay(0)
+                    .setDuration(Perf.light(this) ? (in ? Ui.LOW_FOCUS_IN : Ui.CLOSE) : (in ? 280 : 220))
+                    .setInterpolator(Ui.SOFT).start();
         }
         if (dock && tvosHint != null) {
             tvosHint.animate().cancel();
@@ -4488,12 +4492,13 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      */
     private static void sink(View v, boolean in) {
         v.animate().alpha(in ? 1f : 0f).scaleX(in ? 1f : 0.9f).scaleY(in ? 1f : 0.9f).translationY(in ? 0f : Ui.dpf(28))
-                .setDuration(in ? 560 : 420).setStartDelay(in ? 80 : 0).setInterpolator(Ui.EMPHASIZED).start();
+                .setDuration(Ui.light ? (in ? Ui.LOW_FOCUS_IN : Ui.CLOSE) : (in ? 560 : 420))
+                .setStartDelay(Ui.light ? 0 : (in ? 80 : 0)).setInterpolator(Ui.EMPHASIZED).start();
     }
 
     private static void fade(View v, boolean in) {
-        v.animate().alpha(in ? 1f : 0f).setDuration(in ? 420 : 240).setStartDelay(in ? 120 : 0)
-                .setInterpolator(Ui.SOFT).start();
+        v.animate().alpha(in ? 1f : 0f).setDuration(Ui.light ? (in ? Ui.LOW_FOCUS_IN : Ui.CLOSE) : (in ? 420 : 240))
+                .setStartDelay(Ui.light ? 0 : (in ? 120 : 0)).setInterpolator(Ui.SOFT).start();
     }
 
     private void returnToContent() {
@@ -6677,7 +6682,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             // the photograph rests while the glass covers it: its drift re-blurred the glass five
             // times a second for nothing to see, and on HIGH kept a weak GPU busy as the apps moved
             backdrop.stop();
-        }, 300);
+        }, Perf.light(this) ? Ui.LOW_SHEET_IN : 300);
     }
 
     /** dp home sinks while All Apps covers it, falling back as the glass rises and coming up again as it goes. */
@@ -6707,13 +6712,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         stack.hold(true);
         findPanel.open(typed);
         handler.postDelayed(() -> {
-            if (findPanel.isOpen()) for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
-        }, 300);
+            if (findPanel.isOpen()) {
+                for (View v : behindCc()) v.setVisibility(View.INVISIBLE);
+                if (Perf.light(this)) backdrop.stop();
+            }
+        }, Perf.light(this) ? Ui.LOW_FOCUS_IN : 300);
     }
 
     private void closeFind() {
         if (!findPanel.isOpen()) return;
         findPanel.close();
+        if (Perf.light(this) && resumed) backdrop.start();
         for (View v : behindCc()) v.setVisibility(View.VISIBLE);
         home.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         stack.hold(false);

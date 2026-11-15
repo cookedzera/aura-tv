@@ -164,13 +164,19 @@ final class Find extends FrameLayout {
         field.setSelection(field.length());
     }
 
+    @Override
+    public boolean hasOverlappingRendering() {
+        return !Ui.light && super.hasOverlappingRendering();
+    }
+
     /** Opens with {@code typed} already in the field (a letter pressed on the home screen), the keyboard up. */
     void open(String typed) {
         shown = true;
         setVisibility(VISIBLE);
         animate().cancel();
         setAlpha(0f);
-        animate().alpha(1f).setDuration(240).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(null).start();
+        animate().alpha(1f).setDuration(Ui.light ? Ui.LOW_FOCUS_IN : 240).setStartDelay(0)
+                .setInterpolator(Ui.light ? Ui.EASE_DECEL : Ui.SOFT).withEndAction(null).start();
         field.setText(typed);
         field.setSelection(field.length());
         fill(typed);
@@ -194,7 +200,8 @@ final class Find extends FrameLayout {
         Compat.keyboard(field, false);
         field.clearFocus();
         animate().cancel();
-        animate().alpha(0f).setDuration(180).setStartDelay(0).setInterpolator(Ui.SOFT).withEndAction(() -> {
+        animate().alpha(0f).setDuration(Ui.light ? Ui.CLOSE : 180).setStartDelay(0)
+                .setInterpolator(Ui.light ? Ui.EASE_STANDARD : Ui.SOFT).withEndAction(() -> {
             if (shown) return;
             setVisibility(GONE);
             results.removeAllViews();
