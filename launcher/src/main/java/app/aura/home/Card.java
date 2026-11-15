@@ -103,6 +103,10 @@ final class Card extends View {
     static boolean parallax = true;
     private LinearGradient glintShader;
     private Bitmap bitmap, reflection, liftShadow;
+    private Bitmap restBaked, bakedArt, bakedGlass;
+    private int bakedW, bakedH, bakedX = Integer.MIN_VALUE, bakedY = Integer.MIN_VALUE;
+    private boolean bakedBadge, bakedTvos;
+    static boolean gridMoving;
     private final Paint shadowPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Matrix shadowMatrix = new Matrix();
     private float focus, dim, glintPos = -1f, artAlpha = 1f;
@@ -209,6 +213,7 @@ final class Card extends View {
     protected void onSizeChanged(int w, int h, int ow, int oh) {
         rect.set(0, 0, w, h);
         reflection = null;
+        dropRestBaked();
         if (w > 0 && h > 0) {
             int bw = Math.max(1, Math.round(w * res)), bh = Math.max(1, Math.round(h * res));
             boolean whole = true;
@@ -317,6 +322,7 @@ final class Card extends View {
     private void noRoom() {
         bitmap = null;
         art.setShader(null);
+        dropRestBaked();
         Continue.trim();
         Tiles.trim();
         account();
@@ -399,6 +405,7 @@ final class Card extends View {
         setRotationY(0f);
         if (moved != null) moved.run();
         if (glass != null) glass.removeMirror(this);
+        dropRestBaked();
         attached = false;
         account();
         super.onDetachedFromWindow();
@@ -476,6 +483,7 @@ final class Card extends View {
     void release() {
         // one that had no room is tried again when it next comes near
         starved = false;
+        dropRestBaked();
         if (bitmap == null && ready == null) return;
         bitmap = null;
         ready = null;
@@ -553,6 +561,21 @@ final class Card extends View {
         return b == null || b.isRecycled() ? 0 : b.getAllocationByteCount();
     }
 
+    void dropRestBaked() {
+        if (restBaked != null) {
+            restBaked.recycle();
+            restBaked = null;
+        }
+        bakedArt = null;
+        bakedGlass = null;
+        bakedW = bakedH = 0;
+        bakedX = bakedY = Integer.MIN_VALUE;
+    }
+
+    int pooledBytes() {
+        return bytes(bitmap) + (ready != bitmap ? bytes(ready) : 0) + bytes(reflection) + bytes(restBaked);
+    }
+
     void setDim(float d) {
         if (Math.abs(d - dim) < 0.004f) return;
         dim = d;
@@ -562,6 +585,63 @@ final class Card extends View {
     @Override
     protected void onDraw(Canvas c) {
         int w = getWidth(), h = getHeight();
+        if (!Ui.light && restBaked != null) dropRestBaked();
+        if (Ui.light && w > 0 && h > 0 && art.getShader() != null
+                && focus == 0f && risen == 0f && pressed == 1f
+                && dim == 0f && glintPos < 0f && artAlpha == 1f
+                && getScaleX() == 1f && getScaleY() == 1f
+                && getRotationX() == 0f && getRotationY() == 0f) {
+            int lx = 0, ly = 0;
+            Bitmap curBlur = null;
+            boolean canBake = true;
+            if (glass != null) {
+                if (gridMoving) {
+                    canBake = false;
+                } else {
+                    getLocationInWindow(loc);
+                    lx = loc[0];
+                    ly = loc[1];
+                    if (glass.hasImage()) {
+                        curBlur = glass.steadyBlur();
+                        if (curBlur == null) canBake = false;
+                    }
+                }
+            }
+            if (canBake) {
+                if (restBaked != null && bakedW == w && bakedH == h
+                        && bakedArt == bitmap && bakedBadge == badge && bakedTvos == tvos
+                        && (glass == null || (bakedGlass == curBlur && (!glass.hasImage() || (bakedX == lx && bakedY == ly))))) {
+                    c.drawBitmap(restBaked, 0f, 0f, null);
+                    return;
+                }
+                try {
+                    if (restBaked == null || restBaked.getWidth() != w || restBaked.getHeight() != h) {
+                        if (restBaked != null) restBaked.recycle();
+                        restBaked = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                    } else {
+                        restBaked.eraseColor(0);
+                    }
+                    drawCard(new Canvas(restBaked), w, h, lx, ly, glass != null);
+                    if (android.os.Build.VERSION.SDK_INT >= 24) restBaked.prepareToDraw();
+                    bakedW = w;
+                    bakedH = h;
+                    bakedX = lx;
+                    bakedY = ly;
+                    bakedGlass = curBlur;
+                    bakedArt = bitmap;
+                    bakedBadge = badge;
+                    bakedTvos = tvos;
+                    c.drawBitmap(restBaked, 0f, 0f, null);
+                    return;
+                } catch (OutOfMemoryError e) {
+                    dropRestBaked();
+                }
+            }
+        }
+        drawCard(c, w, h, 0, 0, false);
+    }
+
+    private void drawCard(Canvas c, int w, int h, int lx, int ly, boolean haveLoc) {
         // raised, the pane casts a soft shadow onto the photograph, falling further as it lifts: on HIGH
         // under glass and tvOS tiles (the others cast a real one), on LOW under every tile, unless home's
         // shared shadow already lies beneath it
@@ -578,8 +658,12 @@ final class Card extends View {
                     paneKey = key;
                     blur.setColorFilter(paneFilter(key));
                 }
-                getLocationInWindow(loc);
-                glass.drawBlurRound(c, rect, radius, loc[0], loc[1], blur);
+                if (!haveLoc) {
+                    getLocationInWindow(loc);
+                    lx = loc[0];
+                    ly = loc[1];
+                }
+                glass.drawBlurRound(c, rect, radius, lx, ly, blur);
             } else {
                 int smoke = Ui.withAlpha(Ui.SMOKE, Math.round(255 * (0.40f - 0.16f * focus)));
                 int frost = Ui.withAlpha(Ui.IVORY, Math.round(255 * (0.11f + 0.21f * focus)));

@@ -896,6 +896,11 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         });
     }
 
+    /** The current slide's blur when the backdrop is settled (not cross-fading or fading in), else null. */
+    Bitmap steadyBlur() {
+        return incoming == null && introAlpha() >= 1f && current != null && current.alpha >= 1f ? current.blur : null;
+    }
+
     /** Draws the blurred scene as seen from a view whose top-left sits at (ox, oy) in the window. */
     void drawBlur(Canvas c, float ox, float oy, Paint p) {
         float ia = introAlpha();

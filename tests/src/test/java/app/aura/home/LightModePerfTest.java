@@ -1074,4 +1074,173 @@ public class LightModePerfTest {
             Ui.light = prevLight;
         }
     }
+
+    @Test
+    public void cardRestingBakeAndCategoryCellPoolInLightMode() throws Exception {
+        install("demo.v1", "Video One", ApplicationInfo.CATEGORY_VIDEO);
+        install("demo.v2", "Video Two", ApplicationInfo.CATEGORY_VIDEO);
+        install("demo.m1", "Music One", ApplicationInfo.CATEGORY_AUDIO);
+        install("demo.m2", "Music Two", ApplicationInfo.CATEGORY_AUDIO);
+        install("demo.g1", "Game One", ApplicationInfo.CATEGORY_GAME);
+        Profiles.forget();
+        Profiles.use(c, Profiles.MAIN);
+        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "aura").commit();
+        Prefs.device(c).edit()
+                .putBoolean("welcomed", true)
+                .putString("set_light", "on")
+                .commit();
+
+        boolean prevLight = Ui.light, prevCalm = Backdrop.calm, prevMoving = Card.gridMoving;
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(java.time.Duration.ofMillis(16));
+        Backdrop b = new Backdrop(c);
+        try {
+            int cw = 160, ch = 90;
+            b.measure(View.MeasureSpec.makeMeasureSpec(640, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY));
+            b.layout(0, 0, 640, 360);
+            android.graphics.Bitmap sharp = android.graphics.Bitmap.createBitmap(128, 72, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas sc = new android.graphics.Canvas(sharp);
+            android.graphics.Paint sp = new android.graphics.Paint();
+            sp.setShader(new android.graphics.LinearGradient(0, 0, 128, 72, 0xFF285888, 0xFF904868, android.graphics.Shader.TileMode.CLAMP));
+            sc.drawRect(0, 0, 128, 72, sp);
+            android.graphics.Bitmap blur = Backdrop.blur(sharp);
+            Class<?> slideCls = Class.forName("app.aura.home.Backdrop$Slide");
+            java.lang.reflect.Constructor<?> slideCtor = slideCls.getDeclaredConstructor();
+            slideCtor.setAccessible(true);
+            Object slide = slideCtor.newInstance();
+            set(slide, "sharp", sharp);
+            set(slide, "blur", blur);
+            set(slide, "sw", 128);
+            set(slide, "sh", 72);
+            set(slide, "alpha", 1f);
+            set(slide, "s0", 1.10f);
+            set(slide, "s1", 1.10f);
+            set(slide, "x0", 0.25f);
+            set(slide, "x1", 0.25f);
+            set(slide, "y0", -0.20f);
+            set(slide, "y1", -0.20f);
+            java.lang.reflect.Method place = Backdrop.class.getDeclaredMethod("place", slideCls, long.class);
+            place.setAccessible(true);
+            Backdrop.calm = true;
+            place.invoke(b, slide, android.os.SystemClock.uptimeMillis());
+            set(b, "current", slide);
+            set(b, "introStart", -1L);
+
+            Tiles.Painter painter = (cv, w, h) -> {
+                android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                p.setColor(0xFFFFFFFF);
+                cv.drawCircle(w / 2f, h / 2f, h * 0.25f, p);
+            };
+            Card card = new Card(c, painter, 0xFF336699, 14f);
+            card.glass = b;
+            card.badge = true;
+            card.measure(View.MeasureSpec.makeMeasureSpec(cw, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(ch, View.MeasureSpec.EXACTLY));
+            card.layout(40, 60, 40 + cw, 60 + ch);
+
+            // 1. Live vs Light mode resting bake pixel identity
+            Ui.light = false;
+            Card.gridMoving = false;
+            android.graphics.Bitmap bHigh = android.graphics.Bitmap.createBitmap(cw, ch, android.graphics.Bitmap.Config.ARGB_8888);
+            card.draw(new android.graphics.Canvas(bHigh));
+            Assert.assertNull(field(card, "restBaked"));
+
+            // While gridMoving is true, glass card does not bake restBaked
+            Ui.light = true;
+            Card.gridMoving = true;
+            android.graphics.Bitmap bMoving = android.graphics.Bitmap.createBitmap(cw, ch, android.graphics.Bitmap.Config.ARGB_8888);
+            card.draw(new android.graphics.Canvas(bMoving));
+            Assert.assertNull("Glass card does not bake while grid is moving", field(card, "restBaked"));
+
+            // Once stationary (gridMoving == false), glass card bakes restBaked and matches live pixels 100%
+            Card.gridMoving = false;
+            android.graphics.Bitmap bLight = android.graphics.Bitmap.createBitmap(cw, ch, android.graphics.Bitmap.Config.ARGB_8888);
+            card.draw(new android.graphics.Canvas(bLight));
+            android.graphics.Bitmap baked = field(card, "restBaked");
+            Assert.assertNotNull("Stationary resting card bakes restBaked in Light mode", baked);
+            for (int y = 0; y < ch; y++) {
+                for (int x = 0; x < cw; x++) {
+                    Assert.assertEquals("Card resting pixel mismatch at " + x + "," + y, bHigh.getPixel(x, y), bLight.getPixel(x, y));
+                }
+            }
+
+            // Focused card draws live path without dropping restBaked, then reuses restBaked when unfocused
+            set(card, "focus", 1f);
+            android.graphics.Bitmap bFocused = android.graphics.Bitmap.createBitmap(cw, ch, android.graphics.Bitmap.Config.ARGB_8888);
+            card.draw(new android.graphics.Canvas(bFocused));
+            Assert.assertSame("Focused draw preserves resting bitmap for reuse on unfocus", baked, field(card, "restBaked"));
+            set(card, "focus", 0f);
+            card.release();
+            Assert.assertNull("release() drops restBaked", field(card, "restBaked"));
+
+            // 2. Category switch cellPool reuse, <= 1.5 MB LOW cap, and deferred refreshWidgets
+            Field w = HomeActivity.class.getDeclaredField("warm");
+            w.setAccessible(true);
+            w.setBoolean(null, true);
+            org.robolectric.android.controller.ActivityController<HomeActivity> ac = Robolectric.buildActivity(HomeActivity.class).setup();
+            controllers.add(ac);
+            HomeActivity home = ac.get();
+            run(300);
+
+            String[] cats = {"video", "music", "games"};
+            int[] pmCats = {ApplicationInfo.CATEGORY_VIDEO, ApplicationInfo.CATEGORY_AUDIO, ApplicationInfo.CATEGORY_GAME};
+            java.util.List<AppRepo.App> mine = new java.util.ArrayList<>();
+            for (int i = 0; i < 20; i++) {
+                AppRepo.App a = new AppRepo.App();
+                a.pkg = "demo.app" + i;
+                a.label = "App " + i;
+                a.color = 0xFF204060 + i * 0x030507;
+                a.category = cats[i % cats.length];
+                a.icon = new ColorDrawable(a.color);
+                install(a.pkg, a.label, pmCats[i % pmCats.length]);
+                mine.add(a);
+            }
+            set(home, "apps", mine);
+            call(home, "populate", new Class<?>[0]);
+
+            @SuppressWarnings("unchecked")
+            java.util.List<Cell> allCells = new java.util.ArrayList<>((java.util.List<Cell>) field(home, "cells"));
+            Assert.assertEquals(20, allCells.size());
+            // Give each cell a painted bitmap so pool byte cap is exercised
+            for (Cell cell : allCells) {
+                int[] sz = cell.card.size();
+                if (sz != null) {
+                    cell.card.take(android.graphics.Bitmap.createBitmap(sz[0], sz[1], android.graphics.Bitmap.Config.ARGB_8888));
+                }
+            }
+            Cell videoCellBefore = null;
+            for (Cell cell : allCells) if ("demo.app0".equals(cell.tag)) videoCellBefore = cell;
+            Assert.assertNotNull(videoCellBefore);
+
+            // Switch to tab 1, then tab 2, then back to tab 0 (All apps)
+            call(home, "pickHomeTab", new Class<?>[]{int.class}, 1);
+            Assert.assertTrue("tabSliding is set during Light mode category switch", (Boolean) field(home, "tabSliding"));
+            Assert.assertTrue("Card.gridMoving is true during category switch slide", Card.gridMoving);
+            Assert.assertTrue("cellPool holds <= 1.2 MB on LOW", home.cellPoolBytes() <= 1_200_000);
+
+            call(home, "pickHomeTab", new Class<?>[]{int.class}, 2);
+            Assert.assertTrue("cellPool holds <= 1.2 MB on LOW after second switch", home.cellPoolBytes() <= 1_200_000);
+
+            call(home, "pickHomeTab", new Class<?>[]{int.class}, 0);
+            @SuppressWarnings("unchecked")
+            java.util.List<Cell> afterCells = (java.util.List<Cell>) field(home, "cells");
+            Cell videoCellAfter = null;
+            for (Cell cell : afterCells) if ("demo.app0".equals(cell.tag)) videoCellAfter = cell;
+            Assert.assertSame("Category switch reuses pooled Cell instance", videoCellBefore, videoCellAfter);
+
+            // After 180ms, tabSliding ends and Card.gridMoving returns to false
+            run(500);
+            ShadowLooper.idleMainLooper();
+            Assert.assertFalse("tabSliding clears after animation ends", (Boolean) field(home, "tabSliding"));
+            Assert.assertFalse("Card.gridMoving clears after animation ends", Card.gridMoving);
+        } finally {
+            org.robolectric.shadows.ShadowChoreographer.setPaused(false);
+            ShadowLooper.idleMainLooper();
+            Ui.light = prevLight;
+            Backdrop.calm = prevCalm;
+            Card.gridMoving = prevMoving;
+            b.release();
+        }
+    }
 }

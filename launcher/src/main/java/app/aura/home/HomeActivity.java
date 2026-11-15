@@ -840,6 +840,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             Tiles.trim();
             dropExtras();
             Continue.trim();
+            clearCellPool();
             if (!switcher.isOpen()) {
                 faces.clear();
                 switcher.forget();
@@ -2732,12 +2733,53 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return null;
     }
 
+    private static final int MAX_CELL_POOL = 24;
+    private static final int MAX_CELL_POOL_BYTES_LOW = 1_200_000;
+    private final Map<String, Cell> cellPool = new java.util.LinkedHashMap<>(32, 0.75f, true);
+
+    int cellPoolBytes() {
+        int sum = 0;
+        for (Cell c : cellPool.values()) sum += c.card.pooledBytes();
+        return sum;
+    }
+
+    private void clearCellPool() {
+        for (Cell c : cellPool.values()) c.card.release();
+        cellPool.clear();
+    }
+
+    private void trimCellPool(boolean calm) {
+        while (cellPool.size() > MAX_CELL_POOL) {
+            java.util.Iterator<Cell> it = cellPool.values().iterator();
+            if (!it.hasNext()) break;
+            Cell evict = it.next();
+            evict.card.release();
+            it.remove();
+        }
+        if (!calm) return;
+        int bytes = 0;
+        java.util.List<Cell> list = new java.util.ArrayList<>(cellPool.values());
+        for (int i = list.size() - 1; i >= 0; i--) {
+            Cell c = list.get(i);
+            int b = c.card.pooledBytes();
+            if (bytes + b > MAX_CELL_POOL_BYTES_LOW) {
+                c.card.release();
+            } else {
+                bytes += b;
+            }
+        }
+    }
+
     /**
      * Live inputs first, then your apps in your order, then anything new, alphabetically. A tile
      * painted from exactly the same things as before (app, look, picture, name) is kept as it is
      * and only moved: hiding one app or renaming a folder no longer repaints every tile.
      */
     private void populate() {
+        populate(true);
+    }
+
+    private void populate(boolean withWidgets) {
         String keep = gridAt < cells.size() ? cells.get(gridAt).key() : null;
         // on the first fill the window may already have parked focus on the rail; the grid takes it
         boolean firstFill = cells.isEmpty(), hadFocus = zone == GRID && getCurrentFocus() instanceof Card;
@@ -2751,7 +2793,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         stopPreview();
         // the tiles on screen are painted at once; the rest wait for the first frames and a quiet remote
         filledAt = SystemClock.uptimeMillis();
-        Map<String, Cell> old = new java.util.HashMap<>();
+        Map<String, Cell> old = new java.util.HashMap<>(cellPool);
+        cellPool.clear();
         for (Cell c : cells) old.put(c.key(), c);
         // a new app size: every tile is painted again at its new size, none kept
         if (sizeGrid(Prefs.gridCols(this))) for (Cell c : old.values()) c.sig = null;
@@ -2859,8 +2902,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // than Android handing it to the first view it finds (the sidebar sliding in, the zone changing)
         boolean parked = false;
         if (had != null) for (Cell c : old.values()) if (c.card == had) parked = park();
-        // tiles nothing kept: gone from the page
-        for (Cell c : old.values()) page.removeView(c);
+        // tiles nothing kept: gone from the page, pooled for category tab switches
+        for (Cell c : old.values()) {
+            page.removeView(c);
+            if (c.sig != null && (find(c.tag) != null || c.tag.startsWith("folder:") || c.tag.startsWith("input:") || WATCH_TAG.equals(c.tag))) {
+                cellPool.put(c.key(), c);
+            } else {
+                c.card.release();
+            }
+        }
+        trimCellPool(calm);
         int at = -1;
         for (int i = 0; i < cells.size(); i++) {
             Cell c = cells.get(i);
@@ -2911,7 +2962,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             appsAt = SystemClock.uptimeMillis();
             progressSplash();
         }
-        refreshWidgets(true);
+        if (withWidgets) {
+            handler.removeCallbacks(endTabSlide);
+            refreshWidgets(true);
+        }
         windowMoved();
     }
 
@@ -3148,8 +3202,10 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         handler.removeCallbacks(paintNext);
         handler.removeCallbacks(tidyTiles);
         for (int i = 0; i < cells.size(); i++) {
+            cells.get(i).card.dropRestBaked();
             if (rowsAway(i) > 0 || colsAway(i) > 0) cells.get(i).card.release();
         }
+        clearCellPool();
         shelf.release();
         Tiles.cap(16);
         final Set<String> icons = new HashSet<>();
@@ -3435,9 +3491,12 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     /** Every row, the page and its pages straight to where they're heading. */
     private void settleNow() {
+        tabSliding = false;
+        handler.removeCallbacks(endTabSlide);
         for (int r = 0; r < rowInfo.size(); r++) if (rowInfo.get(r).glide != null) rowInfo.get(r).glide.finish();
         if (scroll != null) scroll.finish();
         if (pageGlide != null) pageGlide.finish();
+        syncGridMoving();
     }
 
     /**
@@ -3584,16 +3643,23 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             for (int i = 0; i < cells.size(); i++) cells.get(i).setTranslationX(placeX(i, cells.get(i)));
             if (pageDots != null) pageDots.setPosition(v / pageW());
             // like the vertical scroll: panes on screen repaint every 6dp (24dp on LOW) and where they stop
+            syncGridMoving();
             if (pageGlide.moving() && Math.abs(v - pageGlassAt) < (Ui.light ? 24 : 6)) return;
             pageGlassAt = v;
             float w = root.getWidth();
             for (int i = 0; i < cells.size(); i++) {
                 Cell c = cells.get(i);
                 float x = c.getTranslationX();
-                if (c.card.glass != null && x + c.getWidth() >= -Ui.dp(32) && x <= w + Ui.dp(32)) c.card.invalidate();
+                boolean onScreen = x + c.getWidth() >= -Ui.dp(32) && x <= w + Ui.dp(32);
+                if (!onScreen) {
+                    c.card.dropRestBaked();
+                } else if (c.card.glass != null) {
+                    c.card.invalidate();
+                }
             }
         });
         pageGlide.to(to, Ui.scrollFloorMs(root, Math.abs(to - pageGlide.value()) * Ui.density, false));
+        syncGridMoving();
     }
 
     /** The dots beneath the dock, one a page, the current one a pill that glides along with the slide. */
@@ -4406,6 +4472,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      * panes on screen.
      */
     private void repaintScrollGlass(float ty, boolean done) {
+        syncGridMoving();
         if (!done && Math.abs(ty - scrollBlurY) < Ui.dpf(Ui.light ? 24 : 6)) return;
         scrollBlurY = ty;
         int w = root.getWidth() > 0 ? root.getWidth() : Ui.dp(960);
@@ -4414,12 +4481,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (dock) dockGlass.invalidate();
         for (int i = 0; i < cells.size(); i++) {
             Cell c = cells.get(i);
-            if (c.card.glass != null && c.getAlpha() > 0f) {
-                float x = c.getX();
-                if (x + Ui.dp(TILE_W) < -Ui.dp(32) || x > w + Ui.dp(32)) continue;
-                // cells are placed by translation: getY() is where one sits on the page
-                float top = c.getY() + c.card.getTop() + ty;
-                if (top + c.card.getHeight() >= -Ui.dp(32) && top <= h + Ui.dp(32)) c.card.invalidate();
+            float x = c.getX();
+            // cells are placed by translation: getY() is where one sits on the page
+            float top = c.getY() + c.card.getTop() + ty;
+            boolean onScreen = c.getAlpha() > 0f
+                    && x + Ui.dp(TILE_W) >= -Ui.dp(32) && x <= w + Ui.dp(32)
+                    && top + c.card.getHeight() >= -Ui.dp(32) && top <= h + Ui.dp(32);
+            if (!onScreen) {
+                c.card.dropRestBaked();
+            } else if (c.card.glass != null) {
+                c.card.invalidate();
             }
         }
     }
@@ -6630,6 +6701,21 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         return homeTab.equals(Categories.ALL) ? null : list.get(at);
     }
 
+    private boolean tabSliding;
+    private final Runnable endTabSlide = () -> {
+        tabSliding = false;
+        syncGridMoving();
+        repaintScrollGlass(scrollY + giveY, true);
+        refreshWidgets(true);
+    };
+
+    private void syncGridMoving() {
+        Card.gridMoving = (scroll != null && scroll.moving())
+                || (give != null && give.moving())
+                || (pageGlide != null && pageGlide.moving())
+                || tabSliding;
+    }
+
     /**
      * An Aura home tab picked: the grid shows its apps, sliding in from the side the tab lies on as
      * All Apps' do (HIGH fades and settles them cleanly); focus stays on the tab unless invoked from grid.
@@ -6643,10 +6729,16 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (scrollTarget != 0f) scrollTo(0);
         // other apps are coming: the cards kept for the one the focus left go
         hideShelf();
-        populate();
+        boolean light = Ui.light;
+        tabSliding = light;
+        syncGridMoving();
+        populate(!light);
+        if (light) {
+            handler.removeCallbacks(endTabSlide);
+            handler.postDelayed(endTabSlide, 170L);
+        }
         float dx = Ui.dpf(28) * Integer.signum(k - was);
         boolean rich = AllApps.rich(this);
-        boolean light = Ui.light;
         // the rows on screen (the first few: the page sits at its top on a tab); those below are simply there
         int animRows = light ? Math.min(2, AllApps.STAGGERED_ROWS) : AllApps.STAGGERED_ROWS;
         for (int i = 0; i < cells.size() && rowOf(i) < animRows; i++) {
