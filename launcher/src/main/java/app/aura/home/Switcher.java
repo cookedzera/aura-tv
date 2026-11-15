@@ -593,12 +593,6 @@ final class Switcher extends FrameLayout {
         shadow.animate().translationY(Ui.dp(RISE)).setStartDelay(0).setDuration(dur).setInterpolator(Ui.SOFT).start();
         away(dur);
         removeCallbacks(closeDone);
-        if (Ui.light && clearedLater != null) {
-            removeCallbacks(clearedLater);
-            Runnable r = clearedLater;
-            clearedLater = null;
-            r.run();
-        }
         closeDone = () -> {
             closeDone = null;
             if (after != null) after.run();

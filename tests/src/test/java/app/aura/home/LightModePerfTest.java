@@ -610,7 +610,7 @@ public class LightModePerfTest {
             Assert.assertEquals(0f, (Float) field(spyMenu, "dim"), 1e-4f);
 
             // Switcher in Light mode: keeps up to 8 cached cards, disables overlapping layers on item containers,
-            // closes in Ui.CLOSE, and runs pending clearedLater immediately when closed early after Close all
+            // closes in Ui.CLOSE, and Close all's word still comes when the deck is shut before it (only a reopen drops it)
             final java.util.Map<String, AppRepo.App> map = new java.util.LinkedHashMap<>();
             java.util.LinkedHashMap<String, Long> recent = new java.util.LinkedHashMap<>();
             long now = System.currentTimeMillis();
@@ -648,10 +648,11 @@ public class LightModePerfTest {
             call(sw, "clearAll", new Class<?>[0]);
             Assert.assertEquals("clearedLater has not fired before Ui.CLOSE", 0, clearedCount[0]);
             sw.close(null);
-            Assert.assertEquals("Closing early after Close all runs clearedLater immediately", 8, clearedCount[0]);
-            Assert.assertNull(field(sw, "clearedLater"));
             run(160);
             Assert.assertEquals("Light mode Switcher finishes closing within Ui.CLOSE", View.GONE, sw.getVisibility());
+            run(400);
+            Assert.assertEquals("Close all's word arrives after an early close", 8, clearedCount[0]);
+            Assert.assertNull(field(sw, "clearedLater"));
 
             // HIGH mode unchanged
             Ui.light = false;

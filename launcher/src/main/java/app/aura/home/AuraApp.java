@@ -11,6 +11,9 @@ public class AuraApp extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        // Light mode known from the process's start, for whatever runs before the home screen does
+        // (a job, the screensaver, Control Center's tiles): the home screen applies it again as it opens
+        Ui.light = Perf.light(this);
         Words.init(this);
         Trouble.init(this);
         Safety.watch(this);
