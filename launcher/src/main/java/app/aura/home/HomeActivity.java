@@ -4696,7 +4696,6 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
 
     /** The coloured light glides to where focus is heading (not where the scrolling page is now) and takes its colour. */
     private void glide(float cx, float cy, int color) {
-        if (bloom.getVisibility() == View.GONE && Backdrop.calm) return;
         float w = Math.max(1, root.getWidth()), h = Math.max(1, root.getHeight());
         bloom.moveTo(cx / w, cy / h, 900);
         bloom.setColor(color, 700);

@@ -483,6 +483,7 @@ public class LightModePerfTest {
     public void bloomSkipsAnimatorsWhenGoneInLightMode() throws Exception {
         Ui.light = true;
         Bloom bloom = new Bloom(c);
+        bloom.layout(0, 0, 1000, 500);
         bloom.setVisibility(View.GONE);
         bloom.moveTo(0.25f, 0.75f, 900);
         bloom.setColor(0xFF336699, 700);
@@ -494,8 +495,10 @@ public class LightModePerfTest {
         Assert.assertEquals(0.75f, (Float) field(bloom, "cy"), 1e-4f);
         Assert.assertEquals(0xFF336699, ((Integer) field(bloom, "color")).intValue());
         Assert.assertEquals(0.45f, (Float) field(bloom, "strength"), 1e-4f);
+        Assert.assertNotEquals("Gone Bloom skips recolor until visible",
+                0xFF336699, ((Integer) field(bloom, "filteredFor")).intValue());
 
-        // HomeActivity.glide() skips Bloom + parallax while Light mode has bloom GONE and Backdrop.calm true
+        // HomeActivity.glide() stores cx/cy/color on Gone Bloom without starting animators
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(java.time.Duration.ofMillis(16));
         try {
@@ -510,10 +513,15 @@ public class LightModePerfTest {
             glide.invoke(home, 320f, 180f, 0xFF4488CC);
             Assert.assertNull(field(homeBloom, "moveAnim"));
             Assert.assertNull(field(homeBloom, "colorAnim"));
+            Assert.assertEquals(0xFF4488CC, ((Integer) field(homeBloom, "color")).intValue());
 
-            // HIGH mode: visible Bloom still runs moveAnim, colorAnim, and strengthAnim
+            // Becoming visible after Light mode immediately recolors and places the stored state
             Ui.light = false;
             bloom.setVisibility(View.VISIBLE);
+            Assert.assertEquals("Visible Bloom immediately recolors to stored color",
+                    0xFF336699, ((Integer) field(bloom, "filteredFor")).intValue());
+            android.graphics.RectF area = field(bloom, "area");
+            Assert.assertTrue("Visible Bloom immediately places stored coordinates", area.width() > 0 && area.height() > 0);
             bloom.moveTo(0.8f, 0.2f, 900);
             bloom.setColor(0xFFAA5500, 700);
             bloom.setStrength(1f, 460);

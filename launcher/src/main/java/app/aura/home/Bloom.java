@@ -72,6 +72,16 @@ final class Bloom extends View implements Backdrop.Tick {
         place();
     }
 
+    @Override public void setVisibility(int visibility) {
+        boolean wasGone = getVisibility() == GONE;
+        super.setVisibility(visibility);
+        if (wasGone && visibility == VISIBLE) {
+            recolor();
+            place();
+            invalidate();
+        }
+    }
+
     private void place() {
         int w = getWidth(), h = getHeight();
         if (w == 0 || shader == null) return;
