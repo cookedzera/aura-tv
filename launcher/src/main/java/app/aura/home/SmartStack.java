@@ -81,9 +81,10 @@ final class SmartStack extends FrameLayout {
     private final Dots dots;
     private final List<Slide> slides = new ArrayList<>();
     private final Path clipPath = new Path();
+    private final GradientDrawable bg;
     private final float cornerRadius;
     private int at, front;
-    private boolean held, running;
+    private boolean held, running, flipping, wasOpaque;
     Listener listener;
 
     private final Runnable advance = new Runnable() {
@@ -106,19 +107,41 @@ final class SmartStack extends FrameLayout {
         });
         setClipToOutline(true);
         // Rounded translucent smoked glass lets Widget's live wallpaper blur harmonise across all corners.
-        GradientDrawable bg = new GradientDrawable();
+        bg = new GradientDrawable();
         bg.setCornerRadius(r);
         bg.setColor(0x3810131A);
         setBackground(bg);
         for (int i = 0; i < 2; i++) {
-            pages[i] = new Page(c);
+            pages[i] = new Page(c, this::syncOpaque);
             addView(pages[i], new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
         pages[1].setAlpha(0f);
+        pages[1].setVisibility(View.INVISIBLE);
         dots = new Dots(c);
         LayoutParams dl = new LayoutParams(Ui.dp(6), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END);
         dl.rightMargin = Ui.dp(12);
         addView(dots, dl);
+    }
+
+    boolean coversOpaque() {
+        return Ui.light && !flipping && pages[front].getVisibility() == View.VISIBLE
+                && pages[front].getAlpha() == 1f && pages[front].art.hasOpaqueBaked();
+    }
+
+    private void syncOpaque() {
+        boolean now = coversOpaque();
+        bg.setColor(now ? 0 : 0x3810131A);
+        if (now != wasOpaque) {
+            wasOpaque = now;
+            invalidate();
+            if (getParent() instanceof View) ((View) getParent()).invalidate();
+        }
+    }
+
+    @Override
+    public void draw(Canvas c) {
+        bg.setColor(coversOpaque() ? 0 : 0x3810131A);
+        super.draw(c);
     }
 
     @Override
@@ -218,14 +241,17 @@ final class SmartStack extends FrameLayout {
 
     /** Both pages at rest, the one on show in front, and the pill on its dot. */
     private void settle() {
+        flipping = false;
         for (int i = 0; i < pages.length; i++) {
             Page pg = pages[i];
             pg.animate().cancel();
             pg.art.animate().cancel();
             pg.settle();
             pg.setAlpha(i == front ? 1f : 0f);
+            pg.setVisibility(i == front ? View.VISIBLE : View.INVISIBLE);
         }
         dots.settle();
+        syncOpaque();
     }
 
     /** Up on the remote: the next card now, and the clock starts again from it. */
@@ -263,25 +289,38 @@ final class SmartStack extends FrameLayout {
         dots.moveTo(at, dir != 0);
         if (dir == 0) {
             // straight to it, even if a flip was under way: both pages back to rest first
+            flipping = false;
             for (Page pg : pages) {
                 pg.animate().cancel();
                 pg.art.animate().cancel();
                 pg.settle();
             }
+            pages[front].setVisibility(View.VISIBLE);
             pages[front].bind(s);
             pages[front].setAlpha(1f);
             pages[1 - front].setAlpha(0f);
+            pages[1 - front].setVisibility(View.INVISIBLE);
+            syncOpaque();
         } else {
             Page in = pages[1 - front], out = pages[front];
             in.animate().cancel();
             out.animate().cancel();
+            flipping = true;
+            in.setVisibility(View.VISIBLE);
+            out.setVisibility(View.VISIBLE);
             in.bind(s);
             in.bringToFront();
             dots.bringToFront();
             float lift = dir == 2 ? 0f : Ui.dpf(26);
+            Runnable endOut = () -> {
+                out.settle();
+                out.setVisibility(View.INVISIBLE);
+                flipping = false;
+                syncOpaque();
+            };
             if (Ui.light) {
                 out.animate().translationY(-lift).alpha(0f).setStartDelay(0)
-                        .setDuration(Ui.CLOSE).setInterpolator(Ui.EASE_STANDARD).withEndAction(out::settle).start();
+                        .setDuration(Ui.CLOSE).setInterpolator(Ui.EASE_STANDARD).withEndAction(endOut).start();
                 in.setTranslationY(lift);
                 in.setAlpha(0f);
                 in.animate().translationY(0f).alpha(1f).setStartDelay(0)
@@ -292,7 +331,7 @@ final class SmartStack extends FrameLayout {
                 // the old card lifts away as the new one rises from just below. Only position and
                 // fade move: no scaling and no offscreen layers, which cost this TV's GPU a frame each
                 out.animate().translationY(-lift).alpha(0f).setStartDelay(0)
-                        .setDuration(520).setInterpolator(Ui.EMPHASIZED).withEndAction(out::settle).start();
+                        .setDuration(520).setInterpolator(Ui.EMPHASIZED).withEndAction(endOut).start();
                 in.setTranslationY(lift);
                 in.setAlpha(0f);
                 in.animate().translationY(0f).alpha(1f).setStartDelay(60)
@@ -302,6 +341,7 @@ final class SmartStack extends FrameLayout {
                 in.art.animate().translationY(0f).setStartDelay(60).setDuration(760).setInterpolator(Ui.EMPHASIZED).start();
             }
             front = 1 - front;
+            syncOpaque();
         }
         if (listener != null) listener.onSlide(s);
     }
@@ -314,7 +354,7 @@ final class SmartStack extends FrameLayout {
         final TextView kicker, badge, title, sub;
         final HomeActivity.Meter bar;
 
-        Page(Context c) {
+        Page(Context c, Runnable onStateChange) {
             super(c);
             // the stack says what's on its card (see show): its words aren't read out a second time
             setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
@@ -326,6 +366,7 @@ final class SmartStack extends FrameLayout {
             floor = new View(c);
             floor.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, new int[]{0xB3000000, 0x33000000, 0x00000000}));
             addView(floor, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            art.bindOverlays(tint, floor, onStateChange);
 
             LinearLayout content = new LinearLayout(c);
             content.setOrientation(LinearLayout.VERTICAL);
@@ -415,9 +456,10 @@ final class SmartStack extends FrameLayout {
             else Ui.fitLines(title, name, Ui.dp(250), 2, 17, 13);
             refresh(s);
             if (s.art != null) {
-                art.set(s);
                 shade(s);
+                art.set(s);
             } else {
+                art.set(null);
                 // an app card's picture is drawn once, then kept on the slide and reused
                 post(() -> drawArt(s));
             }
@@ -441,8 +483,8 @@ final class SmartStack extends FrameLayout {
                 return;
             }
             if (s.art == null) s.art = markArt(s, getWidth(), getHeight());
-            art.set(s);
             shade(s);
+            art.set(s);
         }
 
         /** What can change on a card while it's on show: its line and how far along. */
@@ -521,13 +563,26 @@ final class SmartStack extends FrameLayout {
         private final Paint pic = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         private final Matrix fillMatrix = new Matrix(), picMatrix = new Matrix();
         private final RectF picRect = new RectF();
+        private View tintView, floorView;
+        private Runnable onStateChange;
         private Slide slide;
-        private Bitmap fillArt;
+        private Bitmap fillArt, baked;
+        private boolean bakedOpaque;
 
         ArtView(Context c) {
             super(c);
             // the fill is backdrop: dimmed, so the picture and the words stand in front of it
             fill.setColorFilter(new LightingColorFilter(0xFF7A7A7A, 0));
+        }
+
+        void bindOverlays(View tint, View floor, Runnable onChange) {
+            tintView = tint;
+            floorView = floor;
+            onStateChange = onChange;
+        }
+
+        boolean hasOpaqueBaked() {
+            return Ui.light && baked != null && bakedOpaque;
         }
 
         @Override
@@ -552,7 +607,11 @@ final class SmartStack extends FrameLayout {
             int w = getWidth(), h = getHeight();
             pic.setShader(null);
             fillArt = null;
-            if (b == null || w == 0 || h == 0) return;
+            bakedOpaque = false;
+            if (b == null || w == 0 || h == 0) {
+                syncBaked(false);
+                return;
+            }
             float bw = b.getWidth(), bh = b.getHeight();
             BitmapShader shader = new BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
             if (slide.mark != null || bw / bh >= w / (float) h * 0.8f) {
@@ -563,25 +622,75 @@ final class SmartStack extends FrameLayout {
                 shader.setLocalMatrix(picMatrix);
                 pic.setShader(shader);
                 picRect.set(0, 0, w, h);
-                return;
+            } else {
+                if (slide.blur == null) slide.blur = soften(b);
+                fillArt = slide.blur;
+                float f = Math.max(w / (float) fillArt.getWidth(), h / (float) fillArt.getHeight());
+                fillMatrix.setScale(f, f);
+                fillMatrix.postTranslate((w - fillArt.getWidth() * f) / 2f, (h - fillArt.getHeight() * f) / 2f);
+                // full height on the right, its left side fading into the fill
+                float k = h / bh, pw = bw * k, x = w - pw;
+                picMatrix.setScale(k, k);
+                picMatrix.postTranslate(x, 0);
+                shader.setLocalMatrix(picMatrix);
+                LinearGradient fade = new LinearGradient(x, 0, x + pw * 0.45f, 0, 0x00000000, 0xFF000000, Shader.TileMode.CLAMP);
+                pic.setShader(new ComposeShader(shader, fade, PorterDuff.Mode.DST_IN));
+                picRect.set(x, 0, w, h);
             }
-            if (slide.blur == null) slide.blur = soften(b);
-            fillArt = slide.blur;
-            float f = Math.max(w / (float) fillArt.getWidth(), h / (float) fillArt.getHeight());
-            fillMatrix.setScale(f, f);
-            fillMatrix.postTranslate((w - fillArt.getWidth() * f) / 2f, (h - fillArt.getHeight() * f) / 2f);
-            // full height on the right, its left side fading into the fill
-            float k = h / bh, pw = bw * k, x = w - pw;
-            picMatrix.setScale(k, k);
-            picMatrix.postTranslate(x, 0);
-            shader.setLocalMatrix(picMatrix);
-            LinearGradient fade = new LinearGradient(x, 0, x + pw * 0.45f, 0, 0x00000000, 0xFF000000, Shader.TileMode.CLAMP);
-            pic.setShader(new ComposeShader(shader, fade, PorterDuff.Mode.DST_IN));
-            picRect.set(x, 0, w, h);
+            if (Ui.light) {
+                try {
+                    if (baked == null || baked.getWidth() != w || baked.getHeight() != h) {
+                        if (baked != null) baked.recycle();
+                        baked = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                    } else {
+                        baked.eraseColor(0);
+                    }
+                    Canvas bc = new Canvas(baked);
+                    if (fillArt != null) bc.drawBitmap(fillArt, fillMatrix, fill);
+                    bc.drawRect(picRect, pic);
+                    if (tintView != null && tintView.getBackground() != null) {
+                        Drawable td = tintView.getBackground();
+                        td.setBounds(0, 0, w, h);
+                        td.draw(bc);
+                    }
+                    if (floorView != null && floorView.getBackground() != null) {
+                        Drawable fd = floorView.getBackground();
+                        fd.setBounds(0, 0, w, h);
+                        fd.draw(bc);
+                    }
+                    bakedOpaque = fillArt != null || !b.hasAlpha()
+                            || ((baked.getPixel(0, 0) >>> 24) == 255
+                            && (baked.getPixel(w / 2, h / 2) >>> 24) == 255
+                            && (baked.getPixel(w - 1, h - 1) >>> 24) == 255);
+                    syncBaked(true);
+                    return;
+                } catch (OutOfMemoryError e) {
+                    if (baked != null) {
+                        baked.recycle();
+                        baked = null;
+                    }
+                }
+            }
+            syncBaked(false);
+        }
+
+        private void syncBaked(boolean active) {
+            if (!active && baked != null) {
+                baked.recycle();
+                baked = null;
+            }
+            if (tintView != null) tintView.setVisibility(active ? View.INVISIBLE : View.VISIBLE);
+            if (floorView != null) floorView.setVisibility(active ? View.INVISIBLE : View.VISIBLE);
+            if (onStateChange != null) onStateChange.run();
         }
 
         @Override
         protected void onDraw(Canvas c) {
+            if (!Ui.light && baked != null) syncBaked(false);
+            if (baked != null) {
+                c.drawBitmap(baked, 0f, 0f, null);
+                return;
+            }
             if (pic.getShader() == null) return;
             if (fillArt != null) c.drawBitmap(fillArt, fillMatrix, fill);
             c.drawRect(picRect, pic);

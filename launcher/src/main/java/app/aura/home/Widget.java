@@ -47,6 +47,10 @@ final class Widget extends GlassFrame {
         if (shadow != null && focus > 0f) {
             Ui.drawShadow(c, shadow, getWidth(), getHeight(), Ui.dpf(8) * focus, Math.round(100 * focus), shadowPaint, shadowMatrix);
         }
+        if (Ui.light && getChildCount() == 1 && getChildAt(0) instanceof SmartStack
+                && ((SmartStack) getChildAt(0)).coversOpaque()) {
+            return;
+        }
         super.onDraw(c);
     }
 

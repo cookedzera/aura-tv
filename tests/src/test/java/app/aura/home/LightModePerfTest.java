@@ -950,4 +950,128 @@ public class LightModePerfTest {
             b.release();
         }
     }
+
+    @Test
+    public void smartStackAndSkyArcBakeSinglePassAndMatchPixelsInLightMode() throws Exception {
+        boolean prevLight = Ui.light;
+        try {
+            int w = 240, h = 120;
+            // 1. SkyArc pixel identity & cached bitmap reuse in Light mode
+            for (long now : new long[]{1_500L, 500L}) {
+                Ui.light = false;
+                SkyArc highArc = new SkyArc(c);
+                highArc.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+                highArc.layout(0, 0, w, h);
+                highArc.set(1_000L, 2_000L, now);
+                android.graphics.Bitmap bHigh = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+                highArc.draw(new android.graphics.Canvas(bHigh));
+
+                Ui.light = true;
+                SkyArc lightArc = new SkyArc(c);
+                lightArc.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+                lightArc.layout(0, 0, w, h);
+                lightArc.set(1_000L, 2_000L, now);
+                android.graphics.Bitmap bLight = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+                lightArc.draw(new android.graphics.Canvas(bLight));
+                android.graphics.Bitmap cached1 = field(lightArc, "cached");
+                Assert.assertNotNull(cached1);
+                // Tiny progress change (< 0.002f) does not invalidate or re-bake in Light mode
+                if (now == 1_500L) {
+                    lightArc.set(1_000L, 2_000L, 1_501L);
+                    bLight.eraseColor(0);
+                    lightArc.draw(new android.graphics.Canvas(bLight));
+                    Assert.assertEquals(0.5f, ((Number) field(lightArc, "cachedProgress")).floatValue(), 1e-4f);
+                }
+
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        Assert.assertEquals("SkyArc pixel mismatch at " + x + "," + y, bHigh.getPixel(x, y), bLight.getPixel(x, y));
+                    }
+                }
+            }
+
+            // 2. SmartStack: inactive page INVISIBLE, single-pass baked ArtView + tint + floor, and pixel identity vs HIGH
+            android.graphics.Bitmap wideArt = android.graphics.Bitmap.createBitmap(120, 68, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas wc = new android.graphics.Canvas(wideArt);
+            android.graphics.Paint wp = new android.graphics.Paint();
+            wp.setShader(new android.graphics.LinearGradient(0, 0, 120, 68, 0xFF285888, 0xFF904868, android.graphics.Shader.TileMode.CLAMP));
+            wc.drawRect(0, 0, 120, 68, wp);
+
+            android.graphics.Bitmap narrowArt = android.graphics.Bitmap.createBitmap(50, 80, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas nc = new android.graphics.Canvas(narrowArt);
+            wp.setShader(new android.graphics.LinearGradient(0, 0, 50, 80, 0xFF703890, 0xFF287860, android.graphics.Shader.TileMode.CLAMP));
+            nc.drawRect(0, 0, 50, 80, wp);
+
+            for (android.graphics.Bitmap artBmp : new android.graphics.Bitmap[]{wideArt, narrowArt}) {
+                Ui.light = false;
+                SmartStack sHigh = new SmartStack(c, 26f);
+                sHigh.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+                sHigh.layout(0, 0, w, h);
+                SmartStack.Slide slHigh = new SmartStack.Slide();
+                slHigh.kicker = "UP NEXT";
+                slHigh.title = "Episode One";
+                slHigh.sub = "24m left";
+                slHigh.color = 0xFF336699;
+                slHigh.art = artBmp;
+                SmartStack.Slide slHigh2 = new SmartStack.Slide();
+                slHigh2.kicker = "LATER";
+                slHigh2.title = "Episode Two";
+                slHigh2.art = artBmp;
+                sHigh.setSlides(java.util.Arrays.asList(slHigh, slHigh2));
+
+                Ui.light = true;
+                SmartStack sLight = new SmartStack(c, 26f);
+                sLight.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+                sLight.layout(0, 0, w, h);
+                SmartStack.Slide slLight = new SmartStack.Slide();
+                slLight.kicker = "UP NEXT";
+                slLight.title = "Episode One";
+                slLight.sub = "24m left";
+                slLight.color = 0xFF336699;
+                slLight.art = artBmp;
+                SmartStack.Slide slLight2 = new SmartStack.Slide();
+                slLight2.kicker = "LATER";
+                slLight2.title = "Episode Two";
+                slLight2.art = artBmp;
+                sLight.setSlides(java.util.Arrays.asList(slLight, slLight2));
+
+                Object[] lightPages = field(sLight, "pages");
+                int front = ((Number) field(sLight, "front")).intValue();
+                View frontPage = (View) lightPages[front];
+                View backPage = (View) lightPages[1 - front];
+                Assert.assertEquals(View.VISIBLE, frontPage.getVisibility());
+                Assert.assertEquals("Inactive SmartStack page is INVISIBLE at rest", View.INVISIBLE, backPage.getVisibility());
+
+                View artView = field(frontPage, "art");
+                View tintView = field(frontPage, "tint");
+                View floorView = field(frontPage, "floor");
+                Assert.assertNotNull("Light mode ArtView bakes composite bitmap", field(artView, "baked"));
+                Assert.assertEquals("Tint overlay is INVISIBLE once baked into ArtView", View.INVISIBLE, tintView.getVisibility());
+                Assert.assertEquals("Floor overlay is INVISIBLE once baked into ArtView", View.INVISIBLE, floorView.getVisibility());
+                Assert.assertTrue("SmartStack reports opaque coverage at rest", sLight.coversOpaque());
+
+                // Compare rendered Page pixels between HIGH and Light mode
+                Object[] highPages = field(sHigh, "pages");
+                View highFrontPage = (View) highPages[((Number) field(sHigh, "front")).intValue()];
+                Ui.light = false;
+                android.graphics.Bitmap pHigh = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+                highFrontPage.draw(new android.graphics.Canvas(pHigh));
+                Ui.light = true;
+                android.graphics.Bitmap pLight = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+                frontPage.draw(new android.graphics.Canvas(pLight));
+
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        Assert.assertEquals("SmartStack Page pixel mismatch at " + x + "," + y, pHigh.getPixel(x, y), pLight.getPixel(x, y));
+                    }
+                }
+            }
+        } finally {
+            Ui.light = prevLight;
+        }
+    }
 }

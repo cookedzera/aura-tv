@@ -19,7 +19,8 @@ final class SkyArc extends View {
     private final Path arc = new Path(), done = new Path(), crescent = new Path();
     private final PathMeasure measure = new PathMeasure();
     private final float[] pos = new float[2];
-    private float progress = -1f;
+    private android.graphics.Bitmap cached;
+    private float progress = -1f, cachedProgress = -2f;
 
     SkyArc(Context c) {
         super(c);
@@ -40,12 +41,18 @@ final class SkyArc extends View {
 
     /** Places the sun between today's sunrise and sunset; outside daylight it shows a moon instead. */
     void set(long rise, long set, long now) {
-        progress = set > rise && now >= rise && now <= set ? (now - rise) / (float) (set - rise) : -1f;
+        float next = set > rise && now >= rise && now <= set ? (now - rise) / (float) (set - rise) : -1f;
+        if (Ui.light && ((next < 0f && progress < 0f)
+                || (next >= 0f && progress >= 0f && Math.abs(next - progress) < 0.002f))) {
+            return;
+        }
+        progress = next;
         invalidate();
     }
 
     @Override
     protected void onSizeChanged(int w, int h, int ow, int oh) {
+        cachedProgress = -2f;
         float pad = Ui.dpf(7), base = Math.max(Ui.dpf(12), h - Ui.dpf(3)), top = Math.min(Ui.dpf(6), h * 0.16f);
         arc.reset();
         arc.arcTo(new RectF(pad, top, w - pad, base + (base - top)), 180, 180, true);
@@ -61,8 +68,27 @@ final class SkyArc extends View {
 
     @Override
     protected void onDraw(Canvas c) {
-        float base = getHeight() - Ui.dpf(3);
-        c.drawRect(0, base, getWidth(), base + Ui.hair(), horizon);
+        int w = getWidth(), h = getHeight();
+        if (Ui.light && w > 0 && h > 0) {
+            if (cached == null || cached.getWidth() != w || cached.getHeight() != h || cachedProgress != progress) {
+                if (cached == null || cached.getWidth() != w || cached.getHeight() != h) {
+                    if (cached != null) cached.recycle();
+                    cached = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+                } else {
+                    cached.eraseColor(0);
+                }
+                drawArc(new Canvas(cached), w, h);
+                cachedProgress = progress;
+            }
+            c.drawBitmap(cached, 0f, 0f, null);
+            return;
+        }
+        drawArc(c, w, h);
+    }
+
+    private void drawArc(Canvas c, int w, int h) {
+        float base = h - Ui.dpf(3);
+        c.drawRect(0, base, w, base + Ui.hair(), horizon);
         c.drawPath(arc, track);
         if (progress >= 0f) {
             measure.setPath(arc, false);
