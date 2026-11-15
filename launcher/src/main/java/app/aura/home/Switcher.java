@@ -593,8 +593,12 @@ final class Switcher extends FrameLayout {
         shadow.animate().translationY(Ui.dp(RISE)).setStartDelay(0).setDuration(dur).setInterpolator(Ui.SOFT).start();
         away(dur);
         removeCallbacks(closeDone);
-        removeCallbacks(clearedLater);
-        clearedLater = null;
+        if (clearedLater != null) {
+            removeCallbacks(clearedLater);
+            Runnable r = clearedLater;
+            clearedLater = null;
+            r.run();
+        }
         closeDone = () -> {
             closeDone = null;
             if (after != null) after.run();
@@ -734,7 +738,7 @@ final class Switcher extends FrameLayout {
     private final Map<String, LinearLayout> made = new java.util.LinkedHashMap<String, LinearLayout>(16, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<String, LinearLayout> eldest) {
-            return size() > (Ui.light ? 4 : 8);
+            return size() > 8;
         }
     };
     private final java.util.ArrayDeque<AppRepo.App> toPaint = new java.util.ArrayDeque<>();

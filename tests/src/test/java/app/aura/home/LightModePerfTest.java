@@ -597,11 +597,12 @@ public class LightModePerfTest {
             Assert.assertFalse("Light mode skips full-screen AppMenu invalidate when dim=0", invalidated[0]);
             Assert.assertEquals(0f, (Float) field(spyMenu, "dim"), 1e-4f);
 
-            // Switcher in Light mode: caches at most 4 cards, disables overlapping layers on item containers, closes in Ui.CLOSE
+            // Switcher in Light mode: keeps up to 8 cached cards, disables overlapping layers on item containers,
+            // closes in Ui.CLOSE, and runs pending clearedLater immediately when closed early after Close all
             final java.util.Map<String, AppRepo.App> map = new java.util.LinkedHashMap<>();
             java.util.LinkedHashMap<String, Long> recent = new java.util.LinkedHashMap<>();
             long now = System.currentTimeMillis();
-            for (int k = 0; k < 6; k++) {
+            for (int k = 0; k < 8; k++) {
                 String p = "com.test.p" + k;
                 AppRepo.App app = new AppRepo.App();
                 app.pkg = p;
@@ -611,19 +612,20 @@ public class LightModePerfTest {
                 map.put(p, app);
                 recent.put(p, now - k * 1000L);
             }
+            final int[] clearedCount = {0};
             Switcher sw = new Switcher(home, backdrop, new Switcher.Host() {
                 @Override public AppRepo.App find(String pkg) { return map.get(pkg); }
                 @Override public Card card(AppRepo.App a) { return new Card(home, Tiles.launch(a), a.color, 22); }
                 @Override public void launch(AppRepo.App a, View from) {}
                 @Override public void close(AppRepo.App a) {}
                 @Override public void closeAll(List<AppRepo.App> all) {}
-                @Override public void cleared(int count) {}
+                @Override public void cleared(int count) { clearedCount[0] = count; }
                 @Override public android.graphics.Bitmap shot(String pkg) { return null; }
             });
             ((android.view.ViewGroup) home.findViewById(android.R.id.content)).addView(sw, new FrameLayout.LayoutParams(1280, 720));
             sw.open(recent, null);
             java.util.Map<?, ?> made = field(sw, "made");
-            Assert.assertTrue("Light mode Switcher caps cached cards at 4, was " + made.size(), made.size() <= 4);
+            Assert.assertEquals("Light mode Switcher caches all 8 recent cards", 8, made.size());
             List<View> items = field(sw, "items");
             android.view.ViewGroup itemCol = (android.view.ViewGroup) items.get(0);
             android.view.ViewGroup itemHead = (android.view.ViewGroup) itemCol.getChildAt(0);
@@ -631,7 +633,11 @@ public class LightModePerfTest {
             Assert.assertFalse(itemHead.getChildAt(0).hasOverlappingRendering());
             Assert.assertFalse(itemHead.getChildAt(1).hasOverlappingRendering());
             run(250);
+            call(sw, "clearAll", new Class<?>[0]);
+            Assert.assertEquals("clearedLater has not fired before Ui.CLOSE", 0, clearedCount[0]);
             sw.close(null);
+            Assert.assertEquals("Closing early after Close all runs clearedLater immediately", 8, clearedCount[0]);
+            Assert.assertNull(field(sw, "clearedLater"));
             run(160);
             Assert.assertEquals("Light mode Switcher finishes closing within Ui.CLOSE", View.GONE, sw.getVisibility());
 
@@ -645,7 +651,7 @@ public class LightModePerfTest {
             Assert.assertFalse("Widget inherits GlassFrame non-overlapping rendering", skyW.hasOverlappingRendering());
             Assert.assertTrue(itemCol.hasOverlappingRendering());
             sw.open(recent, null);
-            Assert.assertEquals("HIGH mode Switcher retains all 6 items (up to 8)", 6, made.size());
+            Assert.assertEquals("HIGH mode Switcher retains all 8 items", 8, made.size());
             sw.close(null);
             run(160);
             Assert.assertEquals("HIGH mode Switcher stays open past 160ms (closes at 210ms)", View.VISIBLE, sw.getVisibility());
