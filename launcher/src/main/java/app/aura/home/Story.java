@@ -172,6 +172,13 @@ final class Story extends FrameLayout implements Backdrop.Tick {
     private void change(String t, String a, String c, boolean animate) {
         removeCallbacks(quiet);
         caption.animate().cancel();
+        if (Ui.light && !animate && getAlpha() == 0f) {
+            fill(t, a, c);
+            drift(false);
+            caption.setAlpha(1f);
+            caption.setTranslationY(0f);
+            return;
+        }
         if (!animate || caption.getAlpha() < 0.05f) {
             fill(t, a, c);
             rise();
@@ -222,7 +229,12 @@ final class Story extends FrameLayout implements Backdrop.Tick {
     /** Rises in: the clock first, then the caption. */
     void reveal(long delay) {
         animate().cancel();
+        if (getVisibility() != VISIBLE) setVisibility(VISIBLE);
         setAlpha(1f);
+        if (Ui.light) {
+            removeCallbacks(quiet);
+            postDelayed(quiet, CAPTION_MS);
+        }
         clock.setAlpha(0f);
         clock.setTranslationY(clock.getTranslationY() + Ui.dp(12));
         clock.animate().alpha(1f).translationY(clock.getTranslationY() - Ui.dp(12)).setStartDelay(delay).setDuration(1800)
@@ -231,7 +243,10 @@ final class Story extends FrameLayout implements Backdrop.Tick {
 
     void hide(long ms) {
         removeCallbacks(quiet);
-        animate().alpha(0f).setStartDelay(0).setDuration(ms).setInterpolator(Ui.SOFT).start();
+        animate().alpha(0f).setStartDelay(0).setDuration(ms).setInterpolator(Ui.SOFT)
+                .withEndAction(Ui.light ? () -> {
+                    if (getAlpha() == 0f) setVisibility(INVISIBLE);
+                } : null).start();
     }
 
     @Override

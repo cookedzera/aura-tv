@@ -768,4 +768,76 @@ public class LightModePerfTest {
             Backdrop.calm = prevCalm;
         }
     }
+
+    @Test
+    public void hiddenViewsStayInvisibleAndSettingsSegmentsMatchPixelsInLightMode() throws Exception {
+        install("demo.a1", "Alpha", ApplicationInfo.CATEGORY_VIDEO);
+        Profiles.forget();
+        Profiles.use(c, Profiles.MAIN);
+        Prefs.of(c).edit().clear().putString(Prefs.LAYOUT, "aura").commit();
+        Prefs.device(c).edit()
+                .putBoolean("welcomed", true)
+                .putString("set_light", "on")
+                .commit();
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(java.time.Duration.ofMillis(16));
+        try {
+            Field w = HomeActivity.class.getDeclaredField("warm");
+            w.setAccessible(true);
+            w.setBoolean(null, true);
+            org.robolectric.android.controller.ActivityController<HomeActivity> ac = Robolectric.buildActivity(HomeActivity.class).setup();
+            controllers.add(ac);
+            HomeActivity a = ac.get();
+            run(300);
+
+            View scrim = field(a, "stickyTopScrim");
+            View story = field(a, "story");
+            FocusLayer focusLayer = field(a, "focusLayer");
+            View[] shades = field(focusLayer, "shades");
+
+            Assert.assertEquals("Story stays INVISIBLE outside photo mode in Light mode", View.INVISIBLE, story.getVisibility());
+            Assert.assertEquals("Sticky top scrim stays INVISIBLE at rest in Light mode", View.INVISIBLE, scrim.getVisibility());
+
+            // FocusLayer release hides shades completely from ViewGroup traversal
+            focusLayer.hide();
+            Assert.assertEquals(View.INVISIBLE, shades[0].getVisibility());
+            Assert.assertEquals(View.INVISIBLE, shades[1].getVisibility());
+
+            // Scrolling down reveals stickyTopScrim and holds SmartStack in Light mode; scrolling back hides it again
+            SmartStack stack = field(a, "stack");
+            call(a, "scrollTo", new Class<?>[]{float.class}, 320f);
+            run(900);
+            Assert.assertEquals(View.VISIBLE, scrim.getVisibility());
+            Assert.assertTrue("SmartStack is held while scrolled past the dashboard in Light mode", (Boolean) field(stack, "held"));
+            call(a, "scrollTo", new Class<?>[]{float.class}, 0f);
+            run(900);
+            Assert.assertEquals(View.INVISIBLE, scrim.getVisibility());
+        } finally {
+            org.robolectric.shadows.ShadowChoreographer.setPaused(false);
+        }
+
+        // SettingsPanel.Segment draws identical pixels in Light mode (drawRect/drawRoundRect) and HIGH mode (drawPath)
+        Class<?> segCls = Class.forName("app.aura.home.SettingsPanel$Segment");
+        java.lang.reflect.Constructor<?> ctor = segCls.getDeclaredConstructor();
+        ctor.setAccessible(true);
+        java.lang.reflect.Method set = segCls.getDeclaredMethod("set", boolean.class, boolean.class);
+        set.setAccessible(true);
+        for (boolean[] ends : new boolean[][]{{false, false}, {true, true}, {true, false}, {false, true}}) {
+            android.graphics.drawable.Drawable seg = (android.graphics.drawable.Drawable) ctor.newInstance();
+            seg.setBounds(0, 0, 240, 48);
+            set.invoke(seg, ends[0], ends[1]);
+            android.graphics.Bitmap bHigh = android.graphics.Bitmap.createBitmap(240, 48, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Bitmap bLight = android.graphics.Bitmap.createBitmap(240, 48, android.graphics.Bitmap.Config.ARGB_8888);
+            Ui.light = false;
+            seg.draw(new android.graphics.Canvas(bHigh));
+            Ui.light = true;
+            seg.draw(new android.graphics.Canvas(bLight));
+            for (int y = 0; y < 48; y++) {
+                for (int x = 0; x < 240; x++) {
+                    Assert.assertEquals("Segment pixel (" + x + "," + y + ") top=" + ends[0] + " bottom=" + ends[1],
+                            bHigh.getPixel(x, y), bLight.getPixel(x, y));
+                }
+            }
+        }
+    }
 }

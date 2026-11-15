@@ -2946,7 +2946,11 @@ final class SettingsPanel {
 
         @Override
         public void draw(android.graphics.Canvas c) {
-            c.drawPath(path, fill);
+            if (Ui.light && !top && !bottom) c.drawRect(box, fill);
+            else if (Ui.light && top && bottom) {
+                float r = Ui.dpf(16);
+                c.drawRoundRect(box, r, r, fill);
+            } else c.drawPath(path, fill);
             if (!bottom) {
                 android.graphics.Rect b = getBounds();
                 c.drawRect(b.left + Ui.dp(16), b.bottom - Math.max(1, Ui.hair()), b.right - Ui.dp(16), b.bottom, hair);

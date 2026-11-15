@@ -63,7 +63,8 @@ final class FocusLayer implements ViewTreeObserver.OnPreDrawListener, ViewTreeOb
 
     @Override
     public boolean onPreDraw() {
-        for (Shade s : shades) s.sync();
+        if (!Ui.light) return true;
+        for (Shade s : shades) if (s.card != null) s.sync();
         return true;
     }
 
@@ -80,6 +81,7 @@ final class FocusLayer implements ViewTreeObserver.OnPreDrawListener, ViewTreeOb
             super(c);
             this.layer = layer;
             setAlpha(0f);
+            setVisibility(INVISIBLE);
             setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         }
 
@@ -91,12 +93,14 @@ final class FocusLayer implements ViewTreeObserver.OnPreDrawListener, ViewTreeOb
             peak = (c.tvos ? 165 : 120) / 255f;
             drop = Ui.dpf(c.tvos ? 11 : 9);
             setAlpha(0f);
+            if (getVisibility() != VISIBLE) setVisibility(VISIBLE);
             fit(c);
         }
 
         void release() {
             card = null;
-            setAlpha(0f);
+            if (getAlpha() != 0f) setAlpha(0f);
+            if (getVisibility() != INVISIBLE) setVisibility(INVISIBLE);
         }
 
         /** Sized to its card and the shadow's reach, with the card's baked mask (made when the card was laid out). */
@@ -128,9 +132,11 @@ final class FocusLayer implements ViewTreeObserver.OnPreDrawListener, ViewTreeOb
                 return;
             }
             if (!c.isShown()) {
-                setAlpha(0f);
+                if (getAlpha() != 0f) setAlpha(0f);
+                if (getVisibility() != INVISIBLE) setVisibility(INVISIBLE);
                 return;
             }
+            if (getVisibility() != VISIBLE) setVisibility(VISIBLE);
             fit(c);
             View cell = (View) vp;
             // the card's centre on the page: its own place, lean and scale about its pivot, then its cell's
@@ -139,11 +145,14 @@ final class FocusLayer implements ViewTreeObserver.OnPreDrawListener, ViewTreeOb
             float x = cell.getLeft() + cell.getTranslationX() + cell.getPivotX() + (cx - cell.getPivotX()) * cell.getScaleX();
             float y = cell.getTop() + cell.getTranslationY() + cell.getPivotY() + (cy - cell.getPivotY()) * cell.getScaleY();
             float sc = c.getScaleX() * cell.getScaleX(), lit = Math.min(1f, p);
-            setScaleX(sc);
-            setScaleY(sc);
-            setTranslationX(x - getLeft() - getWidth() / 2f);
-            setTranslationY(y - getTop() - getHeight() / 2f + drop * lit * sc);
-            setAlpha(lit * peak * cell.getAlpha() * c.getAlpha());
+            float tx = x - getLeft() - getWidth() / 2f;
+            float ty = y - getTop() - getHeight() / 2f + drop * lit * sc;
+            float a = lit * peak * cell.getAlpha() * c.getAlpha();
+            if (getScaleX() != sc) setScaleX(sc);
+            if (getScaleY() != sc) setScaleY(sc);
+            if (getTranslationX() != tx) setTranslationX(tx);
+            if (getTranslationY() != ty) setTranslationY(ty);
+            if (getAlpha() != a) setAlpha(a);
         }
 
         @Override

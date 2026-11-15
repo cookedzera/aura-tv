@@ -1085,6 +1085,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // Aura's sticky header scrim & soft bottom horizon feather (tiles scroll beneath the docked categories)
         stickyTopScrim = new Shade(this, new int[]{0xCC07090E, 0x8007090E, 0x0007090E});
         stickyTopScrim.setAlpha(0f);
+        if (Ui.light) stickyTopScrim.setVisibility(View.INVISIBLE);
         home.addView(stickyTopScrim, frame(MATCH, Ui.dp(92), Gravity.TOP, 0, 0, 0, 0));
         bottomFeather = new Shade(this, new int[]{0x0007090E, 0x8C07090E});
         home.addView(bottomFeather, frame(MATCH, Ui.dp(44), Gravity.BOTTOM, 0, 0, 0, 0));
@@ -1126,6 +1127,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         // photo mode: the photograph's story and the time, as in the screensaver
         story = new Story(this, backdrop);
         story.setAlpha(0f);
+        if (Ui.light) story.setVisibility(View.INVISIBLE);
         root.addView(story, match());
         cc = new ControlCenter(this, this);
         root.addView(cc.panel, match());
@@ -2133,8 +2135,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         greeting.setVisibility(aura);
         gridLabel.setVisibility(aura);
         if (stickyTopScrim != null) {
-            stickyTopScrim.setVisibility(aura);
             if (dock) stickyTopScrim.setAlpha(0f);
+            stickyTopScrim.setVisibility(dock ? View.GONE : Ui.light && stickyTopScrim.getAlpha() == 0f ? View.INVISIBLE : View.VISIBLE);
         }
         feather();
         if (dock) {
@@ -4384,14 +4386,17 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         float rest = Ui.dpf(TABS_REST_Y), dockY = Ui.dpf(TABS_DOCK_Y);
         float raw = rest + ty;
         float y = Math.max(dockY, raw);
-        homeTabBar.setTranslationY(y);
+        if (homeTabBar.getTranslationY() != y) homeTabBar.setTranslationY(y);
         float dockFrac = Ui.clamp((rest - raw) / Math.max(1f, rest - dockY), 0f, 1f);
         if (homeTabs != null) homeTabs.setDocked(dockFrac);
-        if (stickyTopScrim != null && homeTabs != null && homeTabs.getVisibility() == View.VISIBLE) {
-            stickyTopScrim.setAlpha(dockFrac);
-        } else if (stickyTopScrim != null) {
+        if (stickyTopScrim != null) {
             // Even without category tabs, a soft top scrim cushions scrolling tiles below the edge.
-            stickyTopScrim.setAlpha(dockFrac * 0.72f);
+            float a = homeTabs != null && homeTabs.getVisibility() == View.VISIBLE ? dockFrac : dockFrac * 0.72f;
+            if (stickyTopScrim.getAlpha() != a) stickyTopScrim.setAlpha(a);
+            if (Ui.light) {
+                int vis = a > 0f ? View.VISIBLE : View.INVISIBLE;
+                if (stickyTopScrim.getVisibility() != vis) stickyTopScrim.setVisibility(vis);
+            }
         }
     }
 
@@ -4403,12 +4408,15 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void repaintScrollGlass(float ty, boolean done) {
         if (!done && Math.abs(ty - scrollBlurY) < Ui.dpf(Ui.light ? 24 : 6)) return;
         scrollBlurY = ty;
+        int w = root.getWidth() > 0 ? root.getWidth() : Ui.dp(960);
         int h = root.getHeight() > 0 ? root.getHeight() : Ui.dp(540);
         for (int i = 0; i < widgets.size(); i++) if (widgets.get(i).getAlpha() > 0f) widgets.get(i).invalidate();
         if (dock) dockGlass.invalidate();
         for (int i = 0; i < cells.size(); i++) {
             Cell c = cells.get(i);
-            if (c.card.glass != null) {
+            if (c.card.glass != null && c.getAlpha() > 0f) {
+                float x = c.getX();
+                if (x + Ui.dp(TILE_W) < -Ui.dp(32) || x > w + Ui.dp(32)) continue;
                 // cells are placed by translation: getY() is where one sits on the page
                 float top = c.getY() + c.card.getTop() + ty;
                 if (top + c.card.getHeight() >= -Ui.dp(32) && top <= h + Ui.dp(32)) c.card.invalidate();
@@ -4481,6 +4489,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         }
         if (shown != dashboard) {
             dashboard = shown;
+            if (Perf.light(this)) stack.hold(!shown || racked || getCurrentFocus() == fyW);
             for (View v : new View[]{skyW, fyW, tdW}) sink(v, shown);
         }
         windowMoved();
@@ -4627,7 +4636,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         if (parking.isFocusable()) unpark();
         glints = 0;
         // the card you're looking at stays put; in light mode, so does the stack of a home left alone
-        stack.hold(n == fyW || racked && Perf.light(this));
+        stack.hold(n == fyW || (racked || !dashboard) && Perf.light(this));
         int i = side.indexOf(n);
         // the tvOS style's sidebar slides in only while it has focus
         if (dock && !sideHidden) sideShown(i >= 0, true);
@@ -4825,7 +4834,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
     private void setRacked(boolean on) {
         racked = on;
         // light mode: nothing turns over on a home left alone (the card in focus holds anyway)
-        if (Perf.light(this)) stack.hold(on || getCurrentFocus() == fyW);
+        if (Perf.light(this)) stack.hold(on || !dashboard || getCurrentFocus() == fyW);
         backdrop.setDefocus(on ? 0f : homeDefocus(), on ? 2600 : 520);
         bloom.setStrength(on ? 0.35f * glow() : glow(), on ? 2600 : 520);
     }
@@ -7462,6 +7471,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         Card.parallax = !light && Prefs.on(this, Prefs.PARALLAX);
         Backdrop.calm = light;
         if (bloom != null) bloom.setVisibility(light ? View.GONE : View.VISIBLE);
+        if (story != null && !photo) story.setVisibility(light ? View.INVISIBLE : View.VISIBLE);
         feather();
         speedWatch = watchSpeed();
     }
