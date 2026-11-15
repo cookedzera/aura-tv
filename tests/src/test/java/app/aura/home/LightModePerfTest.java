@@ -840,4 +840,114 @@ public class LightModePerfTest {
             }
         }
     }
+
+    @Test
+    public void backdropBakesScreenSizedSteadyCopyWithDimInLightModeAndMatchesLivePixels() throws Exception {
+        boolean prevCalm = Backdrop.calm;
+        int w = 320, h = 180, sw = 384, sh = 216;
+        float d = 0.55f, lumaTop = 0.65f, lumaBottom = 0.35f;
+        Backdrop b = new Backdrop(c);
+        try {
+            b.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+            b.layout(0, 0, w, h);
+            Scrim scrim = new Scrim(c, false);
+            scrim.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+            scrim.layout(0, 0, w, h);
+            scrim.adapt(lumaTop, lumaBottom, 0);
+
+            android.graphics.Bitmap sharp = android.graphics.Bitmap.createBitmap(sw, sh, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Bitmap soft = android.graphics.Bitmap.createBitmap(sw, sh, android.graphics.Bitmap.Config.ARGB_8888);
+            sharp.eraseColor(android.graphics.Color.rgb(210, 160, 120));
+            soft.eraseColor(android.graphics.Color.rgb(90, 120, 170));
+
+            Class<?> slideCls = Class.forName("app.aura.home.Backdrop$Slide");
+            java.lang.reflect.Constructor<?> ctor = slideCls.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            Object s = ctor.newInstance();
+            set(s, "sharp", sharp);
+            set(s, "soft", soft);
+            set(s, "sw", sw);
+            set(s, "sh", sh);
+            set(s, "alpha", 1f);
+            set(s, "lumaTop", lumaTop);
+            set(s, "lumaBottom", lumaBottom);
+            set(s, "s0", 1.10f);
+            set(s, "s1", 1.10f);
+            set(s, "x0", 0.25f);
+            set(s, "x1", 0.25f);
+            set(s, "y0", -0.20f);
+            set(s, "y1", -0.20f);
+
+            Method place = Backdrop.class.getDeclaredMethod("place", slideCls, long.class);
+            place.setAccessible(true);
+            Method steady = Backdrop.class.getDeclaredMethod("steady", slideCls, android.graphics.Bitmap.class,
+                    float.class, Scrim.class, int.class, int.class, float.class, float.class);
+            steady.setAccessible(true);
+
+            // HIGH mode: steady() without bake mixes at source photo size without baking dim or shade
+            Backdrop.calm = false;
+            android.graphics.Bitmap stHigh = (android.graphics.Bitmap) steady.invoke(b, s, soft, d, null, w, h, 0f, 0f);
+            Assert.assertNull(field(s, "bakedBitmap"));
+            Assert.assertEquals(0, ((Number) field(s, "bakedLevel")).intValue());
+
+            // Light mode: steady() with bake produces a 1:1 screen-sized (w x h) bitmap with dim & shade baked in
+            Backdrop.calm = true;
+            b.setShade(scrim);
+            place.invoke(b, s, android.os.SystemClock.uptimeMillis());
+            android.graphics.Bitmap stLight = (android.graphics.Bitmap) steady.invoke(b, s, soft, d, scrim, w, h, 0f, 0f);
+            Assert.assertEquals("Baked steady copy is exact screen width", w, stLight.getWidth());
+            Assert.assertEquals("Baked steady copy is exact screen height", h, stLight.getHeight());
+            Assert.assertSame(stLight, field(s, "bakedBitmap"));
+            Assert.assertEquals(Math.round(64 * (1f - 0.30f * d)), ((Number) field(s, "bakedLevel")).intValue());
+            Assert.assertEquals("Baked matrix matches slide resting matrix", (Object) field(s, "m"), (Object) field(s, "bakedM"));
+
+            set(s, "steady", stLight);
+            set(s, "mixed", d);
+            set(s, "baked", true);
+            set(s, "bakedW", w);
+            set(s, "bakedH", h);
+            set(b, "current", s);
+
+            // Compare Light mode 1:1 baked frame against live unbaked frame + live Scrim across rest, rack, and deep defocus
+            for (float testDefocus : new float[]{d, 0.25f, 0f, 1.0f}) {
+                set(b, "defocus", testDefocus);
+                Backdrop.calm = true;
+                set(s, "steady", stLight);
+                set(s, "baked", true);
+                android.graphics.Bitmap gotLight = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+                android.graphics.Canvas cLight = new android.graphics.Canvas(gotLight);
+                b.draw(cLight);
+                scrim.draw(cLight);
+
+                Backdrop.calm = false;
+                set(s, "steady", testDefocus == 1.0f ? stHigh : null);
+                set(s, "baked", false);
+                android.graphics.Bitmap gotLive = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+                android.graphics.Canvas cLive = new android.graphics.Canvas(gotLive);
+                b.draw(cLive);
+                // Use full-res bake for reference comparison (as RestingFrameTest does) so 160x90 upscale isn't compared against full-res gradient
+                scrim.bake(cLive, w, h, lumaTop, lumaBottom);
+
+                // Compare 9x9 block averages across the four quadrants (averaging out 5% noise grain)
+                int[][] spots = {{w / 10, h / 2}, {w / 2, h * 9 / 10}, {w / 2, h / 2}, {w * 3 / 4, h / 10}};
+                for (int[] p : spots) {
+                    double sum1 = 0, sum2 = 0;
+                    int n = 0;
+                    for (int y = p[1] - 4; y <= p[1] + 4; y++) {
+                        for (int x = p[0] - 4; x <= p[0] + 4; x++) {
+                            sum1 += android.graphics.Color.green(gotLive.getPixel(x, y));
+                            sum2 += android.graphics.Color.green(gotLight.getPixel(x, y));
+                            n++;
+                        }
+                    }
+                    Assert.assertEquals("Defocus=" + testDefocus + " at " + p[0] + "," + p[1], sum1 / n, sum2 / n, 3.0);
+                }
+            }
+        } finally {
+            Backdrop.calm = prevCalm;
+            b.release();
+        }
+    }
 }

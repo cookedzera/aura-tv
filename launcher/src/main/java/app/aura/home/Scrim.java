@@ -116,6 +116,10 @@ final class Scrim extends View {
      * stretched from the small copy. Safe on any thread: nothing here is changed.
      */
     void bake(Canvas c, int w, int h, float lumaTop, float lumaBottom) {
+        bake(c, w, h, lumaTop, lumaBottom, null);
+    }
+
+    void bake(Canvas c, int w, int h, float lumaTop, float lumaBottom, android.graphics.ColorFilter cf) {
         Paint s = new Paint(Paint.DITHER_FLAG), f = new Paint(Paint.DITHER_FLAG), t = new Paint(Paint.DITHER_FLAG),
                 v = new Paint(Paint.DITHER_FLAG);
         gradients(s, f, t, v, cover);
@@ -129,6 +133,7 @@ final class Scrim extends View {
         Paint g = new Paint();
         g.setShader(new BitmapShader(noise, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT));
         g.setAlpha(13);
+        if (cf != null) g.setColorFilter(cf);
         c.drawRect(-8, -8, w + 8, h + 8, g);
     }
 

@@ -125,6 +125,11 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         /** Light mode: {@code steady} carries the shade and its grain, baked for a {@code bakedW}x{@code bakedH} screen. */
         boolean baked;
         int bakedW, bakedH;
+        /** Light mode 1:1 screen-sized steady copy with matrix {@code bakedM} and steady dimming {@code bakedLevel} pre-applied. */
+        Bitmap bakedBitmap;
+        final Matrix bakedM = new Matrix();
+        int bakedLevel, relKey = -1;
+        ColorFilter relDim;
         /** {@code steady} is being made again on the loader, which reads {@code sharp}: freeing waits for it. */
         boolean remaking, dropped;
         /** A GIF's frames, played by the render thread; {@code sharp} keeps its first frame for the glass. */
@@ -168,7 +173,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             if (steady != null && steady != sharp && steady != soft) steady.recycle();
             if (soft != null && soft != sharp) soft.recycle();
             if (sharp != null) sharp.recycle();
-            steady = soft = sharp = null;
+            bakedBitmap = steady = soft = sharp = null;
             synchronized (this) {
                 tintedShaders.clear();
                 for (int i = 0; i < tintedBlurs.size(); i++) tintedBlurs.get(i).recycle();
@@ -189,6 +194,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Random rnd = new Random();
     private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+    private final Paint flatPaint = new Paint(Paint.DITHER_FLAG);
     /** On a TV with little memory the photograph is kept in 16-bit colour: half the room, dithered so a sky stays smooth. */
     private Boolean thrifty;
     private final Matrix tmp = new Matrix();
@@ -774,6 +780,39 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             c.restore();
             return;
         }
+        if (b == s.bakedBitmap && s.bakedLevel > 0) {
+            ColorFilter cf = null;
+            if (dimLevel != s.bakedLevel) {
+                int key = (dimLevel << 8) | s.bakedLevel;
+                if (key != s.relKey) {
+                    s.relKey = key;
+                    float k = dimLevel / (float) s.bakedLevel;
+                    android.graphics.ColorMatrix cm = new android.graphics.ColorMatrix();
+                    cm.setScale(k, k, k, 1f);
+                    s.relDim = new android.graphics.ColorMatrixColorFilter(cm);
+                }
+                cf = s.relDim;
+            }
+            if (s.m.equals(s.bakedM) && b.getWidth() == getWidth() && b.getHeight() == getHeight()) {
+                if (a >= 255 && cf == null) {
+                    c.drawBitmap(b, 0f, 0f, null);
+                } else {
+                    flatPaint.setAlpha(a);
+                    flatPaint.setColorFilter(cf);
+                    c.drawBitmap(b, 0f, 0f, flatPaint);
+                }
+                return;
+            }
+            if (s.bakedM.invert(tmp)) {
+                tmp.postConcat(s.m);
+                flatPaint.setAlpha(a);
+                flatPaint.setColorFilter(cf);
+                flatPaint.setFilterBitmap(true);
+                c.drawBitmap(b, tmp, flatPaint);
+                flatPaint.setFilterBitmap(false);
+                return;
+            }
+        }
         paint.setAlpha(a);
         if (b == s.sharp) {
             c.drawBitmap(b, s.m, paint);
@@ -1338,35 +1377,54 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
      * memory. Null without room.
      */
     private Bitmap steady(Slide s, Bitmap soft, float d, Scrim bake, int vw, int vh, float px, float t) {
-        Bitmap out = mix(s.sharp, soft, d);
-        if (out == null || bake == null) {
-            if (out != null) out.prepareToDraw();
-            return out;
-        }
-        Matrix m = new Matrix(), inv = new Matrix();
-        position(s, vw, vh, t, 0f, px, m);
-        m.preScale(s.sw / (float) out.getWidth(), s.sh / (float) out.getHeight());
-        if (!m.invert(inv)) {
-            out.recycle();
-            return null;
-        }
-        Canvas c = new Canvas(out);
-        c.concat(inv);
-        bake.bake(c, vw, vh, s.lumaTop, s.lumaBottom);
-        if (Build.VERSION.SDK_INT >= 28) {
+        if (bake != null && vw > 0 && vh > 0) {
             try {
-                Bitmap hw = out.copy(Bitmap.Config.HARDWARE, false);
-                // off a device (a test's runtime) the "copy" comes back as an empty software bitmap
-                if (hw != null && hw.getConfig() == Bitmap.Config.HARDWARE) {
-                    out.recycle();
-                    return hw;
+                Bitmap out = Bitmap.createBitmap(vw, vh, thrifty() ? Bitmap.Config.RGB_565 : Bitmap.Config.ARGB_8888);
+                Matrix m = new Matrix();
+                position(s, vw, vh, t, 0f, px, m);
+                int level = Math.round(64 * (1f - 0.30f * d));
+                ColorFilter cf = null;
+                if (level < 64) {
+                    int g = Math.round(255 * level / 64f);
+                    cf = new LightingColorFilter(Color.rgb(g, g, g), 0);
                 }
-                if (hw != null) hw.recycle();
-            } catch (RuntimeException | OutOfMemoryError e) {
-                // it stays in software
+                Canvas c = new Canvas(out);
+                Paint p = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+                p.setColorFilter(cf);
+                c.drawBitmap(s.sharp, m, p);
+                if (soft != null && soft != s.sharp && d > 0f) {
+                    Matrix sm = new Matrix(m);
+                    sm.preScale(s.sw / (float) soft.getWidth(), s.sh / (float) soft.getHeight());
+                    p.setAlpha(Math.round(255 * d));
+                    c.drawBitmap(soft, sm, p);
+                }
+                bake.bake(c, vw, vh, s.lumaTop, s.lumaBottom, cf);
+                Bitmap ret = out;
+                if (Build.VERSION.SDK_INT >= 28) {
+                    try {
+                        Bitmap hw = out.copy(Bitmap.Config.HARDWARE, false);
+                        // off a device (a test's runtime) the "copy" comes back as an empty software bitmap
+                        if (hw != null && hw.getConfig() == Bitmap.Config.HARDWARE) {
+                            out.recycle();
+                            ret = hw;
+                        } else if (hw != null) {
+                            hw.recycle();
+                        }
+                    } catch (RuntimeException | OutOfMemoryError e) {
+                        // it stays in software
+                    }
+                }
+                if (ret == out) out.prepareToDraw();
+                s.bakedBitmap = ret;
+                s.bakedM.set(m);
+                s.bakedLevel = level;
+                return ret;
+            } catch (OutOfMemoryError e) {
+                return null;
             }
         }
-        out.prepareToDraw();
+        Bitmap out = mix(s.sharp, soft, d);
+        if (out != null) out.prepareToDraw();
         return out;
     }
 
