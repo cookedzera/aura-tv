@@ -335,10 +335,6 @@ final class SettingsPanel {
             HomeKeys.stopTeaching();
         }
         hideKeyboard();
-        if (Ui.light) {
-            veil.animate().cancel();
-            veil.setAlpha(0f);
-        }
         panel.animate().alpha(0f).setStartDelay(0).setDuration(Ui.CLOSE).setInterpolator(Ui.SOFT)
                 .withEndAction(() -> {
                     if (!open) panel.setVisibility(View.GONE);

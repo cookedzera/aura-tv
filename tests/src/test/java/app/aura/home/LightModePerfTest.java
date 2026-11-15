@@ -216,9 +216,10 @@ public class LightModePerfTest {
             Assert.assertEquals("Light mode keeps Settings veil opaque on frame 0", 1f, settings.veil.getAlpha(), 1e-4f);
             Assert.assertEquals("Light mode hides home views behind Settings immediately", View.INVISIBLE, homeView.getVisibility());
 
-            // Light mode: close drops full-screen veil at once so only columns fade over home
+            // Light mode: close keeps veil opaque inside panel so veil and columns fade together over Ui.CLOSE
             call(home, "closeSettings", new Class<?>[0]);
-            Assert.assertEquals("Light mode drops Settings veil immediately on close", 0f, settings.veil.getAlpha(), 1e-4f);
+            Assert.assertEquals("Light mode fades Settings veil with panel on close", 1f, settings.veil.getAlpha(), 1e-4f);
+            Assert.assertEquals(Ui.CLOSE, settings.panel.animate().getDuration());
             Assert.assertEquals(View.VISIBLE, homeView.getVisibility());
             for (int t = 0; t < 300; t += 16) org.robolectric.shadows.ShadowLooper.idleMainLooper(16, java.util.concurrent.TimeUnit.MILLISECONDS);
 
