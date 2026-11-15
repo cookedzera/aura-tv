@@ -82,6 +82,8 @@ final class SmartStack extends FrameLayout {
     private final List<Slide> slides = new ArrayList<>();
     private final Path clipPath = new Path();
     private final GradientDrawable bg;
+    /** The colour {@link #bg} was last given: setColor asks for a frame even when it's the same one. */
+    private int bgColor = 0x3810131A;
     private final float cornerRadius;
     private int at, front;
     private boolean held, running, flipping, wasOpaque;
@@ -130,7 +132,7 @@ final class SmartStack extends FrameLayout {
 
     private void syncOpaque() {
         boolean now = coversOpaque();
-        bg.setColor(now ? 0 : 0x3810131A);
+        tintBg(now);
         if (now != wasOpaque) {
             wasOpaque = now;
             invalidate();
@@ -140,8 +142,20 @@ final class SmartStack extends FrameLayout {
 
     @Override
     public void draw(Canvas c) {
-        bg.setColor(coversOpaque() ? 0 : 0x3810131A);
+        tintBg(coversOpaque());
         super.draw(c);
+    }
+
+    /**
+     * The smoked glass behind the cards, gone while an opaque card covers it (Light mode). Only
+     * when it changes: a drawable given a colour asks for another frame, and asked on every draw
+     * the stack, and with it the whole screen on a TV that redraws all of it, never stopped drawing.
+     */
+    private void tintBg(boolean opaque) {
+        int want = opaque ? 0 : 0x3810131A;
+        if (want == bgColor) return;
+        bgColor = want;
+        bg.setColor(want);
     }
 
     @Override
