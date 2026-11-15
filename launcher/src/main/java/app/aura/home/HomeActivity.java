@@ -3581,8 +3581,8 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             pageShift = v;
             for (int i = 0; i < cells.size(); i++) cells.get(i).setTranslationX(placeX(i, cells.get(i)));
             if (pageDots != null) pageDots.setPosition(v / pageW());
-            // like the vertical scroll: panes on screen repaint every 6dp and where they stop (LOW: settle only)
-            if (Ui.light ? pageGlide.moving() : pageGlide.moving() && Math.abs(v - pageGlassAt) < 6) return;
+            // like the vertical scroll: panes on screen repaint every 6dp (24dp on LOW) and where they stop
+            if (pageGlide.moving() && Math.abs(v - pageGlassAt) < (Ui.light ? 24 : 6)) return;
             pageGlassAt = v;
             float w = root.getWidth();
             for (int i = 0; i < cells.size(); i++) {
@@ -4401,7 +4401,7 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
      * panes on screen.
      */
     private void repaintScrollGlass(float ty, boolean done) {
-        if (!done && (Ui.light || Math.abs(ty - scrollBlurY) < Ui.dpf(6))) return;
+        if (!done && Math.abs(ty - scrollBlurY) < Ui.dpf(Ui.light ? 24 : 6)) return;
         scrollBlurY = ty;
         int h = root.getHeight() > 0 ? root.getHeight() : Ui.dp(540);
         for (int i = 0; i < widgets.size(); i++) if (widgets.get(i).getAlpha() > 0f) widgets.get(i).invalidate();

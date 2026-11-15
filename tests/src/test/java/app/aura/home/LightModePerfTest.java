@@ -175,8 +175,11 @@ public class LightModePerfTest {
         Assert.assertTrue("Ui.light is enabled", Ui.light);
         Assert.assertFalse("AllApps.rich is off in Light mode", AllApps.rich(home));
         set(home, "scrollBlurY", 0f);
-        call(home, "repaintScrollGlass", new Class<?>[]{float.class, boolean.class}, -Ui.dpf(40), false);
-        Assert.assertEquals("Mid-scroll glass repaint skipped in Light mode", 0f,
+        call(home, "repaintScrollGlass", new Class<?>[]{float.class, boolean.class}, -Ui.dpf(12), false);
+        Assert.assertEquals("Sub-24dp scroll glass repaint skipped in Light mode", 0f,
+                ((Number) field(home, "scrollBlurY")).floatValue(), 1e-4f);
+        call(home, "repaintScrollGlass", new Class<?>[]{float.class, boolean.class}, -Ui.dpf(28), false);
+        Assert.assertEquals("24dp+ scroll glass repaints mid-scroll in Light mode", -Ui.dpf(28),
                 ((Number) field(home, "scrollBlurY")).floatValue(), 1e-4f);
         call(home, "repaintScrollGlass", new Class<?>[]{float.class, boolean.class}, -Ui.dpf(40), true);
         Assert.assertEquals("Settled scroll glass repaints once in Light mode", -Ui.dpf(40),
