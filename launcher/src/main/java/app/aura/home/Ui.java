@@ -327,12 +327,17 @@ final class Ui {
                 Math.round((Color.blue(top) * ta + Color.blue(bottom) * ba) / a));
     }
 
+    private static final java.util.Map<String, ColorMatrixColorFilter> GLASS = new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
      * A pane of glass as one colour filter: the photo's colours lifted by {@code saturation}, then
      * each tint layer (its alpha is its opacity) laid over in order. Folding the layers into the
      * filter means a pane is drawn in one pass instead of one per layer.
      */
     static ColorMatrixColorFilter glass(float saturation, int... layers) {
+        String key = Float.floatToIntBits(saturation) + ":" + java.util.Arrays.toString(layers);
+        ColorMatrixColorFilter f = GLASS.get(key);
+        if (f != null) return f;
         float k = 1f, r = 0f, g = 0f, b = 0f;
         for (int c : layers) {
             float a = Color.alpha(c) / 255f;
@@ -344,7 +349,9 @@ final class Ui {
         ColorMatrix m = new ColorMatrix();
         m.setSaturation(saturation);
         m.postConcat(new ColorMatrix(new float[]{k, 0, 0, 0, r, 0, k, 0, 0, g, 0, 0, k, 0, b, 0, 0, 0, 1, 0}));
-        return new ColorMatrixColorFilter(m);
+        f = new ColorMatrixColorFilter(m);
+        GLASS.put(key, f);
+        return f;
     }
 
     /**

@@ -674,4 +674,98 @@ public class LightModePerfTest {
             org.robolectric.shadows.ShadowChoreographer.setPaused(false);
         }
     }
+
+    @Test
+    public void glassBakesOneTintedBlurPerStrengthInLightModeAndMatchesHighPixels() throws Exception {
+        boolean prevCalm = Backdrop.calm;
+        try {
+            android.graphics.ColorMatrixColorFilter fWidgetA = Ui.glass(Ui.GLASS_SAT, Ui.withAlpha(Ui.SMOKE, Math.round(255 * 0.42f)), Ui.withAlpha(Ui.IVORY, Math.round(255 * 0.11f)));
+            android.graphics.ColorMatrixColorFilter fWidgetB = Ui.glass(Ui.GLASS_SAT, Ui.withAlpha(Ui.SMOKE, Math.round(255 * 0.42f)), Ui.withAlpha(Ui.IVORY, Math.round(255 * 0.11f)));
+            android.graphics.ColorMatrixColorFilter fVeil = Ui.glass(0.85f, Ui.withAlpha(Ui.SMOKE, Math.round(255 * 0.50f)), 0);
+            Assert.assertSame("Identical glass strengths share one filter instance", fWidgetA, fWidgetB);
+            Assert.assertNotSame("Different glass strengths get distinct filter instances", fWidgetA, fVeil);
+
+            Backdrop backdrop = new Backdrop(c);
+            GlassFrame veil = new GlassFrame(c, backdrop, 0, 0.5f);
+            GlassFrame card = new GlassFrame(c, backdrop, 26, 0.42f);
+            Assert.assertFalse("Zero-radius veil disables outline clipping", veil.getClipToOutline());
+            Assert.assertTrue("Rounded pane keeps outline clipping", card.getClipToOutline());
+
+            Class<?> slideCls = Class.forName("app.aura.home.Backdrop$Slide");
+            java.lang.reflect.Constructor<?> ctor = slideCls.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            Object slide = ctor.newInstance();
+            android.graphics.Bitmap blur = android.graphics.Bitmap.createBitmap(128, 72, android.graphics.Bitmap.Config.ARGB_8888);
+            for (int y = 0; y < 72; y++) {
+                for (int x = 0; x < 128; x++) {
+                    blur.setPixel(x, y, android.graphics.Color.rgb((x * 2) & 0xFF, (y * 3) & 0xFF, ((x + y) * 2) & 0xFF));
+                }
+            }
+            set(slide, "blur", blur);
+            set(slide, "sw", 1280);
+            set(slide, "sh", 720);
+            set(slide, "alpha", 1f);
+            set(backdrop, "current", slide);
+
+            android.graphics.RectF box = new android.graphics.RectF(0, 0, 200, 100);
+            android.graphics.Paint pHigh = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG | android.graphics.Paint.FILTER_BITMAP_FLAG);
+            pHigh.setColorFilter(fWidgetA);
+            android.graphics.Bitmap outHigh = android.graphics.Bitmap.createBitmap(200, 100, android.graphics.Bitmap.Config.ARGB_8888);
+            outHigh.eraseColor(android.graphics.Color.BLACK);
+            Backdrop.calm = false;
+            backdrop.drawBlurRound(new android.graphics.Canvas(outHigh), box, 20f, 40f, 60f, pHigh);
+
+            java.util.Map<?, ?> tintedShaders = field(slide, "tintedShaders");
+            Assert.assertEquals("HIGH mode does not allocate pre-tinted blur copies", 0, tintedShaders.size());
+
+            android.graphics.Paint pLight = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG | android.graphics.Paint.FILTER_BITMAP_FLAG);
+            pLight.setColorFilter(fWidgetA);
+            android.graphics.Bitmap outLight = android.graphics.Bitmap.createBitmap(200, 100, android.graphics.Bitmap.Config.ARGB_8888);
+            outLight.eraseColor(android.graphics.Color.BLACK);
+            Backdrop.calm = true;
+            backdrop.drawBlurRound(new android.graphics.Canvas(outLight), box, 20f, 40f, 60f, pLight);
+            Assert.assertSame("Caller paint keeps its ColorFilter after drawBlurRound", fWidgetA, pLight.getColorFilter());
+            Assert.assertEquals("One strength creates one pre-tinted copy", 1, tintedShaders.size());
+
+            // Drawing again with the same strength reuses the cached copy; a second strength adds a second copy
+            android.graphics.Bitmap scratch = android.graphics.Bitmap.createBitmap(200, 100, android.graphics.Bitmap.Config.ARGB_8888);
+            pLight.setColorFilter(fWidgetB);
+            backdrop.drawBlurRound(new android.graphics.Canvas(scratch), box, 20f, 40f, 60f, pLight);
+            Assert.assertEquals(1, tintedShaders.size());
+            pLight.setColorFilter(fVeil);
+            backdrop.drawBlurRound(new android.graphics.Canvas(scratch), box, 0f, 0f, 0f, pLight);
+            Assert.assertEquals("Second strength creates a second pre-tinted copy", 2, tintedShaders.size());
+
+            // Pixel comparison between HIGH and Light mode for the same pane
+            int maxDiff = 0, badX = -1, badY = -1, bad1 = 0, bad2 = 0;
+            for (int y = 0; y < 100; y++) {
+                for (int x = 0; x < 200; x++) {
+                    int c1 = outHigh.getPixel(x, y), c2 = outLight.getPixel(x, y);
+                    int d = Math.max(Math.abs(android.graphics.Color.red(c1) - android.graphics.Color.red(c2)),
+                            Math.max(Math.abs(android.graphics.Color.green(c1) - android.graphics.Color.green(c2)),
+                                    Math.abs(android.graphics.Color.blue(c1) - android.graphics.Color.blue(c2))));
+                    if (d > maxDiff) {
+                        maxDiff = d;
+                        badX = x;
+                        badY = y;
+                        bad1 = c1;
+                        bad2 = c2;
+                    }
+                }
+            }
+            Assert.assertTrue("Pre-tinted glass matches per-pixel ColorMatrixColorFilter within rounding (maxDiff=" + maxDiff
+                    + " at " + badX + "," + badY + " high=" + Integer.toHexString(bad1) + " light=" + Integer.toHexString(bad2) + ")", maxDiff <= 2);
+
+            List<android.graphics.Bitmap> tintedBlurs = field(slide, "tintedBlurs");
+            Assert.assertEquals(2, tintedBlurs.size());
+            android.graphics.Bitmap tb0 = tintedBlurs.get(0);
+            Assert.assertFalse(tb0.isRecycled());
+            call(slide, "recycle", new Class<?>[0]);
+            Assert.assertTrue("Slide.recycle() frees pre-tinted blur bitmaps", tb0.isRecycled());
+            Assert.assertEquals(0, tintedShaders.size());
+            backdrop.release();
+        } finally {
+            Backdrop.calm = prevCalm;
+        }
+    }
 }

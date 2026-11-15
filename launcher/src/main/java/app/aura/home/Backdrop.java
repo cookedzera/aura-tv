@@ -132,6 +132,9 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         ColorFilter animFilter;
         int animAlpha = -1;
         BitmapShader blurShader;
+        /** Light mode: pre-tinted copies of {@code blur} keyed by each pane's glass filter, so panes draw without a per-pixel colour matrix. */
+        final java.util.IdentityHashMap<ColorFilter, BitmapShader> tintedShaders = new java.util.IdentityHashMap<>();
+        final List<Bitmap> tintedBlurs = new ArrayList<>();
         int sw, sh;
         float lumaTop, lumaBottom;
         long start;
@@ -140,6 +143,21 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         float alpha;
         float s0, s1, x0, x1, y0, y1;
         final Matrix m = new Matrix();
+
+        synchronized BitmapShader tintedShader(ColorFilter cf) {
+            if (blur == null || cf == null) return null;
+            BitmapShader sh = tintedShaders.get(cf);
+            if (sh != null) return sh;
+            Bitmap b = Bitmap.createBitmap(blur.getWidth(), blur.getHeight(), Bitmap.Config.ARGB_8888);
+            Paint p = new Paint();
+            p.setColorFilter(cf);
+            new Canvas(b).drawBitmap(blur, 0f, 0f, p);
+            b.prepareToDraw();
+            sh = new BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            tintedBlurs.add(b);
+            tintedShaders.put(cf, sh);
+            return sh;
+        }
 
         /** Frees the large full-screen bitmaps as soon as the slide leaves the screen; {@code blur} stays for {@link #lastBlur}. */
         void recycle() {
@@ -151,10 +169,16 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             if (soft != null && soft != sharp) soft.recycle();
             if (sharp != null) sharp.recycle();
             steady = soft = sharp = null;
+            synchronized (this) {
+                tintedShaders.clear();
+                for (int i = 0; i < tintedBlurs.size(); i++) tintedBlurs.get(i).recycle();
+                tintedBlurs.clear();
+            }
         }
     }
 
     private final List<Wallpaper> walls = new ArrayList<>(), builtIn = new ArrayList<>();
+    private final java.util.concurrent.CopyOnWriteArraySet<ColorFilter> glassFilters = new java.util.concurrent.CopyOnWriteArraySet<>();
     private long wallStamp = -1;
     /** A photograph just sent from a phone, to go on next. */
     private String wanted;
@@ -410,6 +434,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
         dropStandIn();
         mirrors.clear();
         ticks.clear();
+        glassFilters.clear();
         listener = null;
         io.shutdownNow();
     }
@@ -846,21 +871,35 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
      */
     void drawBlurRound(Canvas c, RectF r, float radius, float ox, float oy, Paint p) {
         float ia = introAlpha();
-        blurRound(c, current, r, radius, ox, oy, p, ia);
-        blurRound(c, incoming, r, radius, ox, oy, p, ia);
+        ColorFilter cf = p.getColorFilter();
+        blurRound(c, current, r, radius, ox, oy, p, ia, cf);
+        blurRound(c, incoming, r, radius, ox, oy, p, ia, cf);
         p.setShader(null);
+        p.setColorFilter(cf);
     }
 
-    private void blurRound(Canvas c, Slide s, RectF r, float radius, float ox, float oy, Paint p, float ia) {
+    private void blurRound(Canvas c, Slide s, RectF r, float radius, float ox, float oy, Paint p, float ia, ColorFilter cf) {
         if (s == null || s.blur == null) return;
-        if (s.blurShader == null) s.blurShader = new BitmapShader(s.blur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+        BitmapShader sh = null;
+        if (calm && cf != null) {
+            if (glassFilters.size() < 16) glassFilters.add(cf);
+            sh = s.tintedShader(cf);
+        }
+        if (sh != null) {
+            p.setColorFilter(null);
+        } else {
+            if (s.blurShader == null) s.blurShader = new BitmapShader(s.blur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            sh = s.blurShader;
+            p.setColorFilter(cf);
+        }
         tmp.set(s.m);
         tmp.preScale(s.sw / (float) s.blur.getWidth(), s.sh / (float) s.blur.getHeight());
         tmp.postTranslate(-ox, -oy);
-        s.blurShader.setLocalMatrix(tmp);
-        p.setShader(s.blurShader);
+        sh.setLocalMatrix(tmp);
+        p.setShader(sh);
         p.setAlpha(Math.round(255 * s.alpha * ia));
-        c.drawRoundRect(r, radius, radius, p);
+        if (calm && radius <= 0f) c.drawRect(r, p);
+        else c.drawRoundRect(r, radius, radius, p);
     }
 
     private void blurSlide(Canvas c, Slide s, float ox, float oy, Paint p, float ia) {
@@ -1081,6 +1120,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             s.sw = b.getWidth();
             s.sh = b.getHeight();
             s.blur = blur(b);
+            if (calm) for (ColorFilter cf : glassFilters) s.tintedShader(cf);
             s.soft = b;
             s.lumaTop = s.lumaBottom = 0f;
             path(s);
@@ -1101,6 +1141,7 @@ final class Backdrop extends View implements Choreographer.FrameCallback {
             }
             path(s);
             s.blur = blur(b);
+            if (calm) for (ColorFilter cf : glassFilters) s.tintedShader(cf);
             s.lumaTop = luma(s.blur, 0f, 0f, 0.62f, 0.66f);
             s.lumaBottom = luma(s.blur, 0f, 0.6f, 1f, 1f);
             // the soft copy is an ingredient of the resting copy (and of a GIF's defocus) and goes

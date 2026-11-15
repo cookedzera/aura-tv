@@ -63,7 +63,7 @@ class GlassFrame extends FrameLayout {
                 o.setAlpha(Ui.light ? 0f : 1f);
             }
         });
-        setClipToOutline(true);
+        setClipToOutline(radiusDp > 0);
     }
 
     /**
