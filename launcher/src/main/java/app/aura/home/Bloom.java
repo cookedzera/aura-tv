@@ -85,7 +85,15 @@ final class Bloom extends View implements Backdrop.Tick {
 
     /** Glides the light to a point given as fractions of the screen. */
     void moveTo(float x, float y, long ms) {
-        if (moveAnim != null) moveAnim.cancel();
+        if (moveAnim != null) {
+            moveAnim.cancel();
+            moveAnim = null;
+        }
+        if (getVisibility() == GONE) {
+            cx = x;
+            cy = y;
+            return;
+        }
         final float x0 = cx, y0 = cy;
         moveAnim = ValueAnimator.ofFloat(0f, 1f);
         moveAnim.setDuration(ms);
@@ -100,7 +108,14 @@ final class Bloom extends View implements Backdrop.Tick {
     }
 
     void setColor(int to, long ms) {
-        if (colorAnim != null) colorAnim.cancel();
+        if (colorAnim != null) {
+            colorAnim.cancel();
+            colorAnim = null;
+        }
+        if (getVisibility() == GONE) {
+            color = to;
+            return;
+        }
         if (ms <= 0) {
             color = to;
             recolor();
@@ -118,7 +133,14 @@ final class Bloom extends View implements Backdrop.Tick {
     }
 
     void setStrength(float to, long ms) {
-        if (strengthAnim != null) strengthAnim.cancel();
+        if (strengthAnim != null) {
+            strengthAnim.cancel();
+            strengthAnim = null;
+        }
+        if (getVisibility() == GONE) {
+            strength = to;
+            return;
+        }
         strengthAnim = ValueAnimator.ofFloat(strength, to);
         strengthAnim.setDuration(Math.max(1, ms));
         strengthAnim.setInterpolator(Ui.SOFT);

@@ -474,4 +474,59 @@ public class LightModePerfTest {
             org.robolectric.shadows.ShadowChoreographer.setPaused(false);
         }
     }
+
+    @Test
+    public void bloomSkipsAnimatorsWhenGoneInLightMode() throws Exception {
+        Ui.light = true;
+        Bloom bloom = new Bloom(c);
+        bloom.setVisibility(View.GONE);
+        bloom.moveTo(0.25f, 0.75f, 900);
+        bloom.setColor(0xFF336699, 700);
+        bloom.setStrength(0.45f, 460);
+        Assert.assertNull("Gone Bloom must not start moveAnim", field(bloom, "moveAnim"));
+        Assert.assertNull("Gone Bloom must not start colorAnim", field(bloom, "colorAnim"));
+        Assert.assertNull("Gone Bloom must not start strengthAnim", field(bloom, "strengthAnim"));
+        Assert.assertEquals(0.25f, (Float) field(bloom, "cx"), 1e-4f);
+        Assert.assertEquals(0.75f, (Float) field(bloom, "cy"), 1e-4f);
+        Assert.assertEquals(0xFF336699, ((Integer) field(bloom, "color")).intValue());
+        Assert.assertEquals(0.45f, (Float) field(bloom, "strength"), 1e-4f);
+
+        // HomeActivity.glide() skips Bloom + parallax while Light mode has bloom GONE and Backdrop.calm true
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(java.time.Duration.ofMillis(16));
+        try {
+            Prefs.device(c).edit().putString("set_light", "on").commit();
+            org.robolectric.android.controller.ActivityController<HomeActivity> ac = Robolectric.buildActivity(HomeActivity.class).setup();
+            controllers.add(ac);
+            HomeActivity home = ac.get();
+            Bloom homeBloom = field(home, "bloom");
+            Assert.assertEquals(View.GONE, homeBloom.getVisibility());
+            Method glide = HomeActivity.class.getDeclaredMethod("glide", float.class, float.class, int.class);
+            glide.setAccessible(true);
+            glide.invoke(home, 320f, 180f, 0xFF4488CC);
+            Assert.assertNull(field(homeBloom, "moveAnim"));
+            Assert.assertNull(field(homeBloom, "colorAnim"));
+
+            // HIGH mode: visible Bloom still runs moveAnim, colorAnim, and strengthAnim
+            Ui.light = false;
+            bloom.setVisibility(View.VISIBLE);
+            bloom.moveTo(0.8f, 0.2f, 900);
+            bloom.setColor(0xFFAA5500, 700);
+            bloom.setStrength(1f, 460);
+            ValueAnimator m = field(bloom, "moveAnim");
+            ValueAnimator col = field(bloom, "colorAnim");
+            ValueAnimator st = field(bloom, "strengthAnim");
+            Assert.assertNotNull(m);
+            Assert.assertNotNull(col);
+            Assert.assertNotNull(st);
+            Assert.assertTrue(m.isStarted());
+            Assert.assertTrue(col.isStarted());
+            Assert.assertTrue(st.isStarted());
+            m.cancel();
+            col.cancel();
+            st.cancel();
+        } finally {
+            org.robolectric.shadows.ShadowChoreographer.setPaused(false);
+        }
+    }
 }
