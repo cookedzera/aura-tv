@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 150" width="1280" height="150" role="img" aria-label="12:30 · Daylight: A quiet tour">
+<defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5f9be0"/><stop offset=".7" stop-color="#a9cdf2"/><stop offset="1" stop-color="#e4f0fb"/></linearGradient>
+<radialGradient id="h"><stop offset="0" stop-color="#fff3d1"/><stop offset=".35" stop-color="#ffcf7a" stop-opacity=".85"/><stop offset="1" stop-color="#ffb35c" stop-opacity="0"/></radialGradient>
+<clipPath id="c"><rect width="1280" height="150" rx="18"/></clipPath></defs>
+<g clip-path="url(#c)"><rect width="1280" height="150" fill="url(#s)"/>
+<path d="M40 150 A600 118 0 0 1 1240 150" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width="1.6" stroke-dasharray="2 9" stroke-linecap="round"/>
+<circle cx="640" cy="32" r="46" fill="url(#h)"><animate attributeName="r" values="42;50;42" dur="6s" repeatCount="indefinite"/></circle><circle cx="640" cy="32" r="11" fill="#fff8e6"/>
+<text x="56" y="70" text-anchor="start" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="15" letter-spacing="5" fill="#24456e" fill-opacity=".85">12:30 · DAYLIGHT</text>
+<text x="56" y="114" text-anchor="start" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="38" font-weight="600" fill="#0f2440">A quiet tour</text></g>
+</svg>

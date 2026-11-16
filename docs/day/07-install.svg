@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 150" width="1280" height="150" role="img" aria-label="07:00 · Sunrise: Install">
+<defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3f72"/><stop offset=".6" stop-color="#e7a3a6"/><stop offset="1" stop-color="#ffd9b0"/></linearGradient>
+<radialGradient id="h"><stop offset="0" stop-color="#fff3d1"/><stop offset=".35" stop-color="#ffcf7a" stop-opacity=".85"/><stop offset="1" stop-color="#ffb35c" stop-opacity="0"/></radialGradient>
+<clipPath id="c"><rect width="1280" height="150" rx="18"/></clipPath></defs>
+<g clip-path="url(#c)"><rect width="1280" height="150" fill="url(#s)"/>
+<path d="M40 150 A600 118 0 0 1 1240 150" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width="1.6" stroke-dasharray="2 9" stroke-linecap="round"/>
+<circle cx="97" cy="100" r="46" fill="url(#h)"><animate attributeName="r" values="42;50;42" dur="6s" repeatCount="indefinite"/></circle><circle cx="97" cy="100" r="11" fill="#fff8e6"/>
+<text x="1224" y="70" text-anchor="end" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="15" letter-spacing="5" fill="#fff0e0" fill-opacity=".85">07:00 · SUNRISE</text>
+<text x="1224" y="114" text-anchor="end" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="38" font-weight="600" fill="#fffaf3">Install</text></g>
+</svg>

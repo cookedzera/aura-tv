@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 190" width="1280" height="190" role="img" aria-label="Install in four steps: get Downloader, type 4172997, install, open Aura">
+<defs><linearGradient id="st" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2f3566"/><stop offset="1" stop-color="#6b4a6e"/></linearGradient></defs>
+<rect width="1280" height="190" rx="22" fill="url(#st)"/>
+<path d="M200 70 H1080" stroke="#ffd2b0" stroke-opacity=".35" stroke-width="2" stroke-dasharray="2 9" stroke-linecap="round"/>
+<circle cx="200" cy="70" r="4" fill="#ffd2b0"><animate attributeName="cx" values="200;1080" dur="6s" repeatCount="indefinite"/></circle>
+<circle cx="170" cy="70" r="27" fill="#ff9f68" fill-opacity="1" stroke="#ffd2b0" stroke-opacity=".7"/>
+<text x="170" y="78" text-anchor="middle" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="600" fill="#2a1608">1</text>
+<text x="170" y="132" text-anchor="middle" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="20" font-weight="600" fill="#fff5ea">Get Downloader</text>
+<text x="170" y="158" text-anchor="middle" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="15" fill="#ffe2c8" fill-opacity=".75">Play Store on the TV</text><circle cx="470" cy="70" r="27" fill="#fff" fill-opacity="0.14" stroke="#ffd2b0" stroke-opacity=".7"/>
+<text x="470" y="78" text-anchor="middle" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="600" fill="#ffe9d6">2</text>
+<text x="470" y="132" text-anchor="middle" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="20" font-weight="600" fill="#fff5ea">Type 4172997</text>
+<text x="470" y="158" text-anchor="middle" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="15" fill="#ffe2c8" fill-opacity=".75">always the newest Aura</text><circle cx="810" cy="70" r="27" fill="#fff" fill-opacity="0.14" stroke="#ffd2b0" stroke-opacity=".7"/>
+<text x="810" y="78" text-anchor="middle" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="600" fill="#ffe9d6">3</text>
+<text x="810" y="132" text-anchor="middle" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="20" font-weight="600" fill="#fff5ea">Install</text>
+<text x="810" y="158" text-anchor="middle" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="15" fill="#ffe2c8" fill-opacity=".75">allow it once</text><circle cx="1110" cy="70" r="27" fill="#fff" fill-opacity="0.14" stroke="#ffd2b0" stroke-opacity=".7"/>
+<text x="1110" y="78" text-anchor="middle" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="600" fill="#ffe9d6">4</text>
+<text x="1110" y="132" text-anchor="middle" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="20" font-weight="600" fill="#fff5ea">Open Aura</text>
+<text x="1110" y="158" text-anchor="middle" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica Neue, Arial, sans-serif" font-size="15" fill="#ffe2c8" fill-opacity=".75">a short welcome</text>
+</svg>
