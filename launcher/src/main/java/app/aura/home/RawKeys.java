@@ -43,6 +43,12 @@ final class RawKeys {
      */
     static final String COMMAND = "getevent -lq";
     private static final Pattern SPACE = Pattern.compile("\\s+");
+    /**
+     * The last {@code MSC_SCAN} seen for each device, from the line getevent prints just before its
+     * {@code EV_KEY}: a driver that gives two buttons the same code (MediaTek volume, both
+     * {@code KEY_UNKNOWN}) is told apart by this alone. Read on the reader thread only.
+     */
+    private static final Map<String, String> scan = new HashMap<>();
 
     private static Thread reader;
     private static Adb.Link link;
@@ -160,15 +166,28 @@ final class RawKeys {
 
     /**
      * One line of {@code getevent -lq}: {@code /dev/input/event0: EV_KEY  KEY_A  DOWN}. A button is
-     * its device and its code (a keyboard's A isn't a remote's volume); repeats are left out.
+     * its device and its code (a keyboard's A isn't a remote's volume); repeats are left out. A code
+     * the driver doesn't name ({@code KEY_UNKNOWN}) keeps the scan code from the line before, so two
+     * buttons the driver calls alike are still two buttons, each learned its own direction.
      */
     static Key parse(String line) {
-        if (line == null || line.indexOf("EV_KEY") < 0) return null;
+        if (line == null) return null;
+        if (line.indexOf("EV_MSC") >= 0) {
+            String[] m = SPACE.split(line.trim());
+            if (m.length >= 4 && "MSC_SCAN".equals(m[2])) scan.put(m[0], m[3]);
+            return null;
+        }
+        if (line.indexOf("EV_KEY") < 0) return null;
         String[] t = SPACE.split(line.trim());
         if (t.length < 4 || !"EV_KEY".equals(t[1])) return null;
         boolean down = "DOWN".equals(t[3]);
         if (!down && !"UP".equals(t[3])) return null;
-        return new Key(t[0] + t[2], down);
+        String code = t[2];
+        if ("KEY_UNKNOWN".equals(code)) {
+            String s = scan.get(t[0]);
+            if (s != null) code = code + "#" + s;
+        }
+        return new Key(t[0] + code, down);
     }
 
     interface Out {
@@ -271,6 +290,14 @@ final class RawKeys {
         private static Integer named(String name) {
             if (name.endsWith("KEY_VOLUMEUP")) return 1;
             if (name.endsWith("KEY_VOLUMEDOWN")) return -1;
+            // Some remotes (MediaTek) report both volume buttons as KEY_UNKNOWN, leaving only the scan
+            // code to tell them apart (see {@link #parse}); learned from the volume moving just after
+            // them is unreliable there, so the two codes are known at once instead: 0xc0080 raises the
+            // volume, 0xc0081 lowers it.
+            if (name.indexOf('#') >= 0) {
+                if (name.endsWith("c0080")) return 1;
+                if (name.endsWith("c0081")) return -1;
+            }
             return null;
         }
 
