@@ -153,41 +153,41 @@ final class Adb {
 
         /** Runs one shell command and returns what it printed. */
         String run(String command) throws IOException {
-            int local = nextId++, remote = 0;
-            socket.setSoTimeout(RUN_MS);
-            send(OPEN, local, 0, ("shell:" + command + "\0").getBytes(UTF8));
             ByteArrayOutputStream got = new ByteArrayOutputStream();
-            while (true) {
-                Msg m = read();
-                if (m.arg1 != local) continue;
-                if (m.cmd == OKAY) {
-                    remote = m.arg0;
-                } else if (m.cmd == WRTE) {
-                    got.write(m.data);
-                    send(OKAY, local, m.arg0, null);
-                } else if (m.cmd == CLSE) {
-                    if (remote != 0) send(CLSE, local, remote, null);
-                    return got.toString("UTF-8");
-                }
-            }
-        }
-
-        /** What a streamed command printed, a line at a time; false to stop listening. */
-        interface Lines {
-            boolean line(String line);
+            shell(command, RUN_MS, got::write);
+            return got.toString("UTF-8");
         }
 
         /**
          * Runs one shell command that keeps printing (getevent) and hands each line to {@code sink}
-         * as it comes, for as long as the command runs, {@code sink} wants more, or until this link
-         * is closed from another thread (which is how a reader is stopped).
+         * as it comes, for as long as the command runs or until this link is closed from another
+         * thread (which is how a reader is stopped). Nothing may come for hours: no timeout.
          */
-        void stream(String command, Lines sink) throws IOException {
+        void stream(String command, Reports.Line sink) throws IOException {
+            ByteArrayOutputStream line = new ByteArrayOutputStream();
+            shell(command, 0, data -> {
+                for (byte b : data) {
+                    if (b != '\n') {
+                        line.write(b);
+                        continue;
+                    }
+                    // a line's bytes whole before they're read as text: a character is never split
+                    sink.take(line.toString("UTF-8").trim());
+                    line.reset();
+                }
+            });
+        }
+
+        /** What a shell command prints, as it comes. */
+        private interface Chunk {
+            void take(byte[] data) throws IOException;
+        }
+
+        /** One shell command over this link, its output handed to {@code sink} until it ends. */
+        private void shell(String command, int timeoutMs, Chunk sink) throws IOException {
             int local = nextId++, remote = 0;
-            // nothing may come for hours (no button pressed): no timeout while it streams
-            socket.setSoTimeout(0);
+            socket.setSoTimeout(timeoutMs);
             send(OPEN, local, 0, ("shell:" + command + "\0").getBytes(UTF8));
-            StringBuilder pending = new StringBuilder();
             while (true) {
                 Msg m = read();
                 if (m.arg1 != local) continue;
@@ -195,16 +195,9 @@ final class Adb {
                     remote = m.arg0;
                 } else if (m.cmd == WRTE) {
                     send(OKAY, local, m.arg0, null);
-                    pending.append(new String(m.data, UTF8));
-                    for (int nl; (nl = pending.indexOf("\n")) >= 0; ) {
-                        String line = pending.substring(0, nl).trim();
-                        pending.delete(0, nl + 1);
-                        if (!sink.line(line)) {
-                            if (remote != 0) send(CLSE, local, remote, null);
-                            return;
-                        }
-                    }
+                    sink.take(m.data);
                 } else if (m.cmd == CLSE) {
+                    if (remote != 0) send(CLSE, local, remote, null);
                     return;
                 }
             }
@@ -301,7 +294,15 @@ final class Adb {
     }
 
     /** Aura's own key, made once (a second or two on a slow TV) and kept in private storage. */
+    /** Aura's key, read from its files once (each connection signs with it). */
+    private static KeyPair keyPair;
+
     static synchronized KeyPair key(File dir) throws IOException {
+        if (keyPair == null) keyPair = readKey(dir);
+        return keyPair;
+    }
+
+    private static KeyPair readKey(File dir) throws IOException {
         File priv = new File(dir, "key"), pub = new File(dir, "key.pub");
         try {
             KeyFactory f = KeyFactory.getInstance("RSA");
@@ -546,6 +547,10 @@ final class Adb {
         if (!on(c)) return null;
         try {
             return link(c, false);
+        } catch (Denied e) {
+            // Android forgot Aura's key: as with run(), settings offer to connect again
+            Prefs.device(c).edit().putBoolean("adb_ok", false).apply();
+            return null;
         } catch (IOException | RuntimeException e) {
             return null;
         }

@@ -183,11 +183,11 @@ public class HomeKeys extends AccessibilityService {
      * {@code AccessibilityInputFilter} before {@link #onKeyEvent} or {@code InputDispatcher} key
      * repeats ever run).
      */
-    static void onVolumeKey(int key, boolean up, boolean fromHardwareLog) {
+    static void onVolumeKey(int key, boolean up) {
         HomeKeys s = running;
         if (s == null) return;
-        if (fromHardwareLog) s.keyLog = true;
-        s.volumeKey(key, up, fromHardwareLog);
+        s.keyLog = true;
+        s.volumeKey(key, up, true);
     }
 
     /**
@@ -249,7 +249,7 @@ public class HomeKeys extends AccessibilityService {
             s.ignoreShowDialogs = 1;
             s.ignoreShowDialogUntil = now + 100;
             if (s.filtering && !s.hasHardwareKeyLog && s.volumeHeld == 0 && dir != 0) {
-                onVolumeKey(dir > 0 ? KeyEvent.KEYCODE_VOLUME_UP : KeyEvent.KEYCODE_VOLUME_DOWN, false, false);
+                s.volumeKey(dir > 0 ? KeyEvent.KEYCODE_VOLUME_UP : KeyEvent.KEYCODE_VOLUME_DOWN, false, false);
             }
             return;
         }
@@ -691,35 +691,34 @@ public class HomeKeys extends AccessibilityService {
         }
         firstFront = null;
         boolean want = wish();
-        if (want == filtering) {
-            RawKeys.watch(this, filtering);
-            return;
+        if (want != filtering) {
+            long settle = settleLeft(SystemClock.uptimeMillis(), windowAt);
+            if (settle > 0) {
+                handler.removeCallbacks(refilter);
+                handler.postDelayed(refilter, settle);
+                return;
+            }
+            // changing the flag makes Android drop whatever key is held right now (and its repeats):
+            // letting the filter go waits until the remote has been quiet for a moment
+            if (!want && SystemClock.uptimeMillis() - lastKeyAt < 300) {
+                handler.removeCallbacks(refilter);
+                handler.postDelayed(refilter, 300);
+                return;
+            }
+            if (!want) {
+                volumeHeld = 0;
+                handler.removeCallbacks(volumeRepeat);
+            }
+            AccessibilityServiceInfo info = getServiceInfo();
+            if (info == null) return;
+            if (want) info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+            else info.flags &= ~AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+            setServiceInfo(info);
+            filtering = want;
         }
-        long settle = settleLeft(SystemClock.uptimeMillis(), windowAt);
-        if (settle > 0) {
-            handler.removeCallbacks(refilter);
-            handler.postDelayed(refilter, settle);
-            return;
-        }
-        // changing the flag makes Android drop whatever key is held right now (and its repeats):
-        // letting the filter go waits until the remote has been quiet for a moment
-        if (!want && SystemClock.uptimeMillis() - lastKeyAt < 300) {
-            handler.removeCallbacks(refilter);
-            handler.postDelayed(refilter, 300);
-            return;
-        }
-        if (!want) {
-            volumeHeld = 0;
-            handler.removeCallbacks(volumeRepeat);
-        }
-        AccessibilityServiceInfo info = getServiceInfo();
-        if (info == null) return;
-        if (want) info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
-        else info.flags &= ~AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
-        setServiceInfo(info);
-        filtering = want;
-        // the remote's own presses, for a volume button held in an app (see RawKeys)
-        RawKeys.watch(this, want);
+        // the remote's own presses, for a volume button held in an app (see RawKeys), unless the
+        // TV's log already says when a volume button goes down and up
+        RawKeys.watch(this, filtering && !keyLog);
     }
 
     /**

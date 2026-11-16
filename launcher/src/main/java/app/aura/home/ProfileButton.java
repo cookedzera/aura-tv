@@ -112,14 +112,14 @@ final class ProfileButton {
         if (line.contains("KEY_EVENT_ACTION_DOWN: key=")) {
             int key = parseKeyCode(line, "KEY_EVENT_ACTION_DOWN: key=");
             if (key == KeyEvent.KEYCODE_VOLUME_UP || key == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                main.post(() -> HomeKeys.onVolumeKey(key, false, true));
+                main.post(() -> HomeKeys.onVolumeKey(key, false));
             }
             return;
         }
         if (line.contains("KEY_EVENT_ACTION_UP: key=")) {
             int key = parseKeyCode(line, "KEY_EVENT_ACTION_UP: key=");
             if (key == KeyEvent.KEYCODE_VOLUME_UP || key == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                main.post(() -> HomeKeys.onVolumeKey(key, true, true));
+                main.post(() -> HomeKeys.onVolumeKey(key, true));
             }
             return;
         }
