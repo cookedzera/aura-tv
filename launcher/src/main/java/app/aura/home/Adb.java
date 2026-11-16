@@ -172,6 +172,44 @@ final class Adb {
             }
         }
 
+        /** What a streamed command printed, a line at a time; false to stop listening. */
+        interface Lines {
+            boolean line(String line);
+        }
+
+        /**
+         * Runs one shell command that keeps printing (getevent) and hands each line to {@code sink}
+         * as it comes, for as long as the command runs, {@code sink} wants more, or until this link
+         * is closed from another thread (which is how a reader is stopped).
+         */
+        void stream(String command, Lines sink) throws IOException {
+            int local = nextId++, remote = 0;
+            // nothing may come for hours (no button pressed): no timeout while it streams
+            socket.setSoTimeout(0);
+            send(OPEN, local, 0, ("shell:" + command + "\0").getBytes(UTF8));
+            StringBuilder pending = new StringBuilder();
+            while (true) {
+                Msg m = read();
+                if (m.arg1 != local) continue;
+                if (m.cmd == OKAY) {
+                    remote = m.arg0;
+                } else if (m.cmd == WRTE) {
+                    send(OKAY, local, m.arg0, null);
+                    pending.append(new String(m.data, UTF8));
+                    for (int nl; (nl = pending.indexOf("\n")) >= 0; ) {
+                        String line = pending.substring(0, nl).trim();
+                        pending.delete(0, nl + 1);
+                        if (!sink.line(line)) {
+                            if (remote != 0) send(CLSE, local, remote, null);
+                            return;
+                        }
+                    }
+                } else if (m.cmd == CLSE) {
+                    return;
+                }
+            }
+        }
+
         private void send(int cmd, int arg0, int arg1, byte[] data) throws IOException {
             int n = data == null ? 0 : data.length, sum = 0;
             for (int i = 0; i < n; i++) sum += data[i] & 0xff;
@@ -496,6 +534,19 @@ final class Adb {
                 failures = 0;
                 Prefs.device(c).edit().putBoolean("adb_ok", false).apply();
             }
+            return null;
+        }
+    }
+
+    /**
+     * A connection for a long-running command (see {@link Link#stream}), never putting a question
+     * on the screen. Null when Aura isn't let in. Off the main thread; the caller closes it.
+     */
+    static Link quietLink(Context c) {
+        if (!on(c)) return null;
+        try {
+            return link(c, false);
+        } catch (IOException | RuntimeException e) {
             return null;
         }
     }

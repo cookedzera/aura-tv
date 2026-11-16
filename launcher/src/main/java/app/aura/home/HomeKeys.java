@@ -99,6 +99,8 @@ public class HomeKeys extends AccessibilityService {
     private int volumeHeld;
     private long volumeSince;
     private boolean hasHardwareKeyLog;
+    /** The firmware writes volume presses and releases to its log (ProfileButton reads them). */
+    private boolean keyLog;
     private int expectedVolume = -1;
     private int lastVolumeDir;
     private long lastVolumeStepAt;
@@ -183,7 +185,19 @@ public class HomeKeys extends AccessibilityService {
      */
     static void onVolumeKey(int key, boolean up, boolean fromHardwareLog) {
         HomeKeys s = running;
-        if (s != null) s.volumeKey(key, up, fromHardwareLog);
+        if (s == null) return;
+        if (fromHardwareLog) s.keyLog = true;
+        s.volumeKey(key, up, fromHardwareLog);
+    }
+
+    /**
+     * A volume button pressed or let go, as the remote's receiver itself reported it ({@link RawKeys}):
+     * a sure press and release, as the hardware key log gives where the firmware writes one. Where
+     * it does, that log is used and this is left out, so a press isn't counted twice.
+     */
+    static void onRawVolumeKey(int key, boolean up) {
+        HomeKeys s = running;
+        if (s != null && !s.keyLog) s.volumeKey(key, up, true);
     }
 
     private void volumeKey(int key, boolean up, boolean fromHardwareLog) {
@@ -677,7 +691,10 @@ public class HomeKeys extends AccessibilityService {
         }
         firstFront = null;
         boolean want = wish();
-        if (want == filtering) return;
+        if (want == filtering) {
+            RawKeys.watch(this, filtering);
+            return;
+        }
         long settle = settleLeft(SystemClock.uptimeMillis(), windowAt);
         if (settle > 0) {
             handler.removeCallbacks(refilter);
@@ -701,6 +718,8 @@ public class HomeKeys extends AccessibilityService {
         else info.flags &= ~AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
         setServiceInfo(info);
         filtering = want;
+        // the remote's own presses, for a volume button held in an app (see RawKeys)
+        RawKeys.watch(this, want);
     }
 
     /**
@@ -1067,6 +1086,7 @@ public class HomeKeys extends AccessibilityService {
         live = false;
         if (running == this) running = null;
         ProfileButton.stop();
+        RawKeys.watch(this, false);
         // switched off in Android's settings (not a crash or a restart): it stays off after a restart too
         if (!on(this)) Prefs.device(this).edit().putBoolean("keys_wanted", false).apply();
         InputManager im = (InputManager) getSystemService(Context.INPUT_SERVICE);
