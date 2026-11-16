@@ -2,6 +2,7 @@ package app.aura.home;
 
 import android.content.Context;
 import android.media.AudioManager;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -35,33 +36,55 @@ final class RawKeys {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     /** Kept open this long after the filter goes off: home and back to the app reuse the link. */
     static final long LINGER_MS = 20_000;
-    /** Key lines only, filtered on the TV (no motion from an air mouse sent over); an older grep falls back to all. */
-    static final String COMMAND = "getevent -lq | grep --line-buffered EV_KEY || getevent -lq";
+    /**
+     * getevent on its own, as held volume was first seen working on a TV with: piped into grep, its
+     * output was held back in 4 KB blocks (it never flushes), so presses came dozens at a time.
+     * Lines that aren't keys are dropped here.
+     */
+    static final String COMMAND = "getevent -lq";
     private static final Pattern SPACE = Pattern.compile("\\s+");
 
     private static Thread reader;
     private static Adb.Link link;
     private static volatile boolean wanted;
+    /** STOP is on its way (only ever one). */
+    private static boolean stopping;
     private static Learner learner;
     private static final Runnable STOP = RawKeys::stop;
 
     /** Reading while {@code on} (the key filter is on: an app in front), not otherwise. Main thread. */
     static synchronized void watch(Context c, boolean on) {
         if (!on) {
-            if (wanted) MAIN.postDelayed(STOP, LINGER_MS);
+            // counted from leaving the app, not pushed back by every window that opens at home
+            if (wanted && !stopping) {
+                stopping = true;
+                MAIN.postDelayed(STOP, LINGER_MS);
+            }
             return;
         }
         MAIN.removeCallbacks(STOP);
+        stopping = false;
         wanted = true;
-        if (reader != null && reader.isAlive() || !Adb.on(c)) return;
+        // a reader on its way out clears itself under this lock first (claim), so one is always started when needed
+        if (reader != null || !Adb.on(c)) return;
         final Context app = c.getApplicationContext();
         if (learner == null) learner = new Learner(app, HomeKeys::onRawVolumeKey);
-        reader = new SafeThread(() -> read(app), "raw-keys");
+        reader = new SafeThread(() -> {
+            try {
+                read(app);
+            } finally {
+                // only matters if read() threw: its own ways out go through claim()
+                synchronized (RawKeys.class) {
+                    if (reader == Thread.currentThread()) reader = null;
+                }
+            }
+        }, "raw-keys");
         reader.setDaemon(true);
         reader.start();
     }
 
     private static synchronized void stop() {
+        stopping = false;
         wanted = false;
         Adb.Link l = link;
         link = null;
@@ -70,21 +93,31 @@ final class RawKeys {
     }
 
     /**
+     * Whether the reader carries on (then {@code l}, if any, is the link to stop it by); if not, it's
+     * gone as of now. One lock with {@link #watch}, so a reader on its way out is never taken for one running.
+     */
+    private static synchronized boolean claim(Adb.Link l) {
+        if (!wanted) {
+            reader = null;
+            return false;
+        }
+        if (l != null) link = l;
+        return true;
+    }
+
+    /**
      * One connection after another while wanted: one that drops, or ADB not letting Aura in, is
      * tried again a little later each time (up to half a minute), not on every window that opens.
      */
     private static void read(Context c) {
         long wait = 1000;
-        while (wanted) {
+        while (claim(null)) {
             Adb.Link l = Adb.quietLink(c);
             boolean heard = false;
             if (l != null) {
-                synchronized (RawKeys.class) {
-                    if (!wanted) {
-                        l.close();
-                        return;
-                    }
-                    link = l;
+                if (!claim(l)) {
+                    l.close();
+                    return;
                 }
                 final boolean[] got = {false};
                 try {
@@ -101,10 +134,12 @@ final class RawKeys {
                     synchronized (RawKeys.class) {
                         if (link == l) link = null;
                     }
+                    // a button held as the link went never sends its release: let it go, or the hold runs on
+                    MAIN.post(learner::letGo);
                 }
                 heard = got[0];
             }
-            if (!wanted) return;
+            if (!wanted) continue;
             // a link that carried presses was a good one: the next try comes soon
             if (heard) wait = 1000;
             SystemClock.sleep(wait);
@@ -153,7 +188,13 @@ final class RawKeys {
         static final long RELEARN_MS = 10 * 60_000L;
         /** Buttons that are never volume, whatever moves the volume as they're pressed. */
         private static final Set<String> NEVER = new HashSet<>(Arrays.asList("KEY_UP", "KEY_DOWN", "KEY_LEFT",
-                "KEY_RIGHT", "KEY_ENTER", "KEY_OK", "KEY_SELECT", "KEY_BACK", "KEY_HOME", "KEY_ESC", "KEY_MENU"));
+                "KEY_RIGHT", "KEY_ENTER", "KEY_OK", "KEY_SELECT", "KEY_BACK", "KEY_HOME", "KEY_ESC", "KEY_MENU",
+                // Mute drops the volume to nothing as it's pressed: never learned as volume down
+                "KEY_MUTE", "KEY_PLAYPAUSE", "KEY_PLAY", "KEY_PAUSE", "KEY_STOP", "KEY_NEXTSONG",
+                "KEY_PREVIOUSSONG", "KEY_FASTFORWARD", "KEY_REWIND", "KEY_CHANNELUP", "KEY_CHANNELDOWN",
+                "KEY_POWER", "KEY_SLEEP", "KEY_WAKEUP", "KEY_SEARCH", "KEY_HOMEPAGE", "KEY_BACKSPACE"));
+        /** A press steps the volume once (twice for a quick double tap); a bigger jump is something else. */
+        private static final int MOST_STEPS = 2;
         private final AudioManager audio;
         private final Out out;
         private final Map<String, Integer> dir = new HashMap<>();
@@ -200,11 +241,26 @@ final class RawKeys {
                     }
                     return;
                 }
+                // muted, or jumped further than a press goes: not this button's doing
+                if (Math.abs(after - before) > MOST_STEPS || muted()) return;
                 int learned = after > before ? 1 : -1;
                 dir.put(name, learned);
                 // still held: the hold is stepped from here
                 if (held.contains(name)) out.volume(code(learned), false);
             }, LEARN_MS);
+        }
+
+        /** Every button still held let go (the link carrying their releases is gone). */
+        void letGo() {
+            for (String name : held) {
+                Integer d = dir.get(name);
+                if (d != null) out.volume(code(d), true);
+            }
+            held.clear();
+        }
+
+        private boolean muted() {
+            return audio != null && Build.VERSION.SDK_INT >= 23 && audio.isStreamMute(AudioManager.STREAM_MUSIC);
         }
 
         private int level() {

@@ -103,7 +103,7 @@ public class MediaWatch extends NotificationListenerService {
     public void onListenerDisconnected() {
         if (connected == this) connected = null;
         stopWatching(getApplicationContext());
-        super.onListenerDisconnected();
+        if (Build.VERSION.SDK_INT >= 24) super.onListenerDisconnected();
     }
 
     // ---- notifications, for Control Center -----------------------------------------------------

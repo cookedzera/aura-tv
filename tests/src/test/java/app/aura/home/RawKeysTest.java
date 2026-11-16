@@ -136,4 +136,40 @@ public class RawKeysTest {
         after(RawKeys.Learner.LEARN_MS + 10);
         Assert.assertEquals("learned below full volume", Arrays.asList("up pressed"), out);
     }
+
+    @Test
+    public void muteAndJumpsAreNeverLearnedAsVolume() {
+        // Mute drops the volume to nothing as it goes down: not volume down
+        learner.key("event0:KEY_MUTE", true);
+        volume(0);
+        after(RawKeys.Learner.LEARN_MS + 10);
+        learner.key("event0:KEY_MUTE", false);
+        Assert.assertTrue(out.isEmpty());
+        Assert.assertFalse(learner.wants("event0:KEY_MUTE"));
+
+        // a button the volume jumped several steps after (an app, the TV over HDMI) isn't learned either
+        volume(7);
+        learner.key("event0:KEY_B", true);
+        volume(2);
+        after(RawKeys.Learner.LEARN_MS + 10);
+        learner.key("event0:KEY_B", false);
+        learner.key("event0:KEY_B", true);
+        Assert.assertTrue("still unknown", out.isEmpty());
+    }
+
+    @Test
+    public void aButtonHeldAsTheLinkGoesIsLetGo() {
+        learner.key("event4:KEY_VOLUMEUP", true);
+        learner.letGo();
+        Assert.assertEquals("its release never came: the hold stops anyway", Arrays.asList("up pressed", "up released"), out);
+        out.clear();
+        learner.letGo();
+        Assert.assertTrue("nothing left held", out.isEmpty());
+    }
+
+    @Test
+    public void getEventRunsStraightOnTheTerminal() {
+        // through a pipe its output would be held back in 4 KB blocks: presses would come dozens at a time
+        Assert.assertFalse(RawKeys.COMMAND.contains("|"));
+    }
 }

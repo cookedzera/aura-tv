@@ -97,7 +97,8 @@ final class Renderer {
      * answer a search or a command.
      */
     private final ExecutorService events = Compat.pool("dlna-events", 1);
-    private final Map<String, Sub> subs = new ConcurrentHashMap<>();
+    // ConcurrentHashMap, not Map: remove(key, value) on Map is Android 7 on, on this type it is always there
+    private final ConcurrentHashMap<String, Sub> subs = new ConcurrentHashMap<>();
     private final Random rnd = new Random();
     private volatile ServerSocket http;
     private volatile MulticastSocket ssdp;

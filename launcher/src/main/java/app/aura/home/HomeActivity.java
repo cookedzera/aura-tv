@@ -2963,7 +2963,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
             progressSplash();
         }
         if (withWidgets) {
-            handler.removeCallbacks(endTabSlide);
+            // refreshed here, so not again as a tab slide ends (which must still end it, or the grid
+            // would count as moving and Light mode bake no resting tiles until the next tab)
+            handler.removeCallbacks(tabWidgets);
             refreshWidgets(true);
         }
         windowMoved();
@@ -6706,8 +6708,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         tabSliding = false;
         syncGridMoving();
         repaintScrollGlass(scrollY + giveY, true);
-        refreshWidgets(true);
     };
+    /** The picked tab's widgets, once its slide is over. */
+    private final Runnable tabWidgets = () -> refreshWidgets(true);
 
     private void syncGridMoving() {
         Card.gridMoving = (scroll != null && scroll.moving())
@@ -6735,7 +6738,9 @@ public class HomeActivity extends Activity implements Backdrop.Listener, Control
         populate(!light);
         if (light) {
             handler.removeCallbacks(endTabSlide);
+            handler.removeCallbacks(tabWidgets);
             handler.postDelayed(endTabSlide, 170L);
+            handler.postDelayed(tabWidgets, 170L);
         }
         float dx = Ui.dpf(28) * Integer.signum(k - was);
         boolean rich = AllApps.rich(this);
