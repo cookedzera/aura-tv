@@ -3,7 +3,7 @@
 Aura shows every word in the TV's own language: change the language in Android's settings and
 the home screen is built again in it. A language Aura doesn't have yet falls back to English.
 
-Today Aura speaks **English**, **German**, **Spanish** and **Portuguese**. Corrections and new
+Today Aura speaks **English**, **German**, **Spanish**, **Portuguese** and **Turkish**. Corrections and new
 languages are very welcome. You don't need Android Studio or to know Java, only a text editor
 and a GitHub account.
 
@@ -15,6 +15,7 @@ and a GitHub account.
 | `launcher/src/main/res/values-de/strings.xml` | German |
 | `launcher/src/main/res/values-es/strings.xml` | Spanish |
 | `launcher/src/main/res/values-pt/strings.xml` | Portuguese (written as in Brazil) |
+| `launcher/src/main/res/values-tr/strings.xml` | Turkish |
 
 Each line is one piece of text, with a name that stays in English and the words you translate:
 
