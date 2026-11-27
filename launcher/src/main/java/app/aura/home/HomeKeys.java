@@ -927,11 +927,12 @@ public class HomeKeys extends AccessibilityService {
             }
             return true;
         }
-        // Haier MatrixTV EE's physical INPUT/source button arrives as KEY_BLUE / PROG_BLUE (scan
-        // 0xc006b); this firmware sends no panel intent for it, so open Aura's inputs panel here,
-        // over whatever is in front, exactly as the TV's own inputs button does on other sets.
-        if (key == KeyEvent.KEYCODE_PROG_BLUE || key == KeyEvent.KEYCODE_TV_INPUT
-                || e.getScanCode() == 0xc006b) {
+        // Haier MatrixTV EE's physical INPUT/source button arrives with scan code 0xc006b (and is
+        // also reported as KEY_BLUE / PROG_BLUE); this firmware sends no panel intent for it, so
+        // open Aura's inputs panel here. PROG_BLUE is deliberately NOT matched by keycode: HomeKeys
+        // runs in every app on every TV, where that is the blue colour button of live TV, teletext
+        // and IPTV. The scan code and KEYCODE_TV_INPUT identify this TV's INPUT button alone.
+        if (key == KeyEvent.KEYCODE_TV_INPUT || e.getScanCode() == 0xc006b) {
             if (up && !e.isCanceled() && e.getRepeatCount() == 0) {
                 open("aura_panel", "com.amazon.tv.action.NAVIGATE_TO_INPUTS");
             }
