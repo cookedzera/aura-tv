@@ -1620,7 +1620,12 @@ final class ControlCenter {
                     : live ? act.getString(R.string.input_live)
                     : standby ? act.getString(R.string.input_standby)
                     : act.getString(R.string.input_nothing);
-            Intent open = tuner ? tunerIntent(info) : new Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(info.getId()));
+            // Name the type: without it a file manager with a broader content filter wins the
+            // resolve over the TV's own app and player, and tapping a source looks dead.
+            Intent open = tuner ? tunerIntent(info)
+                    : new Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(TvContract.buildChannelUriForPassthroughInput(info.getId()),
+                                    TvContract.Channels.CONTENT_ITEM_TYPE);
             String name = labels.get(info.getId()), port = ports.get(info.getId());
             int kind = InputSheet.kindOf(name, hdmi ? Cec.type(act, port) : Cec.UNKNOWN, hdmi, tuner);
             InputSheet.Source src = new InputSheet.Source(info.getId(), name, port, what, kind, live, standby, open);
@@ -1686,19 +1691,18 @@ final class ControlCenter {
      */
     private Intent tunerIntent(TvInputInfo info) {
         android.net.Uri channels = TvContract.buildChannelsUriForInput(info.getId());
-        Intent watch = new Intent(Intent.ACTION_VIEW, channels);
+        // The type is what picks the TV app over a file manager whose content filter is broader.
+        Intent watch = new Intent(Intent.ACTION_VIEW)
+                .setDataAndType(channels, TvContract.Channels.CONTENT_TYPE);
         Intent setup = null;
         try {
             setup = info.createSetupIntent();
         } catch (RuntimeException ignored) {
         }
-        boolean none = false;
-        try (android.database.Cursor c = act.getContentResolver().query(channels, new String[]{TvContract.Channels._ID}, null, null, null)) {
-            none = c != null && c.getCount() == 0;
-        } catch (RuntimeException ignored) {
-            // channels aren't Aura's to read on this TV: straight to the TV app, which knows
-        }
-        if (setup != null && (none || !Compat.resolves(act, watch)) && Compat.resolves(act, setup)) return setup;
+        // A channel scan is the fallback for a TV with no app to watch channels at all. With no
+        // channels yet the TV app itself shows the scan prompt, which is where the tap belongs;
+        // the tuner's setup activity here only starts a service and shows nothing on this TV.
+        if (setup != null && !Compat.resolves(act, watch) && Compat.resolves(act, setup)) return setup;
         return watch;
     }
 
