@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- whether a word from a list (a weather, a sky) is lowered when it sits mid-sentence: "12° and cloudy".
+         Languages that capitalise their nouns, like German, set it to false in their own folder. -->
+    <bool name="lower_in_sentence">true</bool>
+</resources>
