@@ -378,14 +378,14 @@
     <string name="speed">HIZ</string>
     <string name="off_for_this_tv">bu TV için kapalı</string>
     <string name="on_for_this_tv">bu TV için açık</string>
-    <string name="light_mode">Açık mod</string>
+    <string name="light_mode">Hafif mod</string>
     <string name="remote">UZAKTAN KUMANDA</string>
     <string name="home_button_in_apps">Uygulamalardaki Home düğmesi</string>
     <string name="home_goes_to">Home gidiyor</string>
     <string name="apps_as_you_left_them">Uygulamalar bıraktığınız gibi</string>
     <string name="pictures_in_the_switcher">Geçişçideki resimler</string>
     <string name="pictures_deleted">Resimler silindi</string>
-    <string name="kept_only_on_this_tv">Yalnızca bu TV'de tutulur, en fazla iki gün</string>
+    <string name="kept_only_on_this_tv">Yalnızca bu TV\'de tutulur, en fazla iki gün</string>
     <string name="give_a_button_an_app">Bir düğmeye uygulama ver</string>
     <string name="remote_buttons">Uzaktan kumanda düğmeleri</string>
     <string name="profiles">Profiller</string>
@@ -883,10 +883,10 @@
     <string name="one_more_step">DAHA BİR ADIM</string>
     <string name="on_this_tv_recommended">"Bu TV'de  ·  önerilen"</string>
     <string name="from_a_computer">Bilgisayardan</string>
-    <string name="by_hand_in_accessibility">Elle, Erişebilirlik'te</string>
+    <string name="by_hand_in_accessibility">Elle, Erişilebilirlik\'te</string>
     <string name="later">Daha sonra</string>
     <string name="whenever_you_like_settings_home">İstediğiniz zaman: Ayarlar, Home düğmesi</string>
-    <string name="on_this_tv">BU TV'DE</string>
+    <string name="on_this_tv">BU TV\'DE</string>
     <string name="three_steps_once">Bir kez üç adım</string>
     <string name="each_one_ticks_itself_off">Her biri ilerledikçe kendi işaretini kaldırır. Geri düğmesiyle Aura\'ya geri dönün.</string>
     <string name="turn_on_developer_options">Geliştirici seçeneklerini açın</string>
@@ -980,7 +980,7 @@
     <string name="joining">%1$s\'e katılıyor</string>
     <!-- Music scenes -->
     <string name="music_scenes">Müzik sahneleri</string>
-    <string name="music_scenes_on">Müzik çalarken hava videoları</string>
+    <string name="music_scenes_on">Müzik çalarken havadan çekimler</string>
     <string name="beat_glow">Ritim parıltısı</string>
     <string name="beat_glow_needs">Ses iznine ihtiyaç var: bu TV\'de kurulumu çalıştırın</string>
     <string name="up_next">Sırada</string>
@@ -1118,7 +1118,7 @@
     <string name="watch_deciding">Karar veriliyor…</string>
     <string name="watch_credit">Başlıklar ve resimler %1$s\'den</string>
     <string name="watch_credit_where">Nerede izle JustWatch\'tan</string>
-    <string name="help_watch">Türlere göre seçilebilecek filmler ve diziler, uygulamalarınız arasında bir döşeme olarak. Açık olduğu sürece yalnızca ağ kullanır. Kapalıysa, ana ekrandan yoktur ve bellek kullanmaz.</string>
+    <string name="help_watch">Türlere göre seçilebilecek filmler ve diziler, uygulamalarınız arasında bir döşeme olarak bulunur. Açık olduğu sürece yalnızca ağ kullanır. Kapalıysa, ana ekrandan yok olur ve bellek kullanmaz.</string>
     <string name="watch_is_off">"İzle kapalı  ·  Ayarlar, Ana ekran geri getirir"</string>
     <string name="watch_turn_off">İzle\'yi kapat</string>
     <string name="whats_new">Yenilikler</string>
@@ -1135,7 +1135,7 @@
     <string name="beta">Beta</string>
     <string name="beta_caps">BETA</string>
     <string name="speed_offer_title">TV\'niz zor çalışıyor</string>
-    <string name="speed_offer_body">Home, uzak kumandanıza yanıt vermek için yavaş yanıtladı. Hafif mod, aynı görünümü daha az hareket ve bulanıklıkla korur, böylece her basışta anında karşılaşırsınız.</string>
+    <string name="speed_offer_body">Home, uzak kumandanızı yavaş yanıtladı. Hafif mod, aynı görünümü daha az hareket ve bulanıklıkla korur, böylece her basışta anında karşılaşırsınız.</string>
     <string name="speed_turn_on">Hafif modu aç</string>
     <string name="speed_warn_title">Bu TV Hafif mod olmadan takılabilir</string>
     <string name="speed_warn_body">Belleği az veya modest bir çip var. Hafif mod burada ana ekranı akıcı tutar; bunun olmadan hareket etme gecikebilir.</string>
